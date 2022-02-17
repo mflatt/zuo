@@ -6,7 +6,7 @@
 ;; and `zuo/defmacromod` layers.
 
 (hash 'read-and-eval
-      (lambda (str start)
+      (lambda (str start mod-path)
         (let ([es (read-from-string-all (substring str start (string-length str)))])
           (if (= 1 (length es))
               (let ([convert-var (variable 'convert)])

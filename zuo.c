@@ -1506,7 +1506,7 @@ static zuo_t *zuo_variable_set(zuo_t *var, zuo_t *val) {
   return zuo_void;
 }
 
-static zuo_t *zuo_make_void() {
+static zuo_t *zuo_make_void(zuo_t *args) {
   return zuo_void;
 }
 
@@ -1955,7 +1955,7 @@ static zuo_t *zuo_split_path(zuo_t *p) {
   return zuo_cons(zuo_false, p);
 }
 
-static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
+static zuo_t *zuo_path_to_complete_path(zuo_t *path, zuo_t *rel_to) {
   zuo_string_t *ps;
 
   check_path_string("path->complete-path", path);
@@ -1963,7 +1963,7 @@ static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
   if (zuo_path_is_absolute(path))
     return path;
   else
-    return zuo_build_path(zuo_current_directory(), path);
+    return zuo_build_path((rel_to == zuo_false) ? zuo_current_directory() : rel_to, path);
 }
 
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
@@ -2111,12 +2111,12 @@ static char *zuo_string_to_c(zuo_t *obj) {
 /* modules                                                              */
 /*======================================================================*/
 
-static zuo_t *zuo_require(zuo_t *module_path) {
+static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
   
   if (module_path->tag == zuo_symbol_tag)
     module_path = zuo_library_path_to_file_path(module_path);
   else if (module_path->tag == zuo_string_tag)
-    module_path = zuo_path_to_complete_path(module_path);
+    module_path = zuo_path_to_complete_path(module_path, zuo_false);
   else
     zuo_fail1w("dynamic-require", "not a module path", module_path);
 
@@ -2126,7 +2126,7 @@ static zuo_t *zuo_require(zuo_t *module_path) {
     
     for (l = zuo_modules; l != zuo_null; l = zuo_cdr(l)) {
       zuo_t *a = zuo_car(l);
-      if (zuo_string_eql(zuo_car(a), module_path))
+      if (zuo_string_eql(zuo_car(a), module_path) == zuo_true)
         return zuo_cdr(a);
     }
   }
@@ -2157,11 +2157,15 @@ static zuo_t *zuo_require(zuo_t *module_path) {
         zuo_t *e = zuo_read_one_str(input + post);
         v = zuo_eval(e);
       } else {
-        zuo_t *env = zuo_require(zuo_symbol(lang));
+        zuo_t *env = zuo_dynamic_require(zuo_symbol(lang));
         zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
         if (proc->tag != zuo_closure_tag)
           zuo_fail1("invalid read-and-eval from language", zuo_symbol(lang));
-        v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_string(input), zuo_cons(zuo_integer(post), zuo_null))));
+        module_path = zuo_car(zuo_stash);
+        v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_string(input),
+                                             zuo_cons(zuo_integer(post),
+                                                      zuo_cons(module_path,
+                                                               zuo_null)))));
       }
       free(lang);
 
@@ -2656,7 +2660,7 @@ static char *zuo_self_path_c(char *exec_file)
     return strdup(exec_file);
   } else if (has_slash(exec_file)) {
     /* Relative path with a directory: */
-    return zip_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file)));
+    return zip_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file), zuo_false));
   } else {
     /* We have to find the executable by searching PATH: */
     char *path = strdup(getenv("PATH")), *p;
@@ -2682,7 +2686,7 @@ static char *zuo_self_path_c(char *exec_file)
       m = build_path(zuo_string(path), zuo_string(exec_file));
 
       if (access(ZUO_STRING_PTR(m), X_OK) == 0)
-        return zip_string_to_c(zuo_path_to_complete_path(m));
+        return zip_string_to_c(zuo_path_to_complete_path(m, zuo_false));
 
       if (more)
 	path = p + 1;
@@ -2755,11 +2759,6 @@ int main(int argc, char **argv) {
     zuo_library_path = zuo_build_path(zuo_car(zuo_split_path(zuo_self_path(argv[0]))),
                                       zuo_library_path);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE0("void", zuo_make_void);
-  ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-namespace", zuo_kernel_namespace);
-
-  ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("cdr", zuo_cdr);
   ZUO_TOP_ENV_SET_PRIMITIVE1("pair?", zuo_pair_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("null?", zuo_null_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("integer?", zuo_integer_p);
@@ -2768,25 +2767,19 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("symbol?", zuo_symbol_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("hash?", zuo_hash_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("list?", zuo_list_p);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("not", zuo_not);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_variable);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("string-length", zuo_string_length);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("string->symbol", zuo_string_to_symbol);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("string->uninterned-symbol", zuo_string_to_uninterned_symbol);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("hash-keys", zuo_hash_keys);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("display", zuo_display);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string", zuo_read_one);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string-all", zuo_read_all);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("eval", zuo_eval);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("cdr", zuo_cdr);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("list", zuo_list);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("append", zuo_append);
   ZUO_TOP_ENV_SET_PRIMITIVE1("reverse", zuo_reverse);
   ZUO_TOP_ENV_SET_PRIMITIVE1("length", zuo_length);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("read-fd", zuo_read_fd);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_wait);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
- 
-  ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE1("not", zuo_not);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("eq?", zuo_eq);
+
   ZUO_TOP_ENV_SET_PRIMITIVE2("+", zuo_add);
   ZUO_TOP_ENV_SET_PRIMITIVE2("-", zuo_subtract);
   ZUO_TOP_ENV_SET_PRIMITIVE2("*", zuo_multiply);
@@ -2797,28 +2790,47 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("=", zuo_eql);
   ZUO_TOP_ENV_SET_PRIMITIVE2(">=", zuo_ge);
   ZUO_TOP_ENV_SET_PRIMITIVE2(">", zuo_gt);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("eq?", zuo_eq);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("string=?", zuo_string_eql);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("string-ref", zuo_string_ref);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("build-path", zuo_build_path);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("process", zuo_process);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("write-fd", zuo_write_fd);
 
+  ZUO_TOP_ENV_SET_PRIMITIVE1("string-length", zuo_string_length);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("string-ref", zuo_string_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE3("substring", zuo_substring);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("string=?", zuo_string_eql);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("string->symbol", zuo_string_to_symbol);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("string->uninterned-symbol", zuo_string_to_uninterned_symbol);
+
+  ZUO_TOP_ENV_SET_PRIMITIVEN("hash", zuo_hash);
   ZUO_TOP_ENV_SET_PRIMITIVE3("hash-ref", zuo_hash_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE3("hash-set", zuo_hash_set);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("hash-keys", zuo_hash_keys);
 
+  ZUO_TOP_ENV_SET_PRIMITIVE2("build-path", zuo_build_path);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("path->complete-path", zuo_path_to_complete_path);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_variable);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE2("process", zuo_process);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_wait);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("read-fd", zuo_read_fd);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("write-fd", zuo_write_fd);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE1("display", zuo_display);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error);
   ZUO_TOP_ENV_SET_PRIMITIVEN("~v", zuo_tilde_v);
   ZUO_TOP_ENV_SET_PRIMITIVEN("~a", zuo_tilde_a);
   ZUO_TOP_ENV_SET_PRIMITIVEN("~s", zuo_tilde_s);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("list", zuo_list);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("append", zuo_append);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("hash", zuo_hash);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string", zuo_read_one);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string-all", zuo_read_all);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("eval", zuo_eval);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("dynamic-require", zuo_dynamic_require);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-namespace", zuo_kernel_namespace);
 
   if (argc > 1)
-    (void)zuo_require(zuo_string(argv[1]));
+    (void)zuo_dynamic_require(zuo_string(argv[1]));
   else {
     char *input = zuo_drain(stdin, 0);
     zuo_t *es = zuo_read_all_str(input);

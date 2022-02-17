@@ -5,7 +5,7 @@
 ;; the `zuo/defmacromod` layer (but implementing the defmacro layer is a path without these).
 
 (hash 'read-and-eval
-      (lambda (str start)
+      (lambda (str start mod-path)
         (let ([es (read-from-string-all (substring str start (string-length str)))])
           (let ([maybe-begin (lambda (l)
                                (if (null? (cdr l))
