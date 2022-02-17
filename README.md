@@ -17,6 +17,7 @@ and use Racket at that point.)
 
 The `zuo/kernel` language implemented by "zuo.c" has these forms:
 
+```
  <expr> ::= <variable>
          | (lambda <formals> <expr>)
          | (<expr> <expr> ...)         ; function call
@@ -25,6 +26,7 @@ The `zuo/kernel` language implemented by "zuo.c" has these forms:
          | (let/cc <variable> <expr>)
          | (let ([<variable> <expr>]) <expr>)
          | (begin <expr> <expr> ...)
+```
 
 Of course, those last two could be encoded with `lambda` easily
 enough, but they're useful shortcuts to expose internally.
