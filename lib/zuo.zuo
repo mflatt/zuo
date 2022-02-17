@@ -1,0 +1,22 @@
+#lang zuo/kernel
+
+;; Implements a basic module language with `define`, `require`, and `provide`
+
+(hash 'read-and-eval
+      (lambda (str start)
+        (let ([es (read-from-string-all (substring str start (string-length str)))])
+          (let ([vars (letrec ([extract-vars (lambda (es vars)
+                                               (if (null? es?)
+                                                   (reverse vars)
+                                                   (let ([e (car es)])
+                                                     (if (pair? 
+          
+          (letrec ([eval-all (lambda (es)
+                               (if (null? es)
+                                   #f
+                                   (begin
+                                     (eval (car es))
+                                     (eval-all (cdr es)))))])
+            (begin
+              (eval-all es)
+              (hash))))))

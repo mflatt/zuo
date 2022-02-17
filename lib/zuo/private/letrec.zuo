@@ -1,0 +1,58 @@
+#lang zuo/kernel
+
+;; Implementing simple macros like `or` and `and` is tedious without
+;; `letrec`, so on top of `zuo/kernel`, add a hacky preprocessor to
+;; expand `letrec` forms. This is only used by the `zuo/qq-and-or`
+;; and `zuo/defmacromod` layers.
+
+(hash 'read-and-eval
+      (lambda (str start)
+        (let ([es (read-from-string-all (substring str start (string-length str)))])
+          (if (= 1 (length es))
+              (let ([convert-var (variable 'convert)])
+                (let ([convert (lambda (s) ((variable-ref convert-var) s))])
+                  (begin
+                    (variable-set!
+                     convert-var
+                     (lambda (s)
+                       (if (pair? s)
+                           (if (eq? (car s) 'letrec)
+                               (let ([no (lambda () (error "letrec: bad syntax" s))])
+                                 (let ([clauses (car (cdr s))])
+                                   (if (if (list? clauses)
+                                           (if (= 1 (length clauses))
+                                               (= 2 (length (car clauses)))
+                                               #f)
+                                           #f)
+                                       (let ([id (car (car clauses))])
+                                         (let ([rhs (car (cdr (car clauses)))])
+                                           (if (if (pair? rhs)
+                                                   (eq? 'lambda (car rhs))
+                                                   #f)
+                                               (let ([var (string->uninterned-symbol "recvar")])
+                                                 (list 'let
+                                                       (list (list var (list 'variable (list 'quote id))))
+                                                       (list 'let
+                                                             (list (list id
+                                                                         (list 'lambda (car (cdr rhs))
+                                                                               (cons (list 'variable-ref var)
+                                                                                     (car (cdr rhs))))))
+                                                             (list 'begin
+                                                                   (list variable-set!
+                                                                         var
+                                                                         (convert rhs))
+                                                                   (let ([body (cdr (cdr s))])
+                                                                     (convert (if (null? (cdr body))
+                                                                                  (car body)
+                                                                                  (cons 'begin body))))))))
+                                               (no))))
+                                       (no))))
+                               (if (eq? (car s) 'quote)
+                                   s
+                                   (cons (convert (car s))
+                                         (convert (cdr s)))))
+                           (if (eq? s 'eval) ; this is how we make our `eval` work at the next layer
+                               (lambda (e) (eval (convert e)))
+                               s))))
+                    (eval (convert (car es))))))
+              (error "only one expression allowed")))))

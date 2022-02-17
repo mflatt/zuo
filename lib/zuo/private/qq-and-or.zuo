@@ -1,0 +1,122 @@
+#lang zuo/private/letrec
+
+;; Implements a less minimal language by adding `and`, `or`, `cond`, and `quasiauote` preprocessing.
+;; These will be replaced with variants that cooerate better with bindings after
+;; the `zuo/defmacromod` layer (but implementing the defmacro layer is a path without these).
+
+(hash 'read-and-eval
+      (lambda (str start)
+        (let ([es (read-from-string-all (substring str start (string-length str)))])
+          (let ([maybe-begin (lambda (l)
+                               (if (null? (cdr l))
+                                   (car l)
+                                   (cons 'begin l)))])
+            (letrec ([convert (lambda (s)
+                                (if (pair? s)
+                                    (if (eq? (car s) 'or)
+                                        (letrec ([expand-or (lambda (l)
+                                                              (if (null? l)
+                                                                  #f
+                                                                  (if (pair? l)
+                                                                      (if (null? (cdr l))
+                                                                          (convert (car l))
+                                                                          (let ([tmp (string->uninterned-symbol "ortmp")])
+                                                                            (list 'let
+                                                                                  (list (list tmp
+                                                                                              (convert (car l))))
+                                                                                  (list 'if
+                                                                                        tmp
+                                                                                        tmp
+                                                                                        (expand-or (cdr l))))))
+                                                                      (error "or: bad syntax" s))))])
+                                          (expand-or (cdr s)))
+                                        (if (eq? (car s) 'and)
+                                            (letrec ([expand-and (lambda (l)
+                                                                   (if (null? l)
+                                                                       #t
+                                                                       (if (pair? l)
+                                                                           (if (null? (cdr l))
+                                                                               (convert (car l))
+                                                                               (list 'if
+                                                                                     (convert (car l))
+                                                                                     (expand-and (cdr l))
+                                                                                     #f))
+                                                                           (error "and: bad syntax" s))))])
+                                              (expand-and (cdr s)))
+                                            (if (eq? (car s) 'cond)
+                                                (let ([no (lambda () (error "cond: bad syntax" s))])
+                                                  (letrec ([expand-cond (lambda (l)
+                                                                          (if (null? l)
+                                                                              (void)
+                                                                              (if (pair? l)
+                                                                                  (if (list? (car l))
+                                                                                      (if (>= (length (car l)) 2)
+                                                                                          (if (eq? (car (car l)) 'else)
+                                                                                              (if (null? (cdr l))
+                                                                                                  (convert (maybe-begin (cdr (car l))))
+                                                                                                  (no))
+                                                                                              (list 'if
+                                                                                                    (convert (car (car l)))
+                                                                                                    (convert (maybe-begin (cdr (car l))))
+                                                                                                    (expand-cond (cdr l))))
+                                                                                          (no))
+                                                                                      (no))
+                                                                                  (no))))])
+                                                    (expand-cond (cdr s))))
+                                                (if (eq? (car s) 'quasiquote)
+                                                    (letrec ([expand-quasiquote (lambda (l)
+                                                                                  (if (null? l)
+                                                                                      '()
+                                                                                      (if (pair? l)
+                                                                                          (if (eq? (car l) 'unquote)
+                                                                                              (if (= 2 (length l))
+                                                                                                  (convert (car (cdr l)))
+                                                                                                  (error "unquote: bad syntax" l))
+                                                                                              (list 'cons
+                                                                                                    (expand-quasiquote (car l))
+                                                                                                    (expand-quasiquote (cdr l))))
+                                                                                          (if (symbol? l)
+                                                                                              (list 'quote l)
+                                                                                              l))))])
+                                                      (if (= 2 (length s))
+                                                          (expand-quasiquote (car (cdr s)))
+                                                          (error "quasiquote: bad syntax" s)))
+                                                    (if (eq? (car s) 'let*)
+                                                        (letrec ([expand-let* (lambda (l body)
+                                                                                (if (null? l)
+                                                                                    body
+                                                                                    (list 'let
+                                                                                          (let ([cl (car l)])
+                                                                                            (list (list (car cl) (convert (car (cdr cl))))))
+                                                                                          (expand-let* (cdr l) body))))])
+                                                          (expand-let* (car (cdr s)) (convert (maybe-begin (cdr (cdr s))))))
+                                                        (if (eq? (car s) 'when)
+                                                            (if (>= (length s) 2)
+                                                                (list 'if
+                                                                      (convert (car (cdr s)))
+                                                                      (convert (maybe-begin (cdr (cdr s))))
+                                                                      '(void))
+                                                                (error "when: bad syntax" s))
+                                                            (if (eq? (car s) 'unless)
+                                                                (if (>= (length s) 2)
+                                                                    (list 'if
+                                                                          (convert (car (cdr s)))
+                                                                          '(void)
+                                                                          (convert (maybe-begin (cdr (cdr s)))))
+                                                                    (error "unless: bad syntax" s))
+                                                                (if (eq? (car s) 'quote)
+                                                                    s
+                                                                    (cons (convert (car s))
+                                                                          (convert (cdr s)))))))))))
+                                    ;; not propagating `eval` like `letrec` does
+                                    s))])
+              (let ([es (convert es)])
+                (letrec ([eval-all (lambda (es)
+                                     (if (null? es)
+                                         (hash)
+                                         (if (null? (cdr es))
+                                             (eval (car es))
+                                             (begin
+                                               (eval (car es))
+                                               (eval-all (cdr es))))))])
+                  (eval-all es))))))))
