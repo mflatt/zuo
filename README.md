@@ -1,35 +1,38 @@
-Zuo: A Tiny Racket for Scripting
+Zuo: a Tiny Racket for Scripting
 --------------------------------
 
 [Work in progress]
 
 You should use Racket to write scripts. But what if you need something
-much smaller than racket for some reson --- or what if you're trying
-to build Racket in the first place? Zuo is a tiny Racket with
-primitives for dealing with files and running processes.
+much smaller than Racket for some reason — or what if you're trying
+to script a build of Racket itself? Zuo is a tiny Racket with
+primitives for dealing with files and running processes, and it comes
+with a `make`-like embedded DSL.
 
 Zuo is a Racket variant in the sense that program files start with
 `#lang`, and the module path after `#lang` determines the parsing and
-expansion of the file content. Even the base Zuo language is defined
-by layers of `#lang`s. But the macro system is non-hygienic. (But you
-could build a hygienic layer on top. But maybe you should just build
-and use Racket at that point.)
+expansion of the file content. That's how the `make`-like DSL is
+defined, and even the base Zuo language is defined by layers of
+`#lang`s. But the macro system of `#lang zuo` is non-hygienic and has
+no phase separation. (But you could build a hygienic layer on top. But
+maybe you should just build and use Racket at that point.)
 
 The `zuo/kernel` language implemented by "zuo.c" has these forms:
 
 ```
  <expr> ::= <variable>
-         | (lambda <formals> <expr>)
-         | (<expr> <expr> ...)         ; function call
-         | (quote <expr>)
-         | (if <expr> <expr> <expr>)
-         | (let/cc <variable> <expr>)
-         | (let ([<variable> <expr>]) <expr>)
-         | (begin <expr> <expr> ...)
+         |  <literal>                   ; number, string, etc.
+         |  (lambda <formals> <expr>)
+         |  (<expr> <expr> ...)         ; function call
+         |  (quote <expr>)
+         |  (if <expr> <expr> <expr>)
+         |  (let/cc <variable> <expr>)
+         |  (let ([<variable> <expr>]) <expr>)
+         |  (begin <expr> <expr> ...)
 ```
 
 Of course, those last two could be encoded with `lambda` easily
-enough, but they're useful shortcuts to expose internally.
+enough, but they're useful shortcuts to make explicit internally.
 
 Zuo data structures are immutable except for "variable" values. A
 variable is like a box, but it's set-once, and a variable has a name
