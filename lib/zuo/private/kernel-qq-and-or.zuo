@@ -1,8 +1,8 @@
-#lang zuo/private/letrec
+#lang zuo/private/kernel-letrec
 
 ;; Implements a less minimal language by adding `and`, `or`, `cond`, and `quasiauote` preprocessing.
 ;; These will be replaced with variants that cooerate better with bindings after
-;; the `zuo/defmacromod` layer (but implementing the defmacro layer is a path without these).
+;; the `defmacromod` layer (but implementing the defmacro layer is a path without these).
 
 (hash 'read-and-eval
       (lambda (str start mod-path)

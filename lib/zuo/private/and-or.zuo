@@ -1,0 +1,83 @@
+#lang zuo/private/macromod
+
+(require "pair.zuo"
+         "syntax-error.zuo")
+
+(provide or
+         and
+         cond else
+         when
+         unless)
+
+(define-syntax or
+  (lambda (stx)
+    (if (list? stx)
+        (if (null? (cdr stx))
+            #t
+            (if (null? (cddr stx))
+                (cadr stx)
+                (list 'let (list (list 'tmp (cadr stx)))
+                      (list 'if 'tmp
+                            'tmp
+                            (cons 'or (cddr stx))))))
+        (bad-syntax stx))))
+
+(define-syntax and
+  (lambda (stx)
+    (if (list? stx)
+        (if (null? (cdr stx))
+            #t
+            (if (null? (cddr stx))
+                (cadr stx)
+                (list 'if (cadr stx)
+                      (cons 'and (cddr stx))
+                      #f)))
+        (bad-syntax stx))))
+
+(define-syntax else
+  (lambda (stx)
+    (misplaced-syntax stx)))
+
+(define-syntax cond
+  (lambda (stx free-id=?)
+    (if (and (list? stx)
+             (pair? (cdr stx))
+             (letrec ([ok-clauses?
+                       (lambda (l)
+                         (or (null? l)
+                             (let ([cl (car l)])
+                               (and (list? cl)
+                                    (>= (length cl) 2)
+                                    (ok-clauses? (cdr l))))))])
+               (ok-clauses? (cdr stx))))
+        (let ([cl1 (cadr stx)]
+              [cls (cddr stx)])
+          (list 'if (if (and (null? cls)
+                             (syntax? (car cl1))
+                             (free-id=? (quote-syntax else) (car cl1)))
+                        #t
+                        (car cl1))
+                (cons 'begin (cdr cl1))
+                (if (null? cls)
+                    '(void)
+                    (cons 'cond cls))))
+        (bad-syntax stx))))
+
+(define-syntax when
+  (lambda (stx)
+    (if (and (list? stx)
+             (>= (length stx) 3))
+        (list 'if (cadr stx)
+              (cons 'begin (cddr stx))
+              '(void))
+        (bad-syntax stx))))
+
+(define-syntax unless
+  (lambda (stx)
+    (if (and (list? stx)
+             (>= (length stx) 3))
+        (list 'if (cadr stx)
+              '(void)
+              (cons 'begin (cddr stx)))
+        (bad-syntax stx))))
+

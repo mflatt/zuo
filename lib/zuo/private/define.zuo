@@ -1,0 +1,37 @@
+#lang zuo/private/macromod
+
+(require "pair.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "list.zuo"
+         "let.zuo"
+         "check-dups.zuo")
+
+(provide (rename-out [define-var-or-proc define]))
+
+(define-syntax define-var-or-proc
+  (lambda (stx)
+    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
+    (let ([head (cadr stx)])
+      (cond
+        [(syntax? head)
+         ;; regular define
+         (cons 'define (cdr stx))]
+        [(and (pair? head)
+              (syntax? (car head)))
+         ;; procedure shorthand
+         (let* ([name (car head)]
+                [args (cdr head)]
+                [arg-names (let loop ([args args])
+                             (cond
+                               [(syntax? args) ; rest arg
+                                (list args)]
+                               [(pair? args)
+                                (unless (syntax? (car args))
+                                  (syntax-error "define: bad argument" (car args)))
+                                (cons (car args) (loop (cdr args)))]
+                               [(null? args) '()]
+                               [else (bad-syntax stx)]))])
+           (check-duplicates arg-names)
+           (list 'define name (list* 'lambda args (cddr stx))))]
+        [else (bad-syntax stx)]))))

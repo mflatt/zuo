@@ -1,0 +1,55 @@
+#lang zuo/private/macromod
+
+(require "pair.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "list.zuo"
+         "check-dups.zuo")
+
+(provide (rename-out [let-or-named-let let])
+         let*)
+
+(define-syntax let-or-named-let
+  (lambda (stx)
+    (cond
+      [(not (pair? stx)) (bad-syntax stx)]
+      [(and (pair? (cdr stx))
+            (syntax? (cadr stx)))
+       ;; named `let`
+       (unless (and (list? stx) (>= (length stx) 4))
+         (bad-syntax stx))
+       (let ([name (cadr stx)]
+             [bindings (cadr (cdr stx))])
+         (for-each (lambda (binding)
+                     (unless (and (list? binding)
+                                  (= 2 (length binding))
+                                  (syntax? (car binding)))
+                       (syntax-error "named let: ill-formed binding" binding)))
+                   bindings)
+         (let ([args (map car bindings)]
+               [inits (map cadr bindings)])
+           (check-duplicates args)
+           (cons (list 'letrec
+                       (list (list name
+                                   (list* 'lambda
+                                          args
+                                          (cddr (cdr stx)))))
+                       name)
+                 inits)))]
+      [else (cons 'let (cdr stx))])))
+
+(define-syntax let*
+  (lambda (stx)
+    (unless (and (list? stx) (>= (length stx) 3))
+      (bad-syntax stx))
+    (let ([bindings (cadr stx)])
+      (for-each (lambda (binding)
+                  (unless (and (list? binding)
+                               (= 2 (length binding))
+                               (syntax? (car binding)))
+                    (syntax-error "let*: ill-formed binding" binding)))
+                bindings)
+      (if (null? bindings)
+          (cons 'begin (cddr stx))
+          (list 'let (list (car bindings))
+                (list* 'let* (cdr bindings) (cddr stx)))))))

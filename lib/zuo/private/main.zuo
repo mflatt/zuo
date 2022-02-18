@@ -1,3 +1,16 @@
 #lang zuo/private/macromod
 
-(provide (all-from-out zuo/private/macromod))
+(require "pair.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "list.zuo"
+         "let.zuo"
+         "define.zuo")
+
+(provide (all-from-out zuo/private/macromod
+                       "pair.zuo"
+                       "and-or.zuo"
+                       "syntax-error.zuo"
+                       "list.zuo"
+                       "let.zuo"
+                       "define.zuo"))

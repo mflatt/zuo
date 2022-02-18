@@ -1,0 +1,107 @@
+#lang zuo/private/macromod
+
+(require "pair.zuo"
+         "and-or.zuo")
+
+(provide list*
+         list-ref
+         list-tail
+         map
+         for-each
+         foldl
+         andmap
+         ormap)
+
+(define list*
+  (lambda (val . vals)
+    (if (null? vals)
+        val
+        (cons val (apply list* vals)))))
+
+(define list-ref
+  (lambda (l n)
+    (unless (and (integer? n) (>= n 0))
+      (error "list-ref: not an index" n))
+    (letrec ([ref (lambda (n l)
+                    (cond
+                      [(not (pair? l)) (error "list-ref: encountered a non-pair" l)]
+                      [(= n 0) (car l)]
+                      [else (ref (- n 1) (cdr l))]))])
+      (ref n l))))
+
+(define list-tail
+  (lambda (l n)
+    (unless (and (integer? n) (>= n 0))
+      (error "list-tail: not an index" n))
+    (letrec ([ref (lambda (n l)
+                    (cond
+                      [(= n 0) l]
+                      [(pair? l) (ref (- n 1) (cdr l))]
+                      [else (error "list-tail: encountered a non-pair" l)]))])
+      (ref n l))))
+
+(define map
+  (lambda (f lst . lsts)
+    (unless (procedure? f) (error "map: not a procedure" f))
+    (unless (list? lst) (error "map: not a list" lst))
+    (cond
+      [(null? lsts)
+       (letrec ([map (lambda (lst)
+                       (if (null? lst)
+                           '()
+                           (cons (f (car lst)) (map (cdr lst)))))])
+         (map lst))]
+      [else
+       (letrec ([check (lambda (lsts)
+                         (unless (null? lsts)
+                           (if (list? (car lsts))
+                               (check (cdr lsts))
+                               (error "map: not a list" (car lsts)))))])
+         (check lsts))
+       (letrec ([maps (lambda (lsts)
+                        (if (null? (car lsts))
+                            '()
+                            (cons (apply f (map car lsts))
+                                  (maps (map cdr lsts)))))])
+         (maps (cons lst lsts)))])))
+
+(define for-each
+  (lambda (f lst . lsts)
+    (void (apply map (cons f (cons lst lsts))))))
+
+(define foldl
+  (lambda (f init lst . lsts)
+    (unless (procedure? f) (error "foldl: not a procedure" f))
+    (unless (list? lst) (error "foldl: not a list" lst))
+    (cond
+      [(null? lsts)
+       (letrec ([fold (lambda (accum lst)
+                        (if (null? lst)
+                            accum
+                            (fold (f (car lst) accum) (cdr lst))))])
+         (fold init lst))]
+      [else
+       (letrec ([check (lambda (lsts)
+                         (unless (null? lsts)
+                           (if (list? (car lsts))
+                               (check (cdr lsts))
+                               (error "foldl: not a list" (car lsts)))))])
+         (check lsts))
+       (letrec ([fold (lambda (accum lsts)
+                        (if (null? (car lsts))
+                            accum
+                            (fold (apply f (append (map car lsts) (list accum)))
+                                  (map cdr lsts))))])
+         (fold init (cons lst lsts)))])))
+
+(define andmap
+  (lambda (f lst)
+    (unless (procedure? f) (error "andmap: not a procedure" f))
+    (unless (list? lst) (error "andmap: not a list" lst))
+    (foldl (lambda (v a) (and a (f v))) #t lst)))
+
+(define ormap
+  (lambda (f lst)
+    (unless (procedure? f) (error "ormap: not a procedure" f))
+    (unless (list? lst) (error "ormap: not a list" lst))
+    (foldl (lambda (v a) (or a (f v))) #f lst)))
