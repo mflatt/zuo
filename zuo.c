@@ -1310,8 +1310,8 @@ static zuo_t *call_primitiveN(zuo_t *data, zuo_t *args) {
   return ((zuo_t *(*)(zuo_t *))((void *)ZUO_INT_I(data)))(args);
 }
 
-static zuo_t *zuo_primitiveN(zuo_t *(*f)(zuo_t *), zuo_t *name) {
-  return zuo_primitive(call_primitiveN, zuo_integer((zuo_int_t)f), -1, name);
+static zuo_t *zuo_primitiveN(zuo_t *(*f)(zuo_t *), int min_args, zuo_t *name) {
+  return zuo_primitive(call_primitiveN, zuo_integer((zuo_int_t)f), -1 << min_args, name);
 }
 
 /*======================================================================*/
@@ -1518,19 +1518,45 @@ static void check_ints(zuo_t *n, zuo_t *m, const char *who) {
   check_integer(who, m);
 }
 
-static zuo_t *zuo_add(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "+");
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) + ZUO_UINT_I(m)));
+static zuo_t *zuo_add(zuo_t *ns) {
+  zuo_uint_t i = 0;
+  while (ns != zuo_null) {
+    zuo_t *n = zuo_car(ns);
+    check_integer("+", n);
+    i += ZUO_UINT_I(n);
+    ns = zuo_cdr(ns);
+  }
+  return zuo_integer((zuo_int_t)i);
 }
 
-static zuo_t *zuo_subtract(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "-");
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) - ZUO_UINT_I(m)));
+static zuo_t *zuo_subtract(zuo_t *ns) {
+  zuo_uint_t i;
+  zuo_t *n = zuo_car(ns);
+  check_integer("-", n);
+  i = ZUO_UINT_I(n);
+  ns = zuo_cdr(ns);
+  if (ns == zuo_null) {
+    i = -i;
+  } else {
+    while (ns != zuo_null) {
+      n = zuo_car(ns);
+      check_integer("-", n);
+      i -= ZUO_UINT_I(n);
+      ns = zuo_cdr(ns);
+    }
+  }
+  return zuo_integer((zuo_int_t)i);
 }
 
-static zuo_t *zuo_multiply(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "*");
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) * ZUO_UINT_I(m)));
+static zuo_t *zuo_multiply(zuo_t *ns) {
+  zuo_uint_t i = 0;
+  while (ns != zuo_null) {
+    zuo_t *n = zuo_car(ns);
+    check_integer("*", n);
+    i *= ZUO_UINT_I(n);
+    ns = zuo_cdr(ns);
+  }
+  return zuo_integer((zuo_int_t)i);
 }
 
 static zuo_t *zuo_quotient(zuo_t *n, zuo_t *m) {
@@ -1922,8 +1948,7 @@ static void continue_step() {
             break;
           } else if (rator->tag == zuo_primitive_tag) {
             zuo_primitive_t *f = (zuo_primitive_t *)rator;
-            if ((f->arity_mask == -1)
-                || (f->arity_mask & (1 << ((count > 10) ? 10 : count))))
+            if (f->arity_mask & (1 << ((count > 10) ? 10 : count)))
               zuo_interp_v = f->proc(f->data, args);
             else
               zuo_fail1("wrong argument count", zuo_cons(rator, args));
@@ -2889,22 +2914,24 @@ static zuo_t *zuo_self_path(char *exec_file) {
 /* main                                                                 */
 /*======================================================================*/
 
-#define TRIE_SET_TOP_ENV(name, proc, make_prim)                 \
-  do {                                                          \
-    zuo_t *sym = zuo_symbol(name);                              \
-    zuo_trie_set(zuo_top_env, sym, make_prim(proc, sym));       \
+#define TRIE_SET_TOP_ENV(name, make_prim)       \
+  do {                                          \
+    zuo_t *sym = zuo_symbol(name);              \
+    zuo_trie_set(zuo_top_env, sym, make_prim);  \
   } while (0)
 
 #define ZUO_TOP_ENV_SET_PRIMITIVE0(name, proc) \
-  TRIE_SET_TOP_ENV(name, proc, zuo_primitive0)
+  TRIE_SET_TOP_ENV(name, zuo_primitive0(proc, sym))
 #define ZUO_TOP_ENV_SET_PRIMITIVE1(name, proc) \
-  TRIE_SET_TOP_ENV(name, proc, zuo_primitive1)
+  TRIE_SET_TOP_ENV(name, zuo_primitive1(proc, sym))
 #define ZUO_TOP_ENV_SET_PRIMITIVE2(name, proc) \
-  TRIE_SET_TOP_ENV(name, proc, zuo_primitive2)
+  TRIE_SET_TOP_ENV(name, zuo_primitive2(proc, sym))
 #define ZUO_TOP_ENV_SET_PRIMITIVE3(name, proc) \
-  TRIE_SET_TOP_ENV(name, proc, zuo_primitive3)
-#define ZUO_TOP_ENV_SET_PRIMITIVEN(name, proc) \
-  TRIE_SET_TOP_ENV(name, proc, zuo_primitiveN)
+  TRIE_SET_TOP_ENV(name, zuo_primitive3(proc, sym))
+#define ZUO_TOP_ENV_SET_PRIMITIVEN(name, proc, min_n) \
+  TRIE_SET_TOP_ENV(name, zuo_primitiveN(proc, min_n, sym))
+#define ZUO_TOP_ENV_SET_PRIMITIVEV(name, val)  \
+  TRIE_SET_TOP_ENV(name, val)
 
 int main(int argc, char **argv) {
   zuo_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
@@ -2946,24 +2973,24 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("symbol?", zuo_symbol_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("hash?", zuo_hash_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("list?", zuo_list_p);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void, 0);
 
-  zuo_trie_set(zuo_top_env, zuo_symbol("apply"), zuo_apply);
+  ZUO_TOP_ENV_SET_PRIMITIVEV("apply", zuo_apply);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
   ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
   ZUO_TOP_ENV_SET_PRIMITIVE1("cdr", zuo_cdr);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("list", zuo_list);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("append", zuo_append);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("list", zuo_list, 0);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("append", zuo_append, 0);
   ZUO_TOP_ENV_SET_PRIMITIVE1("reverse", zuo_reverse);
   ZUO_TOP_ENV_SET_PRIMITIVE1("length", zuo_length);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("not", zuo_not);
   ZUO_TOP_ENV_SET_PRIMITIVE2("eq?", zuo_eq);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE2("+", zuo_add);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("-", zuo_subtract);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("*", zuo_multiply);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("+", zuo_add, 0);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("-", zuo_subtract, 1);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("*", zuo_multiply, 0);
   ZUO_TOP_ENV_SET_PRIMITIVE2("quotient", zuo_quotient);
   ZUO_TOP_ENV_SET_PRIMITIVE2("modulo", zuo_modulo);
   ZUO_TOP_ENV_SET_PRIMITIVE2("<", zuo_lt);
@@ -2980,7 +3007,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("string->uninterned-symbol", zuo_string_to_uninterned_symbol);
   ZUO_TOP_ENV_SET_PRIMITIVE1("symbol->string", zuo_symbol_to_string);
 
-  ZUO_TOP_ENV_SET_PRIMITIVEN("hash", zuo_hash);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("hash", zuo_hash, 0);
   ZUO_TOP_ENV_SET_PRIMITIVE3("hash-ref", zuo_hash_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE3("hash-set", zuo_hash_set);
   ZUO_TOP_ENV_SET_PRIMITIVE2("hash-remove", zuo_hash_remove);
@@ -3006,10 +3033,10 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("write-fd", zuo_write_fd);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("display", zuo_display);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("~v", zuo_tilde_v);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("~a", zuo_tilde_a);
-  ZUO_TOP_ENV_SET_PRIMITIVEN("~s", zuo_tilde_s);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error, 0);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("~v", zuo_tilde_v, 0);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("~a", zuo_tilde_a, 0);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("~s", zuo_tilde_s, 0);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string", zuo_read_one);
   ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string-all", zuo_read_all);
