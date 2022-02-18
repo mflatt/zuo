@@ -104,10 +104,16 @@
                                                                           '(void)
                                                                           (convert (maybe-begin (cdr (cdr s)))))
                                                                     (error "unless: bad syntax" s))
-                                                                (if (eq? (car s) 'quote)
-                                                                    s
-                                                                    (cons (convert (car s))
-                                                                          (convert (cdr s)))))))))))
+                                                                (if (eq? (car s) 'lambda)
+                                                                    (if (>= (length s) 3)
+                                                                        (list 'lambda
+                                                                              (car (cdr s))
+                                                                              (convert (maybe-begin (cdr (cdr s)))))
+                                                                        (error "lambda: bad syntax" s))
+                                                                    (if (eq? (car s) 'quote)
+                                                                        s
+                                                                        (cons (convert (car s))
+                                                                              (convert (cdr s))))))))))))
                                     ;; not propagating `eval` like `letrec` does
                                     s))])
               (let ([es (convert es)])

@@ -21,9 +21,9 @@ The `zuo/kernel` language implemented by "zuo.c" has these forms:
 
 ```
  <expr> ::= <variable>
-         |  <literal>                   ; number, string, etc.
-         |  (lambda <formals> <expr>)
-         |  (<expr> <expr> ...)         ; function call
+         |  <literal>                  ; number, string, etc.
+         |  (<expr> <expr> ...)        ; function call
+         |  (lambda <formals> <expr>)  ; name allowed before <expr>
          |  (quote <expr>)
          |  (if <expr> <expr> <expr>)
          |  (let/cc <variable> <expr>)

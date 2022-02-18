@@ -30,7 +30,7 @@ typedef unsigned long zuo_uint_t;
 
 typedef enum {
   zuo_singleton_tag,
-  zuo_cons_tag,
+  zuo_pair_tag,
   zuo_integer_tag,
   zuo_string_tag,
   zuo_symbol_tag,
@@ -66,10 +66,10 @@ typedef struct {
   zuo_t obj;
   zuo_t *car;
   zuo_t *cdr;
-} zuo_cons_t;
+} zuo_pair_t;
 
-#define ZUO_CAR(p) (((zuo_cons_t *)(p))->car)
-#define ZUO_CDR(p) (((zuo_cons_t *)(p))->cdr)
+#define ZUO_CAR(p) (((zuo_pair_t *)(p))->car)
+#define ZUO_CDR(p) (((zuo_pair_t *)(p))->cdr)
 
 typedef struct {
   zuo_t obj;
@@ -242,8 +242,8 @@ static zuo_int_t object_size(zuo_t *obj) {
     return sizeof(zuo_integer_t);
   case zuo_string_tag:
     return ZUO_STRING_ALLOC_SIZE(ZUO_STRING_LEN(obj));
-  case zuo_cons_tag:
-    return sizeof(zuo_cons_t);
+  case zuo_pair_tag:
+    return sizeof(zuo_pair_t);
   case zuo_symbol_tag:
     return sizeof(zuo_symbol_t);
   case zuo_trie_node_tag:
@@ -288,9 +288,9 @@ static void zuo_trace(zuo_t *obj) {
   case zuo_handle_tag:
   case zuo_forwarded_tag:
     break;
-  case zuo_cons_tag:
-    zuo_update(&((zuo_cons_t *)obj)->car);
-    zuo_update(&((zuo_cons_t *)obj)->cdr);
+  case zuo_pair_tag:
+    zuo_update(&((zuo_pair_t *)obj)->car);
+    zuo_update(&((zuo_pair_t *)obj)->cdr);
     break;
   case zuo_symbol_tag:
     zuo_update(&((zuo_symbol_t *)obj)->str);
@@ -403,7 +403,7 @@ static zuo_t *zuo_integer(zuo_int_t i) {
 }
 
 static zuo_t *zuo_cons(zuo_t *car, zuo_t *cdr) {
-  zuo_cons_t *obj = (zuo_cons_t *)zuo_new(zuo_cons_tag, sizeof(zuo_cons_t));
+  zuo_pair_t *obj = (zuo_pair_t *)zuo_new(zuo_pair_tag, sizeof(zuo_pair_t));
   obj->car = car;
   obj->cdr = cdr;
   return (zuo_t *)obj;
@@ -704,21 +704,21 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
     zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
   } else if (depth >= ZUO_RECUR_LIMIT) {
     out_string(out, "...");
-  } else if (obj->tag == zuo_cons_tag) {
-    zuo_cons_t *p = (zuo_cons_t *)obj;
+  } else if (obj->tag == zuo_pair_tag) {
+    zuo_pair_t *p = (zuo_pair_t *)obj;
     out_char(out, '(');
     if (mode == zuo_print_mode) {
       zuo_t *p2 = (zuo_t *)p;
-      while (p2->tag == zuo_cons_tag)
-        p2 = ((zuo_cons_t *)p2)->cdr;
+      while (p2->tag == zuo_pair_tag)
+        p2 = ((zuo_pair_t *)p2)->cdr;
       if (p2 == zuo_null)
         out_string(out, "list ");
       else
         out_string(out, "list* ");
     }
     zuo_out(out, p->car, depth+1, mode);
-    while (p->cdr->tag == zuo_cons_tag) {      
-      p = (zuo_cons_t *)p->cdr;
+    while (p->cdr->tag == zuo_pair_tag) {
+      p = (zuo_pair_t *)p->cdr;
       out_char(out, ' ');
       zuo_out(out, p->car, depth+1, mode);
     }
@@ -767,7 +767,7 @@ static zuo_t *zuo_to_string(zuo_t *objs, zuo_print_mode_t mode) {
   zuo_t *str;
   out_init(&out);
 
-  while (objs->tag == zuo_cons_tag) {
+  while (objs->tag == zuo_pair_tag) {
     zuo_out(&out, ZUO_CAR(objs), 0, mode);
     objs = ZUO_CDR(objs);
     if ((mode != zuo_display_mode) && (objs != zuo_null))
@@ -901,7 +901,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
   else if ((c == '(') || (c == '[')) {
     int closer = ((c == '(') ? ')' : ']');
     zuo_t *car, *top_p, *cdr;
-    zuo_cons_t *p;
+    zuo_pair_t *p;
     (*_o)++;
     skip_whitespace(s, _o, depth);
     if (s[*_o] == closer) {
@@ -910,7 +910,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
     }
     car = zuo_in(s, _o, depth+1);
     top_p = zuo_cons(car, zuo_null);
-    p = (zuo_cons_t *)top_p;
+    p = (zuo_pair_t *)top_p;
     while (1) {
       skip_whitespace(s, _o, depth);
       if (s[*_o] == 0) {
@@ -928,7 +928,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
         cadr = zuo_in(s, _o, depth+1);
         cdr = zuo_cons(cadr, zuo_null);
         p->cdr = cdr;
-        p = (zuo_cons_t *)cdr;
+        p = (zuo_pair_t *)cdr;
       }
     }
     return top_p;
@@ -1096,7 +1096,7 @@ static zuo_t *zuo_read_all_str(const char *s) {
     if (first == zuo_null)
       first = last = p;
     else {
-      ((zuo_cons_t *)last)->cdr = p;
+      ((zuo_pair_t *)last)->cdr = p;
       last = p;
     }
     skip_whitespace((const unsigned char *)s, &o, 0);
@@ -1195,7 +1195,7 @@ static zuo_t *zuo_primitiveN(zuo_t *(*f)(zuo_t *), zuo_t *name) {
 /*======================================================================*/
 
 static zuo_t *zuo_pair_p(zuo_t *obj) {
-  return (obj->tag == zuo_cons_tag) ? zuo_true : zuo_false;
+  return (obj->tag == zuo_pair_tag) ? zuo_true : zuo_false;
 }
 
 static zuo_t *zuo_null_p(zuo_t *obj) {
@@ -1223,29 +1223,29 @@ static zuo_t *zuo_hash_p(zuo_t *obj) {
 }
 
 static zuo_t *zuo_list_p(zuo_t *obj) {
-  while (obj->tag == zuo_cons_tag)
-    obj = ((zuo_cons_t *)obj)->cdr;
+  while (obj->tag == zuo_pair_tag)
+    obj = ((zuo_pair_t *)obj)->cdr;
   return (obj == zuo_null) ? zuo_true : zuo_false;
 }
 
 static zuo_t *zuo_car(zuo_t *obj) {
-  if (obj->tag != zuo_cons_tag)
+  if (obj->tag != zuo_pair_tag)
     zuo_fail1w("car", "not a pair", obj);
-  return ((zuo_cons_t *)obj)->car;
+  return ((zuo_pair_t *)obj)->car;
 }
 
 static zuo_t *zuo_cdr(zuo_t *obj) {
-  if (obj->tag != zuo_cons_tag)
+  if (obj->tag != zuo_pair_tag)
     zuo_fail1w("cdr", "not a pair", obj);
-  return ((zuo_cons_t *)obj)->cdr;
+  return ((zuo_pair_t *)obj)->cdr;
 }
 
 static zuo_int_t zuo_length_int(zuo_t *in_l) {
   zuo_t *l = in_l;
   zuo_int_t len = 0;
 
-  while (l->tag == zuo_cons_tag) {
-    l = ((zuo_cons_t *)l)->cdr;
+  while (l->tag == zuo_pair_tag) {
+    l = ((zuo_pair_t *)l)->cdr;
     len++;
   }
 
@@ -1261,7 +1261,7 @@ static zuo_t *zuo_length(zuo_t *in_l) {
 
 static zuo_t *zuo_reverse(zuo_t *in_l) {
   zuo_t *l = in_l, *r = zuo_null;
-  while (l->tag == zuo_cons_tag) {
+  while (l->tag == zuo_pair_tag) {
     r = zuo_cons(zuo_car(l), r);
     l = zuo_cdr(l);
   }
@@ -1320,16 +1320,16 @@ static zuo_t *zuo_string_to_uninterned_symbol(zuo_t *obj) {
 static zuo_t *zuo_hash(zuo_t *args) {
   zuo_t *l, *ht;
 
-  for (l = args; l->tag == zuo_cons_tag; l = zuo_cdr(zuo_cdr(l))) {
+  for (l = args; l->tag == zuo_pair_tag; l = zuo_cdr(zuo_cdr(l))) {
     if ((zuo_car(l)->tag != zuo_symbol_tag)
-        || (zuo_cdr(l)->tag != zuo_cons_tag))
+        || (zuo_cdr(l)->tag != zuo_pair_tag))
       break;
   }
   if (l != zuo_null)
     zuo_fail1w("hash", "symbol arguments interleaved with values", args);
 
   ht = zuo_trie_node();
-  for (l = args; l->tag == zuo_cons_tag; l = zuo_cdr(zuo_cdr(l)))
+  for (l = args; l->tag == zuo_pair_tag; l = zuo_cdr(zuo_cdr(l)))
     ht = zuo_trie_extend(ht, zuo_car(l), zuo_car(zuo_cdr(l)));
 
   return ht;
@@ -1448,7 +1448,14 @@ static zuo_t *zuo_display(zuo_t *obj) {
 }
 
 static zuo_t *zuo_error(zuo_t *objs) {
-  zuo_fdisplay(stderr, objs);
+  if ((objs->tag == zuo_pair_tag)
+      && (zuo_car(objs)->tag == zuo_string_tag)) {
+    zuo_fdisplay(stderr, zuo_car(objs));
+    objs = zuo_cdr(objs);
+    if (objs != zuo_null) fprintf(stderr, ": ");
+  }
+  zuo_fdisplay(stderr, zuo_tilde_v(objs));
+  fprintf(stderr, "\n");
   exit(1);
   return zuo_undefined;
 }
@@ -1460,13 +1467,13 @@ static zuo_t *zuo_list(zuo_t *objs) {
 static zuo_t *zuo_append(zuo_t *objs) {
   zuo_t *first = zuo_null, *last = NULL, *p;
   zuo_t *l = objs, *a;
-  while ((l->tag == zuo_cons_tag)
-         && (zuo_cdr(l)->tag == zuo_cons_tag)) {
+  while ((l->tag == zuo_pair_tag)
+         && (zuo_cdr(l)->tag == zuo_pair_tag)) {
     a = zuo_car(l);
-    while (a->tag == zuo_cons_tag) {
+    while (a->tag == zuo_pair_tag) {
       p = zuo_cons(zuo_car(a), zuo_null);
       if (last)
-        ((zuo_cons_t *)last)->cdr = p;
+        ((zuo_pair_t *)last)->cdr = p;
       else
         first = p;
       last = p;
@@ -1477,9 +1484,9 @@ static zuo_t *zuo_append(zuo_t *objs) {
     l = zuo_cdr(l);
   }
 
-  if (l->tag == zuo_cons_tag) {
+  if (l->tag == zuo_pair_tag) {
     if (last)
-      ((zuo_cons_t *)last)->cdr = zuo_car(l);
+      ((zuo_pair_t *)last)->cdr = zuo_car(l);
     else
       first = zuo_car(l);
   }
@@ -1545,33 +1552,33 @@ static void check_syntax(zuo_t *e) {
   while (es != zuo_null) {
     e = zuo_car(es);
     es = zuo_cdr(es);
-    if (e->tag == zuo_cons_tag) {
+    if (e->tag == zuo_pair_tag) {
       zuo_t *rator = zuo_car(e);
 
       if (rator == zuo_quote_symbol) {
         zuo_t *d = zuo_cdr(e);
-        if ((d->tag != zuo_cons_tag) || (zuo_cdr(d) != zuo_null))
+        if ((d->tag != zuo_pair_tag) || (zuo_cdr(d) != zuo_null))
           bad_form(e);
       } else if (rator == zuo_if_symbol) {
         zuo_t *d = zuo_cdr(e), *dd, *ddd;
-        if (d->tag != zuo_cons_tag)
+        if (d->tag != zuo_pair_tag)
           bad_form(e);
         dd = zuo_cdr(d);
-        if (dd->tag != zuo_cons_tag)
+        if (dd->tag != zuo_pair_tag)
           bad_form(e);
         ddd = zuo_cdr(dd);
-        if ((ddd->tag != zuo_cons_tag) || (zuo_cdr(ddd) != zuo_null))
+        if ((ddd->tag != zuo_pair_tag) || (zuo_cdr(ddd) != zuo_null))
           bad_form(e);
         es = zuo_cons(zuo_car(ddd), es);
         es = zuo_cons(zuo_car(dd), es);
         es = zuo_cons(zuo_car(d), es);
       } else if (rator == zuo_lambda_symbol) {
         zuo_t *d = zuo_cdr(e), *dd, *ad;
-        if (d->tag != zuo_cons_tag)
+        if (d->tag != zuo_pair_tag)
           bad_form(e);
         ad = zuo_car(d); /* formals */
         dd = zuo_cdr(d);
-        if (dd->tag != zuo_cons_tag)
+        if (dd->tag != zuo_pair_tag)
           bad_form(e);
         if (zuo_cdr(dd) != zuo_null) {
           /* skip over name string */
@@ -1579,9 +1586,9 @@ static void check_syntax(zuo_t *e) {
             bad_form(e);
           dd = zuo_cdr(dd);
         }
-        if ((dd->tag != zuo_cons_tag) || (zuo_cdr(dd) != zuo_null))
+        if ((dd->tag != zuo_pair_tag) || (zuo_cdr(dd) != zuo_null))
           bad_form(e);
-        while (ad->tag == zuo_cons_tag) {
+        while (ad->tag == zuo_pair_tag) {
           if (zuo_car(ad)->tag != zuo_symbol_tag)
             bad_form(e);
           ad = zuo_cdr(ad);
@@ -1591,38 +1598,38 @@ static void check_syntax(zuo_t *e) {
         es = zuo_cons(zuo_car(dd), es);
       } else if (rator == zuo_let_symbol) {
         zuo_t *d = zuo_cdr(e), *dd, *ad, *aad, *daad, *adaad;
-        if (d->tag != zuo_cons_tag)
+        if (d->tag != zuo_pair_tag)
           bad_form(e);
         ad = zuo_car(d); /* `((id rhs))` */
         dd = zuo_cdr(d);
-        if ((dd->tag != zuo_cons_tag) || (zuo_cdr(dd) != zuo_null))
+        if ((dd->tag != zuo_pair_tag) || (zuo_cdr(dd) != zuo_null))
           bad_form(e);
-        if ((ad->tag != zuo_cons_tag) || (zuo_cdr(ad) != zuo_null))
+        if ((ad->tag != zuo_pair_tag) || (zuo_cdr(ad) != zuo_null))
           bad_form(e);
         aad = zuo_car(ad); /* `(id rhs)` */
-        if ((aad->tag != zuo_cons_tag) || (zuo_car(aad)->tag != zuo_symbol_tag))
+        if ((aad->tag != zuo_pair_tag) || (zuo_car(aad)->tag != zuo_symbol_tag))
           bad_form(e);
         daad = zuo_cdr(aad); /* `(rhs)` */
-        if ((daad->tag != zuo_cons_tag) || (zuo_cdr(daad) != zuo_null))
+        if ((daad->tag != zuo_pair_tag) || (zuo_cdr(daad) != zuo_null))
           bad_form(e);
         adaad = zuo_car(daad); /* `rhs` */
         es = zuo_cons(adaad, es);
         es = zuo_cons(zuo_car(dd), es);
       } else if (rator == zuo_letcc_symbol) {
         zuo_t *d = zuo_cdr(e), *dd;
-        if (d->tag != zuo_cons_tag)
+        if (d->tag != zuo_pair_tag)
           bad_form(e);
         if (zuo_car(d)->tag != zuo_symbol_tag)
           bad_form(e);
         dd = zuo_cdr(d);
-        if ((dd->tag != zuo_cons_tag) || (zuo_cdr(dd) != zuo_null))
+        if ((dd->tag != zuo_pair_tag) || (zuo_cdr(dd) != zuo_null))
           bad_form(e);
         es = zuo_cons(zuo_car(dd), es);
       } else if (rator == zuo_begin_symbol) {
         zuo_t *l = zuo_cdr(e);
-        if (l->tag != zuo_cons_tag)
+        if (l->tag != zuo_pair_tag)
           bad_form(e);
-        while (l->tag == zuo_cons_tag) {
+        while (l->tag == zuo_pair_tag) {
           es = zuo_cons(zuo_car(l), es);
           l = zuo_cdr(l);
         }
@@ -1630,7 +1637,7 @@ static void check_syntax(zuo_t *e) {
           bad_form(e);
       } else {
         zuo_t *l = e;
-        while (l->tag == zuo_cons_tag) {
+        while (l->tag == zuo_pair_tag) {
           es = zuo_cons(zuo_car(l), es);
           l = zuo_cdr(l);
         }
@@ -1642,12 +1649,12 @@ static void check_syntax(zuo_t *e) {
 }
 
 static zuo_t *env_extend(zuo_t *env, zuo_t *sym, zuo_t *val) {
-  ASSERT((env->tag == zuo_trie_node_tag) || (env->tag == zuo_cons_tag));
+  ASSERT((env->tag == zuo_trie_node_tag) || (env->tag == zuo_pair_tag));
   return zuo_cons(zuo_cons(sym, val), env);
 }
 
 static zuo_t *env_lookup(zuo_t *env, zuo_t *sym) {
-  while (env->tag == zuo_cons_tag) {
+  while (env->tag == zuo_pair_tag) {
     zuo_t *a = zuo_car(env);
     if (zuo_car(a) == sym)
       return zuo_cdr(a);
@@ -1671,7 +1678,7 @@ static void interp_step() {
     if (val == zuo_undefined)
       zuo_fail1("undefined", e);
     zuo_interp_v = val;
-  } else if (e->tag == zuo_cons_tag) {
+  } else if (e->tag == zuo_pair_tag) {
     zuo_t *rator = _zuo_car(e);
 
     if (rator == zuo_quote_symbol) {
@@ -1735,7 +1742,7 @@ static void continue_step() {
           if (body_d != zuo_null)
             body = body_d; /* skip over function name */
           vals = _zuo_cdr(vals);
-          while (args->tag == zuo_cons_tag) {
+          while (args->tag == zuo_pair_tag) {
             if (vals == zuo_null)
               break;
             env = env_extend(env, _zuo_car(args), _zuo_car(vals));
@@ -2278,10 +2285,10 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
   char **argv;
 
   /* need at least the command part */
-  if (command_and_args->tag != zuo_cons_tag)
+  if (command_and_args->tag != zuo_pair_tag)
     l = zuo_false;
   else {
-    for (l = command_and_args; l->tag == zuo_cons_tag; l = zuo_cdr(l))
+    for (l = command_and_args; l->tag == zuo_pair_tag; l = zuo_cdr(l))
       if (zuo_car(l)->tag != zuo_string_tag)
         break;
   }
@@ -2303,7 +2310,7 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
     zuo_t *redirect_out_sym = zuo_symbol("redirect-out");
     zuo_t *redirect_err_sym = zuo_symbol("redirect-err");
     
-    for (l = options; l->tag == zuo_cons_tag; l = zuo_cdr(l)) {
+    for (l = options; l->tag == zuo_pair_tag; l = zuo_cdr(l)) {
       zuo_t *a = zuo_car(l);
       if (redirect_in_sym == a)
         redirect_in = 1;
@@ -2474,7 +2481,7 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
   if (is_process_handle(pids_i))
     pids_i = zuo_cons(pids_i, zuo_null);
     
-  for (l = pids_i; l->tag == zuo_cons_tag; l = zuo_cdr(l))
+  for (l = pids_i; l->tag == zuo_pair_tag; l = zuo_cdr(l))
     if (!is_process_handle(zuo_car(l)))
       break;
   if (l != zuo_null)
