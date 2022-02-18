@@ -147,7 +147,8 @@ typedef enum {
   zuo_apply_cont,
   zuo_begin_cont,
   zuo_let_cont,
-  zuo_if_cont
+  zuo_if_cont,
+  zuo_done_cont
 } zuo_cont_tag_t;
 
 typedef struct zuo_cont_t {
@@ -165,8 +166,11 @@ static zuo_t *zuo_false;
 static zuo_t *zuo_null;
 static zuo_t *zuo_eof;
 static zuo_t *zuo_void;
-static zuo_t *zuo_apply;
 static zuo_t *zuo_empty_hash;
+
+/* sentinels for the interpreter */
+static zuo_t *zuo_done_k;
+static zuo_t *zuo_apply;
 
 /* symbol table, root environment, and module */
 static zuo_t *zuo_intern_table;
@@ -366,9 +370,11 @@ static void zuo_collect() {
   zuo_update(&zuo_null);
   zuo_update(&zuo_eof);
   zuo_update(&zuo_void);
-  zuo_update(&zuo_apply);
   zuo_update(&zuo_empty_hash);
   
+  zuo_update(&zuo_done_k);
+  zuo_update(&zuo_apply);
+
   zuo_update(&zuo_intern_table);
   zuo_update(&zuo_top_env);
   zuo_update(&zuo_modules);
@@ -1875,75 +1881,75 @@ static void continue_step() {
   switch (k->tag) {
   case zuo_apply_cont:
     {
-      zuo_t *vals = _zuo_car(k->data);
+      zuo_t *rev_vals = _zuo_car(k->data);
       zuo_t *exps = _zuo_cdr(k->data);
-      vals = zuo_cons(zuo_interp_v, vals);
+      rev_vals = zuo_cons(zuo_interp_v, rev_vals);
       if (exps == zuo_null) {
         zuo_t *rator;
-        vals = zuo_reverse(vals);
-        rator = _zuo_car(vals);
-        if (rator->tag == zuo_closure_tag) {
-          zuo_t *all_vals = vals;
-          zuo_closure_t *f = (zuo_closure_t *)rator;
-          zuo_t *env = f->env;
-          zuo_t *args = _zuo_car(_zuo_cdr(f->lambda));
-          zuo_t *body = _zuo_cdr(_zuo_cdr(f->lambda));
-          zuo_t *body_d = _zuo_cdr(body);
-          if (body_d != zuo_null)
-            body = body_d; /* skip over function name */
-          vals = _zuo_cdr(vals);
-          while (args->tag == zuo_pair_tag) {
-            if (vals == zuo_null)
-              break;
-            env = env_extend(env, _zuo_car(args), _zuo_car(vals));
-            args = _zuo_cdr(args);
-            vals = _zuo_cdr(vals);
-          }
-          if (args->tag == zuo_symbol_tag)
-            env = env_extend(env, args, vals);
-          else if (args != zuo_null || vals != zuo_null)
-            zuo_fail1("wrong argument count", all_vals);
-          
-          zuo_interp_e = _zuo_car(body);
-          zuo_interp_env = env;
-          zuo_interp_v = zuo_undefined;
-        } else if (rator->tag == zuo_primitive_tag) {
-          zuo_primitive_t *f = (zuo_primitive_t *)rator;
-          zuo_int_t n = ((f->arity_mask == -1) ? 0 : zuo_length_int(_zuo_cdr(vals)));
-          if (f->arity_mask & (1 << ((n > 10) ? 10 : n)))
-            zuo_interp_v = f->proc(f->data, _zuo_cdr(vals));
-          else
-            zuo_fail1("wrong argument count", vals);
-        } else if (rator->tag == zuo_cont_tag) {
-          zuo_t *args = _zuo_cdr(vals);
-          zuo_int_t n = zuo_length_int(args);
-          if (n == 1) {
-            zuo_interp_k = _zuo_car(vals);
-            zuo_interp_v = _zuo_car(args);
+        zuo_t *args = zuo_null;
+        int count = 0;
+        while (_zuo_cdr(rev_vals) != zuo_null) {
+          args = zuo_cons(_zuo_car(rev_vals), args);
+          count++;
+          rev_vals = _zuo_cdr(rev_vals);
+        }
+        rator = _zuo_car(rev_vals);
+        while (1) { /* loop in case of `apply` */
+          if (rator->tag == zuo_closure_tag) {
+            zuo_t *all_args = args;
+            zuo_closure_t *f = (zuo_closure_t *)rator;
+            zuo_t *env = f->env;
+            zuo_t *formals = _zuo_car(_zuo_cdr(f->lambda));
+            zuo_t *body = _zuo_cdr(_zuo_cdr(f->lambda));
+            zuo_t *body_d = _zuo_cdr(body);
+            if (body_d != zuo_null)
+              body = body_d; /* skip over function name */
+            while (formals->tag == zuo_pair_tag) {
+              if (args == zuo_null)
+                break;
+              env = env_extend(env, _zuo_car(formals), _zuo_car(args));
+              args = _zuo_cdr(args);
+              formals = _zuo_cdr(formals);
+            }
+            if (formals->tag == zuo_symbol_tag)
+              env = env_extend(env, formals, args);
+            else if (formals != zuo_null || args != zuo_null)
+              zuo_fail1("wrong argument count", zuo_cons(rator, all_args));
+
+            zuo_interp_e = _zuo_car(body);
+            zuo_interp_env = env;
+            zuo_interp_v = zuo_undefined;
+            break;
+          } else if (rator->tag == zuo_primitive_tag) {
+            zuo_primitive_t *f = (zuo_primitive_t *)rator;
+            if ((f->arity_mask == -1)
+                || (f->arity_mask & (1 << ((count > 10) ? 10 : count))))
+              zuo_interp_v = f->proc(f->data, args);
+            else
+              zuo_fail1("wrong argument count", zuo_cons(rator, args));
+            break;
+          } else if (rator->tag == zuo_cont_tag) {
+            if (count == 1) {
+              zuo_interp_k = rator;
+              zuo_interp_v = _zuo_car(args);
+            } else
+              zuo_fail1("wrong argument count", zuo_cons(rator, args));
+            break;
+          } else if (rator == zuo_apply) {
+            if (count != 2)
+              zuo_fail1("wrong argument count", zuo_cons(zuo_apply, args));
+            rator = _zuo_car(args);
+            args = _zuo_car(_zuo_cdr(args));
+            if (!zuo_list_p(args))
+              zuo_fail1("not a list", args);
+            /* no break => loop to apply again */
           } else
-            zuo_fail1("wrong argument count", vals);
-        } else if (rator == zuo_apply) {
-          zuo_t *args = _zuo_cdr(vals), *proc, *lst;
-          if (zuo_length_int(args) != 2)
-            zuo_fail1("wrong argument count", vals);
-          proc = _zuo_car(args);
-          lst = _zuo_car(_zuo_cdr(args));
-          if (!zuo_list_p(lst))
-            zuo_fail1("not a list", lst);
-          if (lst == zuo_null)
-            zuo_interp_v = proc;
-          else {
-            lst = zuo_reverse(zuo_cons(proc, lst));
-            zuo_interp_v = zuo_car(lst);
-            lst = _zuo_cdr(lst);
-          }
-          zuo_interp_k = zuo_cont(zuo_apply_cont, zuo_cons(lst, zuo_null), zuo_interp_env, zuo_interp_k);
-        } else
-          zuo_fail1("not a function for call", rator);
+            zuo_fail1("not a function for call", rator);
+        }
       } else {
         zuo_interp_e = _zuo_car(exps);
         zuo_interp_env = k->env;
-        zuo_interp_k = zuo_cont(zuo_apply_cont, zuo_cons(vals, _zuo_cdr(exps)), zuo_interp_env, zuo_interp_k);
+        zuo_interp_k = zuo_cont(zuo_apply_cont, zuo_cons(rev_vals, _zuo_cdr(exps)), zuo_interp_env, zuo_interp_k);
         zuo_interp_v = zuo_undefined;
       }
     }
@@ -1975,6 +1981,8 @@ static void continue_step() {
       zuo_interp_v = zuo_undefined;
     }
     break;
+  case zuo_done_cont:
+    break;
   }
 }
 
@@ -1986,13 +1994,13 @@ zuo_t *zuo_eval(zuo_t *e) {
   zuo_interp_e = e;
   zuo_interp_v = zuo_undefined;
   zuo_interp_env = zuo_top_env;
-  zuo_interp_k = zuo_eof;
+  zuo_interp_k = zuo_done_k;
 
   while (1) {
     zuo_check_collect();
     if (zuo_interp_v == zuo_undefined) {
       interp_step();
-    } else if (zuo_interp_k == zuo_eof) {
+    } else if (zuo_interp_k == zuo_done_k) {
       zuo_t *v = zuo_interp_v;
       zuo_interp_e = zuo_interp_v = zuo_interp_env = zuo_interp_k = zuo_false;
       
@@ -2906,6 +2914,7 @@ int main(int argc, char **argv) {
   zuo_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+  zuo_done_k = zuo_cont(zuo_done_cont, zuo_false, zuo_false, zuo_false);
   zuo_empty_hash = zuo_trie_node();
   zuo_intern_table = zuo_trie_node();
 
