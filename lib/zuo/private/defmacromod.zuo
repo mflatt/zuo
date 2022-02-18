@@ -40,48 +40,46 @@
        ;; poor man's structs
        [make-maker (lambda (tag) (lambda (v) (cons tag v)))]
        [make-? (lambda (tag) (lambda (v) (and (pair? v) (eq? tag (car v)))))]
-       [make-ref (lambda (tag) cdr)]
-
-       [make-macro (make-maker 'macro)]
-       [macro? (make-? 'macro)]
+       [make-?? (lambda (tag1 tag2) (lambda (v) (and (pair? v) (or (eq? tag1 (car v))
+                                                                   (eq? tag2 (car v))))))]
+       [any-ref cdr] ; not bothering to check a tag
 
        [make-core-form (make-maker 'core-form)]
        [core-form? (make-? 'core-form)]
-       [syntax-id (make-ref 'core-form)]
+       [syntax-id any-ref]
 
        [make-local (make-maker 'local)]
        [local? (make-? 'local)]
-       [local-id (make-ref 'local)]
-
-       [make-local-variable (make-maker 'local-variable)]
+       [local-id any-ref]
 
        [make-defined (make-maker 'defined)]
        [defined? (make-? 'defined)]
+       [make-local-variable (make-maker 'local-variable)]
+       [variable? (make-?? 'local-variable 'defined)]
+       [variable-var any-ref]
 
+       [make-macro (make-maker 'macro)]
        [make-defined-macro (make-maker 'defined-macro)]
        [defined-macro? (make-? 'defined-macro)]
-       [defined-macro-id (make-ref 'defined-macro)]
-
-       [variable? (lambda (v) (and (pair? v)
-                                   (let ([t (car v)])
-                                     (or (eq? t 'local-variable)
-                                         (eq? t 'defined)))))]
-       [variable-var cdr] ; can be id or variable value
+       [macro? (make-?? 'macro 'defined-macro)]
+       [macro-proc any-ref]
+       [apply-macro (lambda (m s) (apply (macro-proc m) (cdr s)))]
 
        [make-literal (make-maker 'literal)]
        [literal? (make-? 'literal)]
-       [literal-val (make-ref 'literal)]
+       [literal-val any-ref]
 
        [top-binds (foldl (lambda (id binds)
                            (hash-set binds id (make-core-form id)))
                          (kernel-namespace)
                          '(lambda let letrec quote if begin
-                                  define require provide))]
+                                  define defmacro require provide))]
 
        [export-bind (lambda (bind)
                       ;; convert a local binding into one suitable to import
                       (cond
                         [(defined? bind) (make-local-variable (variable-var bind))]
+                        [(defined-macro? bind) (make-macro (macro-proc bind))]
                         [else bind]))]
 
        [gensym (lambda (s) (string->uninterned-symbol (~a s)))]
@@ -110,6 +108,43 @@
                                                       def-id (make-local def-id))]
                                  [new-s `(variable-set! ,var ,(cadr (cdr s)))])
                             (k new-s new-binds))))]
+
+       [expand-defmacro (lambda (s binds parse)
+                          (unless (and (list? s)
+                                       (>= 4 (length s))
+                                       (symbol? (cadr s)))
+                            (bad-syntax s))
+                          (let* ([macro-id (cadr s)]
+                                 [formals (cadr (cdr s))])
+                            (letrec ([check (lambda (formals seen)
+                                              (cond
+                                                [(null? formals) #t]
+                                                [(pair? formals)
+                                                 (and (symbol? (car formals))
+                                                      (check (car formals) seen)
+                                                      (check (cdr formals) (cons (car formals) seen)))]
+                                                [(symbol? formals)
+                                                 (if (member? formals seen)
+                                                     (duplicate-identifier formals)
+                                                     #t)]
+                                                [else #f]))])
+                              (unless (check (cadr (cdr s)) '())
+                                (bad-syntax s)))
+                            (let ([id-bind (hash-ref binds macro-id #f)])
+                              (when (or (defined? id-bind)
+                                        (defined-macro? id-bind))
+                                (error "duplicate definition" macro-id)))
+                            (let* ([e (parse `(lambda ,formals . ,(cddr (cdr s)))
+                                             ;; filter bindings to drop definitions
+                                             (foldl (lambda (id new-binds)
+                                                      (let ([bind (hash-ref binds id #f)])
+                                                        (if (defined? id)
+                                                            new-binds
+                                                            (hash-set new-binds id bind))))
+                                                    (hash)
+                                                    (hash-keys binds)))]
+                                   [proc (eval e)])
+                              (hash-set binds macro-id (make-macro proc)))))]
 
        [expand-provide (lambda (s binds provides)
                          (unless (list? s) (bad-syntax s))
@@ -228,7 +263,7 @@
 
        [expand-top-sequence
         ;; expand top-level forms and gather imports and definitions
-        (lambda (es binds mod-path)
+        (lambda (es binds mod-path parse)
           (letrec ([expand-top
                     (lambda (es accum binds provides)
                       (cond
@@ -254,6 +289,9 @@
                                                        binds
                                                        (lambda (new-s new-binds)
                                                          (expand-top (cdr es) (cons new-s accum) new-binds provides)))]
+                                       [(eq? bind 'defmacro)
+                                        (let ([new-binds (expand-defmacro s binds parse)])
+                                          (expand-top (cdr es) accum new-binds provides))]
                                        [(eq? bind 'provide)
                                         (let ([new-provides (expand-provide s binds provides)])
                                           (expand-top (cdr es) accum binds new-provides))]
@@ -417,7 +455,7 @@
     (hash 'read-and-eval
           (lambda (str start mod-path)
             (let* ([es (read-from-string-all (substring str start (string-length str)))]
-                   [es+binds+provides (expand-top-sequence es top-binds mod-path)]
+                   [es+binds+provides (expand-top-sequence es top-binds mod-path parse)]
                    [es (car es+binds+provides)]
                    [binds (cadr es+binds+provides)]
                    [provides (cadr (cdr es+binds+provides))]
@@ -432,5 +470,5 @@
                                           (unless bind (error "provided identifier not bound" id))
                                           (provide-out (cdr as-ids) (hash-set outs as-id (export-bind bind))))]))])
                            (provide-out (hash-keys provides) (hash)))])
-              (eval (cons 'begin (map (lambda (e) (parse e binds)) es)))
+              (eval (cons 'begin (cons '(void) (map (lambda (e) (parse e binds)) es))))
               (hash 'provides outs))))))

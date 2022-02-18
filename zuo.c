@@ -157,6 +157,7 @@ static zuo_t *zuo_false;
 static zuo_t *zuo_null;
 static zuo_t *zuo_eof;
 static zuo_t *zuo_void;
+static zuo_t *zuo_apply;
 
 /* symbol table, root environment, and module */
 static zuo_t *zuo_intern_table;
@@ -350,6 +351,7 @@ static void zuo_collect() {
   zuo_update(&zuo_null);
   zuo_update(&zuo_eof);
   zuo_update(&zuo_void);
+  zuo_update(&zuo_apply);
   
   zuo_update(&zuo_intern_table);
   zuo_update(&zuo_top_env);
@@ -732,17 +734,19 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
     }
     out_char(out, ')');
   } else if (obj->tag == zuo_primitive_tag) {
-    out_string(out, "#<function:");
+    out_string(out, "#<procedure:");
     zuo_out(out, ((zuo_primitive_t *)obj)->name, depth+1, zuo_display_mode);
     out_string(out, ">");
   } else if (obj->tag == zuo_closure_tag) {
     zuo_t *dd = ZUO_CDR(ZUO_CDR(((zuo_closure_t *)obj)->lambda));
-    out_string(out, "#<function");
+    out_string(out, "#<procedure");
     if (ZUO_CAR(dd)->tag == zuo_string_tag) {
       out_string(out, ":");
       zuo_out(out, ZUO_CAR(dd), depth+1, zuo_display_mode);
     }
     out_string(out, ">");
+  } else if (obj == zuo_apply) {
+    out_string(out, "#<procedure:apply>");
   } else if (obj->tag == zuo_trie_node_tag) {
     out_string(out, "#<hash>");
   } else if (obj->tag == zuo_handle_tag) {
@@ -1772,6 +1776,22 @@ static void continue_step() {
             zuo_interp_v = _zuo_car(args);
           } else
             zuo_fail1("wrong argument count", vals);
+        } else if (rator == zuo_apply) {
+          zuo_t *args = _zuo_cdr(vals), *proc, *lst;
+          if (zuo_length_int(args) != 2)
+            zuo_fail1("wrong argument count", vals);
+          proc = _zuo_car(args);
+          lst = _zuo_car(_zuo_cdr(args));
+          if (!zuo_list_p(lst))
+            zuo_fail1("not a list", lst);
+          if (lst == zuo_null)
+            zuo_interp_v = proc;
+          else {
+            lst = zuo_reverse(zuo_cons(proc, lst));
+            zuo_interp_v = zuo_car(lst);
+            lst = _zuo_cdr(lst);
+          }
+          zuo_interp_k = zuo_cont(zuo_apply_cont, zuo_cons(lst, zuo_null), zuo_interp_env, zuo_interp_k);
         } else
           zuo_fail1("not a function for call", rator);
       } else {
@@ -2718,22 +2738,22 @@ static zuo_t *zuo_self_path(char *exec_file) {
 /* main                                                                 */
 /*======================================================================*/
 
-#define TRIE_SET_AND_SAVE_NAME(name, proc, make_prim)           \
+#define TRIE_SET_TOP_ENV(name, proc, make_prim)                 \
   do {                                                          \
     zuo_t *sym = zuo_symbol(name);                              \
     zuo_trie_set(zuo_top_env, sym, make_prim(proc, sym));       \
   } while (0)
 
 #define ZUO_TOP_ENV_SET_PRIMITIVE0(name, proc) \
-  TRIE_SET_AND_SAVE_NAME(name, proc, zuo_primitive0)
+  TRIE_SET_TOP_ENV(name, proc, zuo_primitive0)
 #define ZUO_TOP_ENV_SET_PRIMITIVE1(name, proc) \
-  TRIE_SET_AND_SAVE_NAME(name, proc, zuo_primitive1)
+  TRIE_SET_TOP_ENV(name, proc, zuo_primitive1)
 #define ZUO_TOP_ENV_SET_PRIMITIVE2(name, proc) \
-  TRIE_SET_AND_SAVE_NAME(name, proc, zuo_primitive2)
+  TRIE_SET_TOP_ENV(name, proc, zuo_primitive2)
 #define ZUO_TOP_ENV_SET_PRIMITIVE3(name, proc) \
-  TRIE_SET_AND_SAVE_NAME(name, proc, zuo_primitive3)
+  TRIE_SET_TOP_ENV(name, proc, zuo_primitive3)
 #define ZUO_TOP_ENV_SET_PRIMITIVEN(name, proc) \
-  TRIE_SET_AND_SAVE_NAME(name, proc, zuo_primitiveN)
+  TRIE_SET_TOP_ENV(name, proc, zuo_primitiveN)
 
 int main(int argc, char **argv) {
   char *input;
@@ -2744,6 +2764,7 @@ int main(int argc, char **argv) {
   zuo_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+  zuo_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_intern_table = zuo_trie_node();
 
   zuo_interp_e = zuo_interp_v = zuo_interp_env = zuo_interp_k = zuo_false;
@@ -2775,6 +2796,8 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("hash?", zuo_hash_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("list?", zuo_list_p);
   ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void);
+
+  zuo_trie_set(zuo_top_env, zuo_symbol("apply"), zuo_apply);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
   ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
