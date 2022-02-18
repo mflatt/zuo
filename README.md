@@ -13,9 +13,7 @@ Zuo is a Racket variant in the sense that program files start with
 `#lang`, and the module path after `#lang` determines the parsing and
 expansion of the file content. That's how the `make`-like DSL is
 defined, and even the base Zuo language is defined by layers of
-`#lang`s. But the macro system of `#lang zuo` is non-hygienic and has
-no phase separation. (But you could build a hygienic layer on top. But
-maybe you should just build and use Racket at that point.)
+`#lang`s with hygienic macros (but no phase separation).
 
 The `zuo/kernel` language implemented by "zuo.c" has these forms:
 
@@ -23,7 +21,7 @@ The `zuo/kernel` language implemented by "zuo.c" has these forms:
  <expr> ::= <variable>
          |  <literal>                  ; number, string, etc.
          |  (<expr> <expr> ...)        ; function call
-         |  (lambda <formals> <expr>)  ; name allowed before <expr>
+         |  (lambda <formals> <string>? <expr>) ; optional name
          |  (quote <expr>)
          |  (if <expr> <expr> <expr>)
          |  (let/cc <variable> <expr>)

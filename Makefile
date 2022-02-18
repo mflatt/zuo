@@ -1,3 +1,3 @@
 
 zuo: zuo.c
-	cc -g -o zuo zuo.c
+	cc -Wall -g -o zuo zuo.c
