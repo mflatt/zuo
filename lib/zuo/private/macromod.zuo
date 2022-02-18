@@ -387,7 +387,7 @@
                                  [def-id (gensym sym)]
                                  [var (variable sym)]
                                  [new-state (add-binding state id (as-specific (make-defined var)))]
-                                 [new-s `(,variable-set! ,var ,(cadr (cdr s)))])
+                                 [new-s `(,variable-set! ,var (,name-lambda ,(cadr (cdr s)) ,id))])
                             (k new-s new-state))))]
 
        [expand-define-syntax (lambda (s state parse)
@@ -399,7 +399,7 @@
                                            (defined-macro? id-bind))
                                    (syntax-error "duplicate definition" id))
                                  (let* ([e (parse (cadr (cdr s)) state)]
-                                        [proc (eval e)])
+                                        [proc (eval (name-lambda e id))])
                                    (add-binding state id (as-specific (make-defined-macro proc))))))]
 
        [expand-provide (lambda (s state provides mod-path)
@@ -741,6 +741,8 @@
                                          (cons 'begin es)))]
                                   [else
                                    (map (lambda (e) (parse e state)) s)]))]
+                             [(eq? rator name-lambda) ; form created by `define` to propagate name
+                              (name-lambda (parse (cadr s) state) (cadr (cdr s)))]
                              [else (map (lambda (e) (parse e state)) s)]))]
                         [(syntax? s)
                          (let* ([bind (resolve state s)])

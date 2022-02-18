@@ -11,7 +11,7 @@
                                (if (null? (cdr l))
                                    (car l)
                                    (cons 'begin l)))])
-            (letrec ([convert (lambda (s)
+            (letrec ([convert (lambda (s maybe-name)
                                 (if (pair? s)
                                     (if (eq? (car s) 'or)
                                         (letrec ([expand-or (lambda (l)
@@ -19,11 +19,11 @@
                                                                   #f
                                                                   (if (pair? l)
                                                                       (if (null? (cdr l))
-                                                                          (convert (car l))
+                                                                          (convert (car l) #f)
                                                                           (let ([tmp (string->uninterned-symbol "ortmp")])
                                                                             (list 'let
                                                                                   (list (list tmp
-                                                                                              (convert (car l))))
+                                                                                              (convert (car l) #f)))
                                                                                   (list 'if
                                                                                         tmp
                                                                                         tmp
@@ -36,9 +36,9 @@
                                                                        #t
                                                                        (if (pair? l)
                                                                            (if (null? (cdr l))
-                                                                               (convert (car l))
+                                                                               (convert (car l) #f)
                                                                                (list 'if
-                                                                                     (convert (car l))
+                                                                                     (convert (car l) #f)
                                                                                      (expand-and (cdr l))
                                                                                      #f))
                                                                            (error "and: bad syntax" s))))])
@@ -53,11 +53,11 @@
                                                                                       (if (>= (length (car l)) 2)
                                                                                           (if (eq? (car (car l)) 'else)
                                                                                               (if (null? (cdr l))
-                                                                                                  (convert (maybe-begin (cdr (car l))))
+                                                                                                  (convert (maybe-begin (cdr (car l))) #f)
                                                                                                   (no))
                                                                                               (list 'if
-                                                                                                    (convert (car (car l)))
-                                                                                                    (convert (maybe-begin (cdr (car l))))
+                                                                                                    (convert (car (car l)) #f)
+                                                                                                    (convert (maybe-begin (cdr (car l))) #f)
                                                                                                     (expand-cond (cdr l))))
                                                                                           (no))
                                                                                       (no))
@@ -70,7 +70,7 @@
                                                                                       (if (pair? l)
                                                                                           (if (eq? (car l) 'unquote)
                                                                                               (if (= 2 (length l))
-                                                                                                  (convert (car (cdr l)))
+                                                                                                  (convert (car (cdr l)) #f)
                                                                                                   (error "unquote: bad syntax" l))
                                                                                               (list 'cons
                                                                                                     (expand-quasiquote (car l))
@@ -87,36 +87,41 @@
                                                                                     body
                                                                                     (list 'let
                                                                                           (let ([cl (car l)])
-                                                                                            (list (list (car cl) (convert (car (cdr cl))))))
+                                                                                            (list (list (car cl) (convert (car (cdr cl)) (car cl)))))
                                                                                           (expand-let* (cdr l) body))))])
-                                                          (expand-let* (car (cdr s)) (convert (maybe-begin (cdr (cdr s))))))
+                                                          (expand-let* (car (cdr s)) (convert (maybe-begin (cdr (cdr s))) #f)))
                                                         (if (eq? (car s) 'when)
                                                             (if (>= (length s) 2)
                                                                 (list 'if
-                                                                      (convert (car (cdr s)))
-                                                                      (convert (maybe-begin (cdr (cdr s))))
+                                                                      (convert (car (cdr s)) #f)
+                                                                      (convert (maybe-begin (cdr (cdr s))) #f)
                                                                       '(void))
                                                                 (error "when: bad syntax" s))
                                                             (if (eq? (car s) 'unless)
                                                                 (if (>= (length s) 2)
                                                                     (list 'if
-                                                                          (convert (car (cdr s)))
+                                                                          (convert (car (cdr s)) #f)
                                                                           '(void)
-                                                                          (convert (maybe-begin (cdr (cdr s)))))
+                                                                          (convert (maybe-begin (cdr (cdr s))) #f))
                                                                     (error "unless: bad syntax" s))
                                                                 (if (eq? (car s) 'lambda)
                                                                     (if (>= (length s) 3)
-                                                                        (list 'lambda
-                                                                              (car (cdr s))
-                                                                              (convert (maybe-begin (cdr (cdr s)))))
+                                                                        (let ([keep-names? #f])
+                                                                          (let ([args (car (cdr s))])
+                                                                            (let ([body (cdr (cdr s))])
+                                                                              (let ([body (convert (maybe-begin body) #f)])
+                                                                                (if (if keep-names? maybe-name #f)
+                                                                                    (let ([name (symbol->string maybe-name)])
+                                                                                      (list 'lambda args name body))
+                                                                                    (list 'lambda args body))))))
                                                                         (error "lambda: bad syntax" s))
                                                                     (if (eq? (car s) 'quote)
                                                                         s
-                                                                        (cons (convert (car s))
-                                                                              (convert (cdr s))))))))))))
+                                                                        (cons (convert (car s) #f)
+                                                                              (convert (cdr s) #f)))))))))))
                                     ;; not propagating `eval` like `letrec` does
                                     s))])
-              (let ([es (convert es)])
+              (let ([es (convert es #f)])
                 (letrec ([eval-all (lambda (es)
                                      (if (null? es)
                                          (hash)

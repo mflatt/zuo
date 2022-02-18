@@ -935,14 +935,19 @@ static void zuo_fdisplay(FILE *out, zuo_t *obj) {
   zuo_fout(out, obj, zuo_display_mode);
 }
 
-static void zuo_fail(const char *str) {
-  fprintf(stderr, "%s\n", str);
-  while (zuo_interp_k != zuo_done_k) {
-    zuo_t *name = ((zuo_cont_t *)zuo_interp_k)->in_proc;
+static void zuo_stack_dump() {
+  zuo_t *k = zuo_interp_k;
+  while (k != zuo_done_k) {
+    zuo_t *name = ((zuo_cont_t *)k)->in_proc;
     if (name->tag == zuo_string_tag)
       fprintf(stderr, " in %s\n", ZUO_STRING_PTR(name));
-    zuo_interp_k = ((zuo_cont_t *)zuo_interp_k)->next;
+    k = ((zuo_cont_t *)k)->next;
   }
+}
+
+static void zuo_fail(const char *str) {
+  fprintf(stderr, "%s\n", str);
+  zuo_stack_dump();
   exit(1);
 }
 
@@ -1925,6 +1930,7 @@ static zuo_t *env_lookup(zuo_t *env, zuo_t *sym) {
 
 static void interp_step() {
   zuo_t *e = zuo_interp_e;
+
   if (e->tag == zuo_symbol_tag) {
     zuo_t *val = env_lookup(zuo_interp_env, e);
     if (val == zuo_undefined)

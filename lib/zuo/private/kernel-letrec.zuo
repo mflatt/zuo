@@ -40,7 +40,13 @@
                                                              (list 'begin
                                                                    (list variable-set!
                                                                          var
-                                                                         (convert rhs))
+                                                                         (let ([lam (convert rhs)])
+                                                                           (if #f ; keep-names?
+                                                                               (cons (car lam)
+                                                                                     (cons (car (cdr lam))
+                                                                                           (cons (symbol->string id)
+                                                                                                 (cdr (cdr lam)))))
+                                                                               lam)))
                                                                    (let ([body (cdr (cdr s))])
                                                                      (convert (if (null? (cdr body))
                                                                                   (car body)
