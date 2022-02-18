@@ -2173,6 +2173,7 @@ static zuo_t *zuo_path_to_complete_path(zuo_t *path, zuo_t *rel_to) {
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
   zuo_string_t *str;
   zuo_t *strobj;
+  int saw_slash = 0;
 
   if (path->tag == zuo_symbol_tag) {
     str = (zuo_string_t *)((zuo_symbol_t *)path)->str;
@@ -2181,6 +2182,7 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
     else {
       zuo_int_t i;
       for (i = 0; i < str->len; i++) {
+        if (str->s[i] == '/') saw_slash = 1;
         if (!zuo_is_symbol_module_char(str->s[i])) {
           str = NULL;
           break;
@@ -2193,7 +2195,10 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
   if (str == NULL)
     zuo_fail1w("module-path->path", "not a module-path symbol", path);
   
-  strobj = zuo_tilde_a(zuo_cons((zuo_t *)str, zuo_string(".zuo")));
+  strobj = zuo_tilde_a(zuo_cons((zuo_t *)str,
+                                zuo_cons(saw_slash ? zuo_string("") : zuo_string("/main"),
+                                         zuo_cons(zuo_string(".zuo"),
+                                                  zuo_null))));
 
   return zuo_build_path(zuo_library_path, strobj);
 }
@@ -2363,7 +2368,7 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
         zuo_t *env = zuo_dynamic_require(zuo_symbol(lang));
         zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
         if (proc->tag != zuo_closure_tag)
-          zuo_fail1("invalid read-and-eval from language", zuo_symbol(lang));
+          zuo_fail1("not a language module path", zuo_symbol(lang));
         module_path = zuo_car(zuo_stash);
         v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_string(input),
                                              zuo_cons(zuo_integer(post),

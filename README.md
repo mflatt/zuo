@@ -13,7 +13,8 @@ Zuo is a Racket variant in the sense that program files start with
 `#lang`, and the module path after `#lang` determines the parsing and
 expansion of the file content. That's how the `make`-like DSL is
 defined, and even the base Zuo language is defined by layers of
-`#lang`s with hygienic macros (but no phase separation).
+`#lang`s. One of the early layers implements hygienic macros (but
+without a phase separation).
 
 The `zuo/kernel` language implemented by "zuo.c" has these forms:
 
