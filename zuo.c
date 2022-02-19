@@ -79,7 +79,6 @@ typedef struct {
 } zuo_string_t;
 
 #define ZUO_STRING_ALLOC_SIZE(len) (((sizeof(zuo_string_t) + (len) + 1 + 3) >> 2) << 2)
-
 #define ZUO_STRING_LEN(obj) (((zuo_string_t *)(obj))->len)
 #define ZUO_STRING_PTR(obj) ((char *)&((zuo_string_t *)(obj))->s)
 

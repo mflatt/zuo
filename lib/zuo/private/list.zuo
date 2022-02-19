@@ -1,7 +1,6 @@
 #lang zuo/private/macromod
 
-(require "pair.zuo"
-         "and-or.zuo")
+(require "and-or.zuo")
 
 (provide list*
          list-ref

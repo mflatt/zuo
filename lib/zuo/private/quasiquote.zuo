@@ -1,0 +1,43 @@
+#lang zuo/private/macromod
+
+(require "stx.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "list.zuo"
+         "let.zuo")
+
+(provide quasiquote)
+
+(define-syntax quasiquote
+  (lambda (stx)
+    (unless (and (stx-list? stx) (= (stx-length stx) 2))
+      (bad-syntax stx))
+    (let loop ([s (stx-cadr stx)] [depth 0])
+      (let ([loop-pair (lambda (combine combine-name a d depth)
+                         (let ([a (loop a depth)]
+                               [d (loop d depth)])
+                           (if (and (stx-pair? a)
+                                    (eq? (stx-car a) 'quote)
+                                    (stx-pair? d)
+                                    (eq? (stx-car d) 'quote))
+                               (list 'quote (combine (stx-cadr a) (stx-cadr d)))
+                               (list combine-name a d))))])
+        (cond
+          [(stx-pair? s)
+           (let ([a (stx-car s)])
+             (cond
+               [(and (identifier? a)
+                     (eq? (syntax-e a) 'unquote))
+                (unless (= (stx-length s) 2)
+                  (bad-syntax s))
+                (if (= depth 0)
+                    (stx-cadr s)
+                    (loop-pair list 'list a (stx-cadr s) (- depth 1)))]
+               [(and (identifier? a)
+                     (eq? (syntax-e a) 'quasiquote))
+                (unless (= (stx-length s) 2)
+                  (bad-syntax s))
+                (loop-pair list 'list a (stx-cadr s) (- depth 1))]
+               [else
+                (loop-pair cons 'cons a (stx-cdr s) depth)]))]
+          [else (list 'quote s)])))))

@@ -41,7 +41,7 @@
                                                                    (list variable-set!
                                                                          var
                                                                          (let ([lam (convert rhs)])
-                                                                           (if #f ; keep-names?
+                                                                           (if #t ; keep-names?
                                                                                (cons (car lam)
                                                                                      (cons (car (cdr lam))
                                                                                            (cons (symbol->string id)

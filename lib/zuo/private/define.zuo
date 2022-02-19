@@ -1,6 +1,6 @@
 #lang zuo/private/macromod
 
-(require "pair.zuo"
+(require "stx.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
          "list.zuo"
@@ -11,27 +11,27 @@
 
 (define-syntax define-var-or-proc
   (lambda (stx)
-    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
-    (let ([head (cadr stx)])
+    (unless (and (stx-list? stx) (>= (stx-length stx) 3)) (bad-syntax stx))
+    (let ([head (stx-cadr stx)])
       (cond
-        [(syntax? head)
+        [(identifier? head)
          ;; regular define
-         (cons 'define (cdr stx))]
-        [(and (pair? head)
-              (syntax? (car head)))
+         (cons 'define (stx-cdr stx))]
+        [(and (stx-pair? head)
+              (identifier? (stx-car head)))
          ;; procedure shorthand
-         (let* ([name (car head)]
-                [args (cdr head)]
+         (let* ([name (stx-car head)]
+                [args (stx-cdr head)]
                 [arg-names (let loop ([args args])
                              (cond
-                               [(syntax? args) ; rest arg
+                               [(identifier? args) ; rest arg
                                 (list args)]
-                               [(pair? args)
-                                (unless (syntax? (car args))
+                               [(stx-pair? args)
+                                (unless (identifier? (car args))
                                   (syntax-error "define: bad argument" (car args)))
-                                (cons (car args) (loop (cdr args)))]
+                                (cons (stx-car args) (loop (stx-cdr args)))]
                                [(null? args) '()]
                                [else (bad-syntax stx)]))])
            (check-duplicates arg-names)
-           (list 'define name (list* 'lambda args (cddr stx))))]
+           (list 'define name (list* 'lambda args (stx-cddr stx))))]
         [else (bad-syntax stx)]))))

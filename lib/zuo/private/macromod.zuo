@@ -42,12 +42,6 @@
                                       (or (f (car vs)) (ormap (cdr vs)))))])
                   (ormap vs)))]
 
-       [syntax-tag (string->uninterned-symbol "syntax")]
-       [syntax (lambda (id scopes) (opaque syntax-tag (cons id scopes)))]
-       [syntax? (lambda (v) (and (opaque-ref syntax-tag v #f) #t))]
-       [syntax-e (lambda (v) (car (or (opaque-ref syntax-tag v #f)
-                                      (error "syntax-e: not a syntax object" v))))]
-       [syntax-scopes (lambda (v) (cdr (opaque-ref syntax-tag v #f)))]
        [make-scope (lambda (name) (string->uninterned-symbol name))]
        [set-add (lambda (ht v) (hash-set ht v #t))]
        [set-remove hash-remove]
@@ -56,50 +50,153 @@
                      (if (eq? ht ht2)
                          (hash-set ht v #t)
                          ht2)))]
+       [scope-set=? (lambda (sc1 sc2)
+                      (and (hash-keys-subset? sc1 sc2)
+                           (hash-keys-subset? sc2 sc1)))]
 
-       [identifier? (lambda (v) (and (opaque-ref opaque-tag v #f) #t))]
+       [empty-prop (hash)]
+       [prop-add (lambda (prop s) (hash-set prop s 'add))]
+       [prop-remove (lambda (prop s) (hash-set prop s 'remove))]
+       [prop-flip (lambda (prop s)
+                    (let ([v (hash-ref prop s #f)])
+                      (cond
+                        [(not v) (hash-set prop s 'flip)]
+                        [(eq? v 'flip) (hash-remove prop s)]
+                        [(eq? v 'add) (hash-set prop s 'remove)]
+                        [else (hash-set prop s 'add)])))]
+
+       [syntax-tag (string->uninterned-symbol "syntax")]
+       [identifier (lambda (id scopes) (opaque syntax-tag (cons id scopes)))]
+       [lazy-prop-pair (lambda (vec) (opaque syntax-tag vec))]
+
+       [syntax? (lambda (v) (and (opaque-ref syntax-tag v #f) #t))]
+       [identifier? (lambda (v) (symbol? (car (opaque-ref syntax-tag v '(#f . #f)))))]
+       [lazy-prop-pair? (lambda (v) (pair? (car (opaque-ref syntax-tag v '(#f . #f)))))]
+       [identifier-e (lambda (v) (car (opaque-ref syntax-tag v #f)))]
+       [identifier-scopes (lambda (v) (cdr (opaque-ref syntax-tag v #f)))]
+       [syntax-raw-content (lambda (v) (opaque-ref syntax-tag v #f))] ; returns # for non-syntaz
 
        [datum->syntax (letrec ([datum->syntax (lambda (ctx v)
                                                 (cond
                                                   [(syntax? v) v]
-                                                  [(symbol? v) (syntax v (syntax-scopes ctx))]
+                                                  [(symbol? v) (identifier v (identifier-scopes ctx))]
                                                   [(pair? v) (cons (datum->syntax ctx (car v))
                                                                    (datum->syntax ctx (cdr v)))]
                                                   [else v]))])
                         datum->syntax)]
        [syntax->datum (letrec ([syntax->datum (lambda (s)
                                                 (cond
-                                                  [(syntax? s) (syntax-e s)]
+                                                  [(identifier? s) (identifier-e s)]
+                                                  [(lazy-prop-pair? s) (syntax->datum (car (syntax-raw-content s)))]
                                                   [(pair? s) (cons (syntax->datum (car s))
                                                                    (syntax->datum (cdr s)))]
                                                   [else s]))])
                         syntax->datum)]
 
-       [adjust-scope (letrec ([adjust-scope (lambda (s scope op)
-                                              (cond
-                                                [(syntax? s) (syntax (syntax-e s)
-                                                                     (op (syntax-scopes s) scope))]
-                                                [(pair? s) (cons (adjust-scope (car s) scope op)
-                                                                 (adjust-scope (cdr s) scope op))]
-                                                [else s]))])
-                       adjust-scope)]
-       [add-scope (lambda (s scope) (adjust-scope s scope set-add))]
-       [flip-scope (lambda (s scope) (adjust-scope s scope set-flip))]
-       [scope-set=? (lambda (sc1 sc2)
-                      (and (hash-keys-subset? sc1 sc2)
-                           (hash-keys-subset? sc2 sc1)))]
+       [adjust-scope (lambda (s scope op prop-op)
+                       (cond
+                         [(pair? s) (lazy-prop-pair (cons s (prop-op empty-prop scope)))]
+                         [else (let* ([c (syntax-raw-content s)])
+                                 (if c
+                                     (let ([a (car c)])
+                                       (if (symbol? a)
+                                           (identifier a (op (cdr c) scope))
+                                           (lazy-prop-pair (cons (car c)
+                                                                 (prop-op (cdr c) scope)))))
+                                     s))]))]
+       [add-scope (lambda (s scope) (adjust-scope s scope set-add prop-add))]
+       [remove-scope (lambda (s scope) (adjust-scope s scope set-remove prop-remove))]
+       [flip-scope (lambda (s scope) (adjust-scope s scope set-flip prop-flip))]
+
+       [apply-prop (lambda (prop s)
+                     (cond
+                       [(pair? s) (lazy-prop-pair (cons s prop))]
+                       [else (foldl (lambda (scope s)
+                                      (let ([op (hash-ref prop scope #f)])
+                                        (cond
+                                          [(eq? op 'add) (add-scope s scope)]
+                                          [(eq? op 'remove) (remove-scope s scope)]
+                                          [else (flip-scope s scope)])))
+                                    s
+                                    (hash-keys prop))]))]
+
+       [syntax-e (lambda (s) (let ([c (syntax-raw-content s)])
+                               (if c
+                                   (let ([a (car c)])
+                                     (if (symbol? a)
+                                         a
+                                         (let ([prop (cdr c)])
+                                           (cons (apply-prop prop (car a))
+                                                 (apply-prop prop (cdr a))))))
+                                   s)))]
+
+       [stx-pair? (lambda (p) (or (pair? p) (lazy-prop-pair? p)))]
+       [stx-car (lambda (p) (if (pair? p)
+                                (car p)
+                                (let ([c (syntax-raw-content p)])
+                                  (if (and c (pair? (car c)))
+                                      (apply-prop (cdr c) (car (car c)))
+                                      (error "stx-car: not a syntax pair" p)))))]
+       [stx-cdr (lambda (p) (if (pair? p)
+                                (cdr p)
+                                (let ([c (syntax-raw-content p)])
+                                  (if (and c (pair? (car c)))
+                                      (apply-prop (cdr c) (cdr (car c)))
+                                      (error "stx-cdr: not a syntax pair" p)))))]
+       [stx-list? (letrec ([stx-list?
+                            (lambda (p)
+                              (cond
+                                [(null? p) #t]
+                                [(pair? p) (stx-list? (cdr p))]
+                                [else (let ([c (syntax-raw-content p)])
+                                        (and c
+                                             (let ([pr (car c)])
+                                               (and (pair? pr) (stx-list? (cdr pr))))))]))])
+                    stx-list?)]
+       [stx->list (letrec ([stx->list
+                            (lambda (p)
+                              (cond
+                                [(null? p) '()]
+                                [(pair? p) (let ([r (stx->list (cdr p))])
+                                             (and r (cons (car p) r)))]
+                                [else (let ([c (syntax-raw-content p)])
+                                        (and c
+                                             (let* ([a (car c)])
+                                               (and (pair? a)
+                                                    (let* ([prop (cdr c)]
+                                                           [r (stx->list (apply-prop prop (cdr a)))])
+                                                      (and r (cons (apply-prop prop (car a))
+                                                                   r)))))))]))])
+                    stx->list)]
+       [stx-length (letrec ([stx-length
+                             (lambda (p)
+                               (cond
+                                 [(null? p) 0]
+                                 [(pair? p) (+ 1 (stx-length (cdr p)))]
+                                 [else (let ([c (syntax-raw-content p)])
+                                         (if c
+                                             (let ([a (car c)])
+                                               (if (pair? a)
+                                                   (+ 1 (stx-length (cdr a)))
+                                                   0))
+                                             0))]))])
+                     stx-length)]
+       [stx-caar (lambda (p) (stx-car (stx-car p)))]
+       [stx-cadr (lambda (p) (stx-car (stx-cdr p)))]
+       [stx-cdar (lambda (p) (stx-cdr (stx-car p)))]
+       [stx-cddr (lambda (p) (stx-cdr (stx-cdr p)))]
 
        [add-binding* (lambda (binds id binding)
-                       (let* ([sym (syntax-e id)]
-                              [sc (syntax-scopes id)]
+                       (let* ([sym (identifier-e id)]
+                              [sc (identifier-scopes id)]
                               [sym-binds (hash-ref binds sym (hash))]
                               [k-scope (car (hash-keys sc))] ; relying on deterministic order
                               [sc+bs (hash-ref sym-binds k-scope '())]
                               [sym-binds (hash-set sym-binds k-scope (cons (cons sc binding) sc+bs))])
                          (hash-set binds sym sym-binds)))]
        [find-all-matching-bindings (lambda (binds id)
-                                     (let* ([sym (syntax-e id)]
-                                            [id-sc (syntax-scopes id)]
+                                     (let* ([sym (identifier-e id)]
+                                            [id-sc (identifier-scopes id)]
                                             [sym-binds (hash-ref binds sym #f)])
                                        (if (not sym-binds)
                                            '()
@@ -117,7 +214,7 @@
                             (map (lambda (sc+b)
                                    (unless (hash-keys-subset? (car sc+b)
                                                               (car max-sc+b))
-                                     (error "ambiguous" (syntax-e id))))
+                                     (error "ambiguous" (identifier-e id))))
                                  candidate-sc+bs))]
        [resolve* (lambda (binds id)
                    (let* ([candidate-sc+bs (find-all-matching-bindings binds id)])
@@ -173,8 +270,8 @@
                                      (eq? a b)
                                      (string=? a b)))]
        [call-with-nominal (lambda (state mod-path default-ids k)
-                            (let* ([mod-path (if (syntax? mod-path)
-                                                 (syntax-e mod-path)
+                            (let* ([mod-path (if (identifier? mod-path)
+                                                 (identifier-e mod-path)
                                                  mod-path)]
                                    [fronted
                                     (letrec ([assoc-to-front
@@ -190,6 +287,10 @@
                                    (let* ([new-noms (cons (cons (caar fronted) new-sym+bs)
                                                           (cdr fronted))])
                                      (state-set-nominals state new-noms))))))]
+       [init-nominal (lambda (state mod-path)
+                       (call-with-nominal state mod-path '()
+                                          (lambda (sym+binds install)
+                                            (install sym+binds))))]
        [record-nominal (lambda (state mod-path sym bind)
                          (call-with-nominal state mod-path '()
                                             (lambda (sym+binds install)
@@ -217,10 +318,12 @@
                              (list (cons mod-path sym+bs))))]
 
        [bound-identifier=? (lambda (id1 id2)
-                             (and (eq? (syntax-e id1) (syntax-e id2))
-                                  (scope-set=? (syntax-scopes id1)
-                                               (syntax-scopes id2))))]
-       [id-sym-eq? (lambda (id sym) (and (syntax? id) (eq? (syntax-e id) sym)))]
+                             (unless (identifier? id1) (error "bound-identifier?: not an identifier" id1))
+                             (unless (identifier? id2) (error "bound-identifier?: not an identifier" id2))
+                             (and (eq? (identifier-e id1) (identifier-e id2))
+                                  (scope-set=? (identifier-scopes id1)
+                                               (identifier-scopes id2))))]
+       [id-sym-eq? (lambda (id sym) (and (identifier? id) (eq? (identifier-e id) sym)))]
 
        ;; simple transparent structs
        [make-maker (lambda (tag) (lambda (v) (cons tag v)))]
@@ -285,7 +388,7 @@
                       (or (specific=? bind1 bind2)
                           (and (not bind1)
                                (not bind2)
-                               (eq? (syntax-e id1) (syntax-e id2))))))]
+                               (eq? (identifier-e id1) (identifier-e id2))))))]
 
        [core-sc (hash 'core #t)]
        [make-core-initial-bind (lambda (bind) (hash 'core (list (cons core-sc (as-specific (make-initial-import bind))))))]
@@ -308,7 +411,13 @@
                                        quote-syntax))]
        [top-binds (let* ([binds top-form-binds]
                          [add (lambda (binds name val) (hash-set binds name (make-core-initial-bind val)))]
-                         [binds (add binds 'syntax? syntax?)]
+                         [binds (add binds 'identifier? identifier?)]
+                         [binds (add binds 'stx-pair? stx-pair?)]
+                         [binds (add binds 'stx-car stx-car)]
+                         [binds (add binds 'stx-cdr stx-cdr)]
+                         [binds (add binds 'stx-list? stx-list?)]
+                         [binds (add binds 'stx->list stx->list)]
+                         [binds (add binds 'stx-length stx-length)]
                          [binds (add binds 'syntax-e syntax-e)]
                          [binds (add binds 'syntax->datum syntax->datum)]
                          [binds (add binds 'datum->syntax datum->syntax)]
@@ -342,17 +451,17 @@
                                     bind)))]
 
        [gensym (lambda (sym) (string->uninterned-symbol (symbol->string sym)))]
-       [maybe-begin (lambda (d) (if (null? (cdr d)) (car d) (cons (syntax 'begin core-sc) d)))]
+       [maybe-begin (lambda (d) (if (null? (stx-cdr d)) (stx-car d) (cons (identifier 'begin core-sc) d)))]
        [name-lambda (lambda (form id)
                       (if (and (pair? form)
                                (eq? (car form) 'lambda))
                           ;; `zuo/kernel` recognizes this pattern to name the form
-                          `(lambda ,(cadr form) ,(symbol->string (syntax-e id)) ,(cadr (cdr form)))
+                          `(lambda ,(cadr form) ,(symbol->string (identifier-e id)) ,(cadr (cdr form)))
                           form))]
 
        [syntax-error (lambda (msg s) (error (~a msg ": " (~s (syntax->datum s)))))]
        [bad-syntax (lambda (s) (syntax-error "bad syntax" s))]
-       [duplicate-identifier (lambda (id s) (error "duplicate identifier" (syntax-e id) (syntax-e s)))]
+       [duplicate-identifier (lambda (id s) (error "duplicate identifier:" (identifier-e id) (syntax->datum s)))]
 
        [apply-macro (lambda (m s ctx state k)
                       (let* ([apply-macro
@@ -376,34 +485,34 @@
                              (apply-macro proc ctx (merge-binds state key m-binds)))])))]
 
        [expand-define (lambda (s state k)
-                        (unless (and (list? s) (= 3 (length s)) (syntax? (cadr s)))
+                        (unless (and (stx-list? s) (= 3 (stx-length s)) (identifier? (stx-cadr s)))
                           (bad-syntax s))
-                        (let* ([id (cadr s)]
+                        (let* ([id (stx-cadr s)]
                                [id-bind (resolve state id)])
                           (when (or (defined? id-bind)
                                     (defined-macro? id-bind))
                             (syntax-error "duplicate definition" id))
-                          (let* ([sym (syntax-e id)]
+                          (let* ([sym (identifier-e id)]
                                  [def-id (gensym sym)]
                                  [var (variable sym)]
                                  [new-state (add-binding state id (as-specific (make-defined var)))]
-                                 [new-s `(,variable-set! ,var (,name-lambda ,(cadr (cdr s)) ,id))])
+                                 [new-s `(,variable-set! ,var (,name-lambda ,(stx-cadr (stx-cdr s)) ,id))])
                             (k new-s new-state))))]
 
        [expand-define-syntax (lambda (s state parse)
-                               (unless (and (list? s) (= 3 (length s)) (syntax? (cadr s)))
+                               (unless (and (stx-list? s) (= 3 (stx-length s)) (identifier? (stx-cadr s)))
                                  (bad-syntax s))
-                               (let* ([id (cadr s)]
+                               (let* ([id (stx-cadr s)]
                                       [id-bind (resolve state id)])
                                  (when (or (defined? id-bind)
                                            (defined-macro? id-bind))
                                    (syntax-error "duplicate definition" id))
-                                 (let* ([e (parse (cadr (cdr s)) state)]
+                                 (let* ([e (parse (stx-cadr (stx-cdr s)) state)]
                                         [proc (eval (name-lambda e id))])
                                    (add-binding state id (as-specific (make-defined-macro proc))))))]
 
        [expand-provide (lambda (s state provides mod-path)
-                         (unless (list? s) (bad-syntax s))
+                         (unless (stx-list? s) (bad-syntax s))
                          (foldl (lambda (p provides)
                                   (let* ([add-provide (lambda (provides id as-sym)
                                                         (let* ([old-id (hash-ref provides as-sym #f)])
@@ -413,27 +522,27 @@
                                                           (hash-set provides as-sym id)))]
                                          [bad-provide-form (lambda () (syntax-error "bad provide clause" p))])
                                     (cond
-                                      [(syntax? p) (add-provide provides p (syntax-e p))]
-                                      [(pair? p)
-                                       (unless (list? p) (bad-provide-form))
-                                       (let ([form (car p)])
+                                      [(identifier? p) (add-provide provides p (identifier-e p))]
+                                      [(stx-pair? p)
+                                       (unless (stx-list? p) (bad-provide-form))
+                                       (let ([form (stx-car p)])
                                          (cond
                                            [(id-sym-eq? form 'rename-out)
                                             (foldl (lambda (rn provides)
-                                                     (unless (and (list? rn) (= 2 (length rn))
-                                                                  (syntax? (car rn)) (syntax? (cadr rn)))
+                                                     (unless (and (stx-list? rn) (= 2 (stx-length rn))
+                                                                  (identifier? (stx-car rn)) (identifier? (stx-cadr rn)))
                                                        (bad-provide-form))
-                                                     (add-provide provides (car rn) (syntax-e (cadr rn))))
+                                                     (add-provide provides (stx-car rn) (identifier-e (stx-cadr rn))))
                                                    provides
-                                                   (cdr p))]
+                                                   (stx->list (stx-cdr p)))]
                                            [(id-sym-eq? form 'all-from-out)
                                             (foldl (lambda (req-path provides)
-                                                     (let* ([prov-sc (syntax-scopes (car s))]
+                                                     (let* ([prov-sc (identifier-scopes (stx-car s))]
                                                             [sym+binds (lookup-nominal state req-path)])
                                                        (unless sym+binds (syntax-error "module not required" req-path))
                                                        (foldl (lambda (sym+bind provides)
                                                                 (let* ([sym (car sym+bind)]
-                                                                       [id (syntax sym prov-sc)]
+                                                                       [id (identifier sym prov-sc)]
                                                                        [bind (resolve* (state-binds state) id)])
                                                                   (cond
                                                                     [(not (specific=? bind (cdr sym+bind)))
@@ -444,23 +553,23 @@
                                                               provides
                                                               sym+binds)))
                                                    provides
-                                                   (cdr p))]
+                                                   (stx->list (stx-cdr p)))]
                                            [else (bad-provide-form)]))]
                                       [else (bad-provide-form)])))
                                 provides
-                                (cdr s)))]
+                                (stx->list (stx-cdr s))))]
        [expand-require (lambda (s state mod-path)
                          (let* ([check-renames
                                  ;; syntax check on renaming clauses `ns`
                                  (lambda (r ns id-ok?)
                                    (map (lambda (n) (unless (or (and id-ok?
-                                                                     (syntax? n))
-                                                                (and (list? n)
-                                                                     (= 2 (length n))
-                                                                     (syntax? (car n))
-                                                                     (syntax? (cadr n))))
+                                                                     (identifier? n))
+                                                                (and (stx-list? n)
+                                                                     (= 2 (stx-length n))
+                                                                     (identifier? (stx-car n))
+                                                                     (identifier? (stx-cadr n))))
                                                       (bad-syntax r)))
-                                        ns))]
+                                        (stx->list ns)))]
                                 [make-rename-filter
                                  ;; used to apply `ns` renaming clauses to an imported identifier
                                  (lambda (ns only?)
@@ -468,11 +577,11 @@
                                      (letrec ([loop (lambda (ns)
                                                       (cond
                                                         [(null? ns) (if only? #f sym)]
-                                                        [(id-sym-eq? (car ns) sym) sym]
-                                                        [(and (pair? (car ns))
-                                                              (id-sym-eq? (caar ns) sym))
-                                                         (syntax-e (cadr (car ns)))]
-                                                        [else (loop (cdr ns))]))])
+                                                        [(id-sym-eq? (stx-car ns) sym) sym]
+                                                        [(and (stx-pair? (stx-car ns))
+                                                              (id-sym-eq? (stx-caar ns) sym))
+                                                         (syntax-e (stx-cadr (stx-car ns)))]
+                                                        [else (loop (stx-cdr ns))]))])
                                        (loop ns))))]
                                 [make-provides-checker
                                  ;; used to check whether set of provided is consistent with `ns`
@@ -480,26 +589,26 @@
                                    (lambda (provides)
                                      (map (lambda (n)
                                             (let ([id (if (pair? n) (car n) n)])
-                                              (unless (hash-ref provides (syntax-e id) #f)
+                                              (unless (hash-ref provides (identifier-e id) #f)
                                                 (syntax-error "identifier is not in required set" id))))
-                                          ns)))])
+                                          (stx->list ns))))])
                            ;; parse each `require` clause `r:
                            (foldl (lambda (r state)
-                                    (let* ([req-sc (syntax-scopes (car s))]
+                                    (let* ([req-sc (identifier-scopes (stx-car s))]
                                            [req-path+filter+check
                                             (cond
                                               [(string? r) (list r (lambda (sym) sym) void)]
-                                              [(syntax? r) (list (syntax-e r) (lambda (sym) sym) void)]
-                                              [(pair? r)
-                                               (unless (and (list? r) (pair? (cdr r))) (bad-syntax r))
-                                               (let* ([ns (cddr r)])
+                                              [(identifier? r) (list (identifier-e r) (lambda (sym) sym) void)]
+                                              [(stx-pair? r)
+                                               (unless (and (stx-list? r) (stx-pair? (stx-cdr r))) (bad-syntax r))
+                                               (let* ([ns (stx-cddr r)])
                                                  (cond
-                                                   [(id-sym-eq? (car r) 'only-in)
+                                                   [(id-sym-eq? (stx-car r) 'only-in)
                                                     (check-renames r ns #t)
-                                                    (list (cadr r) (make-rename-filter ns #t) (make-provides-checker ns))]
-                                                   [(id-sym-eq? (car r) 'rename-in)
+                                                    (list (stx-cadr r) (make-rename-filter ns #t) (make-provides-checker ns))]
+                                                   [(id-sym-eq? (stx-car r) 'rename-in)
                                                     (check-renames r ns #f)
-                                                    (list (cadr r) (make-rename-filter ns #f) (make-provides-checker ns))]
+                                                    (list (stx-cadr r) (make-rename-filter ns #f) (make-provides-checker ns))]
                                                    [else (bad-syntax r)]))]
                                               [else (bad-syntax r)])]
                                            [req-path (car req-path+filter+check)]
@@ -509,7 +618,8 @@
                                                             (path->complete-path req-path (car (split-path mod-path)))
                                                             (syntax->datum req-path))]
                                            [mod (dynamic-require in-mod-path)]
-                                           [provides (hash-ref mod 'macromod-provides #f)])
+                                           [provides (hash-ref mod 'macromod-provides #f)]
+                                           [state (init-nominal state req-path)])
                                       (unless provides (syntax-error "not a compatible module" r))
                                       (check provides)
                                       ;; add each provided binding (except as filtered)
@@ -519,7 +629,7 @@
                                                    [(not as-sym) state]
                                                    [else
                                                     ;; check whether it's bound already
-                                                    (let* ([as-id (syntax as-sym req-sc)]
+                                                    (let* ([as-id (identifier as-sym req-sc)]
                                                            [current-bind (resolve* (state-binds state) as-id)]
                                                            [req-bind (hash-ref provides sym #f)]
                                                            [add-binding/record-nominal
@@ -545,7 +655,7 @@
                                              state
                                              (hash-keys provides))))
                                   state
-                                  (cdr s))))]
+                                  (stx->list (stx-cdr s)))))]
 
        [expand-top-sequence
         ;; expand top-level forms and gather imports and definitions
@@ -555,11 +665,11 @@
                       (cond
                         [(null? es) (list (reverse accum) state provides)]
                         [else
-                         (let* ([s (car es)])
+                         (let* ([s (stx-car es)])
                            (cond
-                             [(pair? s)
-                              (let* ([rator (car s)]
-                                     [bind (and (syntax? rator)
+                             [(stx-pair? s)
+                              (let* ([rator (stx-car s)]
+                                     [bind (and (identifier? rator)
                                                 (resolve state rator))])
                                 (cond
                                   [(macro? bind)
@@ -570,8 +680,8 @@
                                    (let ([bind (form-id bind)])
                                      (cond
                                        [(eq? bind 'begin)
-                                        (unless (list? s) (bad-syntax s))
-                                        (expand-top (append (cdr s) (cdr es)) accum state provides)]
+                                        (unless (stx-list? s) (bad-syntax s))
+                                        (expand-top (append (stx->list (stx-cdr s)) (cdr es)) accum state provides)]
                                        [(eq? bind 'define)
                                         (expand-define s
                                                        state
@@ -593,36 +703,36 @@
             (expand-top es '() state (hash))))]
 
        [parse-lambda (lambda (s state parse)
-                       (unless (>= (length s) 3) (bad-syntax s))
-                       (let* ([formals (cadr s)]
+                       (unless (>= (stx-length s) 3) (bad-syntax s))
+                       (let* ([formals (stx-cadr s)]
                               [new-formals (letrec ([reformal (lambda (f seen)
                                                                 (cond
                                                                   [(null? f) '()]
-                                                                  [(syntax? f)
+                                                                  [(identifier? f)
                                                                    (when (ormap (lambda (sn) (bound-identifier=? f sn)) seen)
                                                                      (duplicate-identifier f s))
                                                                    (gensym (syntax-e f))]
-                                                                  [(pair? f)
-                                                                   (let* ([a (car f)])
-                                                                     (unless (syntax? a) (bad-syntax s))
+                                                                  [(stx-pair? f)
+                                                                   (let* ([a (stx-car f)])
+                                                                     (unless (identifier? a) (bad-syntax s))
                                                                      (cons (reformal a seen)
-                                                                           (reformal (cdr f) (cons a seen))))]
+                                                                           (reformal (stx-cdr f) (cons a seen))))]
                                                                   [else (bad-syntax s)]))])
                                              (reformal formals '()))]
                               [new-scope (make-scope "lambda")]
                               [state (letrec ([add-formals (lambda (state formals new-formals)
                                                              (cond
-                                                               [(syntax? formals)
+                                                               [(identifier? formals)
                                                                 (let* ([id (add-scope formals new-scope)])
                                                                   (add-binding state id (make-local new-formals)))]
-                                                               [(pair? formals)
-                                                                (add-formals (add-formals state (cdr formals) (cdr new-formals))
-                                                                             (car formals)
+                                                               [(pair? new-formals)
+                                                                (add-formals (add-formals state (stx-cdr formals) (cdr new-formals))
+                                                                             (stx-car formals)
                                                                              (car new-formals))]
                                                                [else state]))])
                                        (add-formals state formals new-formals))])
                          `(lambda ,new-formals
-                            ,(parse (maybe-begin (add-scope (cddr s) new-scope)) state))))]
+                            ,(parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state))))]
 
        [nest-bindings (lambda (new-cls body)
                         (letrec ([nest-bindings (lambda (new-cls)
@@ -632,29 +742,28 @@
                                                          ,(nest-bindings (cdr new-cls)))))])
                           (nest-bindings (reverse new-cls))))]
        [parse-let (lambda (s state parse)
-                    (unless (>= (length s) 3) (bad-syntax s))
-                    (let* ([cls (cadr s)]
+                    (unless (>= (stx-length s) 3) (bad-syntax s))
+                    (let* ([cls (stx-cadr s)]
                            [orig-state state]
                            [new-scope (make-scope "let")])
-                      (unless (list? cls) (bad-syntax s))
+                      (unless (stx-list? cls) (bad-syntax s))
                       (letrec ([parse-clauses
                                 (lambda (cls new-cls state seen)
                                   (cond
                                     [(null? cls)
                                      (nest-bindings (reverse new-cls)
-                                                    (parse (maybe-begin (add-scope (cddr s) new-scope)) state))]
+                                                    (parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state))]
                                     [else
-                                     (let* ([cl (car cls)])
-                                       (unless (list? cl) (bad-syntax s))
-                                       (unless (= 2 (length cl)) (bad-syntax s))
-                                       (let* ([id (car cl)])
-                                         (unless (syntax? id) (bad-syntax s))
+                                     (let* ([cl (stx-car cls)])
+                                       (unless (and (stx-list? cl) (= 2 (stx-length cl))) (bad-syntax s))
+                                       (let* ([id (stx-car cl)])
+                                         (unless (identifier? id) (bad-syntax s))
                                          (when (ormap (lambda (sn) (bound-identifier=? id sn)) seen)
                                            (duplicate-identifier id s))
-                                         (let* ([new-id (gensym (syntax-e id))])
-                                           (parse-clauses (cdr cls)
+                                         (let* ([new-id (gensym (identifier-e id))])
+                                           (parse-clauses (stx-cdr cls)
                                                           (cons (list new-id (name-lambda
-                                                                              (parse (cadr cl) orig-state)
+                                                                              (parse (stx-cadr cl) orig-state)
                                                                               id))
                                                                 new-cls)
                                                           (add-binding state (add-scope id new-scope) (make-local new-id))
@@ -662,11 +771,11 @@
                         (parse-clauses cls '() state '()))))]
 
        [parse-letrec (lambda (s state parse)
-                       (unless (>= (length s) 3) (bad-syntax s))
-                       (let* ([cls (cadr s)]
+                       (unless (>= (stx-length s) 3) (bad-syntax s))
+                       (let* ([cls (stx-cadr s)]
                               [orig-state state]
                               [new-scope (make-scope "letrec")])
-                         (unless (list? cls) (bad-syntax s))
+                         (unless (stx-list? cls) (bad-syntax s))
                          ;; use mutable variables to tie knots
                          (letrec ([bind-all (lambda (x-cls new-ids state seen)
                                               (cond
@@ -679,22 +788,21 @@
                                                      (begin . ,(map2 (lambda (cl new-id)
                                                                        `(,variable-set! ,(car new-ids)
                                                                                         ,(name-lambda
-                                                                                          (let ([rhs (cadr (car cls))])
+                                                                                          (let ([rhs (stx-cadr (stx-car cls))])
                                                                                             (parse (add-scope rhs new-scope) state))
-                                                                                          (caar cls))))
-                                                                     cls
+                                                                                          (stx-caar cls))))
+                                                                     (stx->list cls)
                                                                      (reverse new-ids)))
-                                                     ,(parse (maybe-begin (add-scope (cddr s) new-scope)) state)))]
+                                                     ,(parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state)))]
                                                 [else
-                                                 (let* ([cl (car x-cls)])
-                                                   (unless (list? cl) (bad-syntax s))
-                                                   (unless (= 2 (length cl)) (bad-syntax s))
-                                                   (let* ([id (car cl)])
-                                                     (unless (syntax? id) (bad-syntax s))
+                                                 (let* ([cl (stx-car x-cls)])
+                                                   (unless (and (stx-list? cl) (= 2 (stx-length cl))) (bad-syntax s))
+                                                   (let* ([id (stx-car cl)])
+                                                     (unless (identifier? id) (bad-syntax s))
                                                      (when (ormap (lambda (sn) (bound-identifier=? id sn)) seen)
                                                        (duplicate-identifier id s))
-                                                     (let ([new-id (gensym (syntax-e id))])
-                                                       (bind-all (cdr x-cls)
+                                                     (let ([new-id (gensym (identifier-e id))])
+                                                       (bind-all (stx-cdr x-cls)
                                                                  (cons new-id new-ids)
                                                                  (add-binding state (add-scope id new-scope) (make-local-variable new-id))
                                                                  (cons id seen)))))]))])
@@ -705,9 +813,9 @@
           (letrec ([parse
                     (lambda (s state)
                       (cond
-                        [(pair? s)
-                         (let* ([rator (car s)]
-                                [bind (and (syntax? rator)
+                        [(stx-pair? s)
+                         (let* ([rator (stx-car s)]
+                                [bind (and (identifier? rator)
                                            (resolve state rator))])
                            (cond
                              [(macro? bind)
@@ -715,7 +823,7 @@
                                            (lambda (new-s new-state)
                                              (parse new-s new-state)))]
                              [(core-form? bind)
-                              (unless (list? s) (bad-syntax s))
+                              (unless (stx-list? s) (bad-syntax s))
                               (let ([bind (form-id bind)])
                                 (cond
                                   [(eq? bind 'lambda)
@@ -725,26 +833,28 @@
                                   [(eq? bind 'letrec)
                                    (parse-letrec s state parse)]
                                   [(eq? bind 'quote)
-                                   (unless (= 2 (length s)) (bad-syntax s))
-                                   `(quote ,(syntax->datum (cadr s)))]
+                                   (unless (= 2 (stx-length s)) (bad-syntax s))
+                                   `(quote ,(syntax->datum (stx-cadr s)))]
                                   [(eq? bind 'quote-syntax)
-                                   (unless (= 2 (length s)) (bad-syntax s))
-                                   `(quote ,(cadr s))]
+                                   (unless (= 2 (stx-length s)) (bad-syntax s))
+                                   `(quote ,(stx-cadr s))]
                                   [(eq? bind 'if)
-                                   (unless (= 4 (length s)) (bad-syntax s))
-                                   `(if ,(parse (cadr s) state) ,(parse (cadr (cdr s)) state) ,(parse (cadr (cddr s)) state))]
+                                   (unless (= 4 (stx-length s)) (bad-syntax s))
+                                   `(if ,(parse (stx-cadr s) state)
+                                        ,(parse (stx-cadr (stx-cdr s)) state)
+                                        ,(parse (stx-cadr (stx-cddr s)) state))]
                                   [(eq? bind 'begin)
-                                   (unless (pair? (cdr s)) (bad-syntax s))
-                                   (let ([es (map (lambda (e) (parse e state)) (cdr s))])
+                                   (unless (stx-pair? (stx-cdr s)) (bad-syntax s))
+                                   (let ([es (map (lambda (e) (parse e state)) (stx->list (stx-cdr s)))])
                                      (if (null? (cdr es))
                                          (car es)
                                          (cons 'begin es)))]
                                   [else
-                                   (map (lambda (e) (parse e state)) s)]))]
+                                   (map (lambda (e) (parse e state)) (stx->list s))]))]
                              [(eq? rator name-lambda) ; form created by `define` to propagate name
-                              (name-lambda (parse (cadr s) state) (cadr (cdr s)))]
-                             [else (map (lambda (e) (parse e state)) s)]))]
-                        [(syntax? s)
+                              (name-lambda (parse (stx-cadr s) state) (stx-cadr (stx-cdr s)))]
+                             [else (map (lambda (e) (parse e state)) (stx->list s))]))]
+                        [(identifier? s)
                          (let* ([bind (resolve state s)])
                            (cond
                              [(core-form? bind) (bad-syntax s)]
@@ -766,8 +876,8 @@
           (lambda (str start mod-path)
             (let* ([es (read-from-string-all (substring str start (string-length str)))]
                    [mod-scope (make-scope "module")]
-                   [ctx (syntax 'module (set-add core-sc mod-scope))]
-                   [es (datum->syntax ctx es)]
+                   [ctx (identifier 'module (set-add core-sc mod-scope))]
+                   [es (map (lambda (e) (datum->syntax ctx e)) es)]
                    [parse (make-parse ctx)]
                    [initial-state (make-initial-state ctx)]
                    [es+state+provides (expand-top-sequence es initial-state mod-path ctx parse)]

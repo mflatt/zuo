@@ -1,0 +1,46 @@
+#lang zuo/private/macromod
+
+(provide stx-caar
+         stx-cadr
+         stx-cdar
+         stx-cddr)
+
+(define bad
+  (lambda (who v)
+    (error (~a who ": not a valid argument") v)))
+
+(define stx-caar
+  (lambda (v)
+    (if (stx-pair? v)
+        (let ([a (stx-car v)])
+          (if (stx-pair? a)
+              (stx-car a)
+              (bad 'stx-caar v)))
+        (bad 'stx-caar v))))
+
+(define stx-cadr
+  (lambda (v)
+    (if (stx-pair? v)
+        (let ([d (stx-cdr v)])
+          (if (stx-pair? d)
+              (stx-car d)
+              (bad 'stx-cadr v)))
+        (bad 'stx-cadr v))))
+
+(define stx-cdar
+  (lambda (v)
+    (if (stx-pair? v)
+        (let ([a (stx-cdr v)])
+          (if (stx-pair? a)
+              (stx-cdr a)
+              (bad 'stx-cdar v)))
+        (bad 'stx-cdar v))))
+
+(define stx-cddr
+  (lambda (v)
+    (if (stx-pair? v)
+        (let ([d (stx-cdr v)])
+          (if (stx-pair? d)
+              (stx-cdr d)
+              (bad 'stx-cddr v)))
+        (bad 'stx-cddr v))))

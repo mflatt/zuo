@@ -1,6 +1,6 @@
 #lang zuo/private/macromod
 
-(require "pair.zuo"
+(require "stx.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
          "list.zuo"
@@ -12,44 +12,49 @@
 (define-syntax let-or-named-let
   (lambda (stx)
     (cond
-      [(not (pair? stx)) (bad-syntax stx)]
-      [(and (pair? (cdr stx))
-            (syntax? (cadr stx)))
+      [(not (stx-pair? stx)) (bad-syntax stx)]
+      [(and (stx-pair? (stx-cdr stx))
+            (identifier? (stx-cadr stx)))
        ;; named `let`
-       (unless (and (list? stx) (>= (length stx) 4))
+       (unless (and (stx-list? stx)
+                    (>= (stx-length stx) 4))
          (bad-syntax stx))
-       (let ([name (cadr stx)]
-             [bindings (cadr (cdr stx))])
+       (let ([name (stx-cadr stx)]
+             [bindings (stx->list (stx-cadr (stx-cdr stx)))])
          (for-each (lambda (binding)
-                     (unless (and (list? binding)
-                                  (= 2 (length binding))
-                                  (syntax? (car binding)))
+                     (unless (and (stx-list? binding)
+                                  (= 2 (stx-length binding))
+                                  (identifier? (stx-car binding)))
                        (syntax-error "named let: ill-formed binding" binding)))
                    bindings)
-         (let ([args (map car bindings)]
-               [inits (map cadr bindings)])
+         (let ([args (map stx-car bindings)]
+               [inits (map stx-cadr bindings)])
            (check-duplicates args)
            (cons (list 'letrec
                        (list (list name
                                    (list* 'lambda
                                           args
-                                          (cddr (cdr stx)))))
+                                          (stx-cddr (stx-cdr stx)))))
                        name)
                  inits)))]
-      [else (cons 'let (cdr stx))])))
+      [else (cons 'let (stx-cdr stx))])))
 
 (define-syntax let*
   (lambda (stx)
-    (unless (and (list? stx) (>= (length stx) 3))
+    (unless (and (stx-list? stx) (>= (stx-length stx) 3))
       (bad-syntax stx))
-    (let ([bindings (cadr stx)])
+    (let ([bindings (stx-cadr stx)])
       (for-each (lambda (binding)
-                  (unless (and (list? binding)
-                               (= 2 (length binding))
-                               (syntax? (car binding)))
+                  (unless (and (stx-list? binding)
+                               (= 2 (stx-length binding))
+                               (identifier? (stx-car binding)))
                     (syntax-error "let*: ill-formed binding" binding)))
-                bindings)
-      (if (null? bindings)
-          (cons 'begin (cddr stx))
-          (list 'let (list (car bindings))
-                (list* 'let* (cdr bindings) (cddr stx)))))))
+                (stx->list bindings))
+      (letrec ([nest-bindings
+                (lambda (bindings)
+                  (if (null? bindings)
+                      (cons 'begin (stx-cddr stx))
+                      (list 'let (list (stx-car bindings))
+                            (nest-bindings (stx-cdr bindings)))))])
+        (nest-bindings bindings)))))
+

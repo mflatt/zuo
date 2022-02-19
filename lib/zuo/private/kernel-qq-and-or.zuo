@@ -106,7 +106,7 @@
                                                                     (error "unless: bad syntax" s))
                                                                 (if (eq? (car s) 'lambda)
                                                                     (if (>= (length s) 3)
-                                                                        (let ([keep-names? #f])
+                                                                        (let ([keep-names? #t])
                                                                           (let ([args (car (cdr s))])
                                                                             (let ([body (cdr (cdr s))])
                                                                               (let ([body (convert (maybe-begin body) #f)])
