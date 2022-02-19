@@ -12,32 +12,33 @@
   (lambda (stx)
     (unless (and (list? stx) (= (length stx) 2))
       (bad-syntax stx))
-    (let loop ([s (cadr stx)] [depth 0])
-      (let ([loop-pair (lambda (combine combine-name a d depth)
-                         (let ([a (loop a depth)]
-                               [d (loop d depth)])
-                           (if (and (pair? a)
-                                    (eq? (car a) 'quote)
-                                    (pair? d)
-                                    (eq? (car d) 'quote))
-                               (list 'quote (combine (cadr a) (cadr d)))
-                               (list combine-name a d))))])
-        (cond
-          [(pair? s)
-           (let ([a (car s)])
-             (cond
-               [(and (identifier? a)
-                     (eq? (syntax-e a) 'unquote))
-                (unless (= (length s) 2)
-                  (bad-syntax s))
-                (if (= depth 0)
-                    (cadr s)
-                    (loop-pair list 'list a (cadr s) (- depth 1)))]
-               [(and (identifier? a)
-                     (eq? (syntax-e a) 'quasiquote))
-                (unless (= (length s) 2)
-                  (bad-syntax s))
-                (loop-pair list 'list a (cadr s) (- depth 1))]
-               [else
-                (loop-pair cons 'cons a (cdr s) depth)]))]
-          [else (list 'quote s)])))))
+    (let ([quot (quote-syntax quote)])
+      (let loop ([s (cadr stx)] [depth 0])
+        (let ([loop-pair (lambda (combine combine-name a d depth)
+                           (let ([a (loop a depth)]
+                                 [d (loop d depth)])
+                             (if (and (pair? a)
+                                      (eq? (car a) quot)
+                                      (pair? d)
+                                      (eq? (car d) quot))
+                                 (list quot (combine (cadr a) (cadr d)))
+                                 (list combine-name a d))))])
+          (cond
+            [(pair? s)
+             (let ([a (car s)])
+               (cond
+                 [(and (identifier? a)
+                       (eq? (syntax-e a) 'unquote))
+                  (unless (= (length s) 2)
+                    (bad-syntax s))
+                  (if (= depth 0)
+                      (cadr s)
+                      (loop-pair list 'list a (cadr s) (- depth 1)))]
+                 [(and (identifier? a)
+                       (eq? (syntax-e a) 'quasiquote))
+                  (unless (= (length s) 2)
+                    (bad-syntax s))
+                  (loop-pair list (quote-syntax list) a (cadr s) (- depth 1))]
+                 [else
+                  (loop-pair cons (quote-syntax cons) a (cdr s) depth)]))]
+            [else (list quot s)]))))))

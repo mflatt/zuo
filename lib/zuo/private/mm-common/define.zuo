@@ -16,7 +16,7 @@
       (cond
         [(identifier? head)
          ;; regular define
-         (cons 'define (cdr stx))]
+         (cons (quote-syntax define) (cdr stx))]
         [(and (pair? head)
               (identifier? (car head)))
          ;; procedure shorthand
@@ -33,5 +33,5 @@
                                [(null? args) '()]
                                [else (bad-syntax stx)]))])
            (check-duplicates arg-names)
-           (list 'define name (list* (quote-syntax lambda) args (cddr stx))))]
+           (list (quote-syntax define) name (list* (quote-syntax lambda) args (cddr stx))))]
         [else (bad-syntax stx)]))))
