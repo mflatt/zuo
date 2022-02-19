@@ -4,14 +4,13 @@
 ;; which is information about `require`s that is used to implement
 ;; `(provide (all-from-out ....))`
 
-(define make-state (lambda (binds nominals) (cons binds (cons (hash) nominals))))
+(define make-state cons)
 (define state-binds car)
-(define state-merged cadr)
-(define state-nominals cddr)
+(define state-nominals cdr)
 (define state-set-binds (lambda (state binds) (cons binds (cdr state))))
-(define state-set-merged (lambda (state merged) (cons (car state) (cons merged (cddr state)))))
-(define state-set-nominals (lambda (state nominals) (cons (car state) (cons (cadr state) nominals))))
+(define state-set-nominals (lambda (state nominals) (cons (car state) nominals)))
 
+;; helper to lookup or update nominals:
 (define call-with-nominal
   (lambda (state mod-path default-ids k)
     (let* ([fronted
@@ -52,16 +51,3 @@
 (define initial-nominals
   (lambda (mod-path sym+bs)
     (list (cons mod-path sym+bs))))
-
-(define merge-binds
-  (lambda (state key m-binds merge-binds*)
-    (let* ([merged (state-merged state)])
-      (cond
-        [(hash-ref merged key #f)
-         ;; already merged
-         state]
-        [else
-         (let* ([merged (hash-set merged key #t)]
-                [binds (state-binds state)]
-                [new-binds (merge-binds* binds key m-binds)])
-           (state-set-binds (state-set-merged state merged) new-binds))]))))

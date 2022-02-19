@@ -1,9 +1,9 @@
 #lang zuo/datum
 
 (define free-id=?
-  (lambda (state id1 id2)
-    (let* ([bind1 (resolve* (state-binds state) id1)]
-           [bind2 (resolve* (state-binds state) id2)])
+  (lambda (binds id1 id2)
+    (let* ([bind1 (resolve* binds id1)]
+           [bind2 (resolve* binds id2)])
       (or (specific=? bind1 bind2)
           (and (not bind1)
                (not bind2)

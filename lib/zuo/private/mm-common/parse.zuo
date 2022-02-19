@@ -42,7 +42,7 @@
              (let* ([add-provide (lambda (provides id as-sym)
                                    (let* ([old-id (hash-ref provides as-sym #f)])
                                      (when (and old-id
-                                                (not (free-id=? state old-id id)))
+                                                (not (free-id=? (state-binds state) old-id id)))
                                        (syntax-error "already provided as different binding" as-sym))
                                      (hash-set provides as-sym id)))]
                     [bad-provide-form (lambda () (syntax-error "bad provide clause" p))])
@@ -214,9 +214,10 @@
                                           (resolve state rator))])
                           (cond
                             [(macro? bind)
-                             (apply-macro bind s ctx state
-                                          (lambda (new-s new-state)
-                                            (expand-top (cons new-s (cdr es)) accum new-state provides)))]
+                             (apply-macro bind s ctx (state-binds state)
+                                          (lambda (new-s new-binds)
+                                            (let ([new-state (state-set-binds state new-binds)])
+                                              (expand-top (cons new-s (cdr es)) accum new-state provides))))]
                             [(core-form? bind)
                              (let ([bind (form-id bind)])
                                (cond
@@ -368,9 +369,9 @@
                                      (resolve state rator))])
                      (cond
                        [(macro? bind)
-                        (apply-macro bind s ctx state
-                                     (lambda (new-s new-state)
-                                       (parse new-s new-state)))]
+                        (apply-macro bind s ctx (state-binds state)
+                                     (lambda (new-s new-binds)
+                                       (parse new-s (state-set-binds state new-binds))))]
                        [(core-form? bind)
                         (unless (list? s) (bad-syntax s))
                         (let ([bind (form-id bind)])
@@ -452,14 +453,10 @@
 (hash
  ;; makes `#lang zuo/private/macromod work:
  'read-and-eval (make-read-and-eval (lambda (ctx)
-                                      (make-state (binds-set-context top-binds ctx)
-                                                  (initial-nominals language-mod-path
-                                                                    (extract-initial-binds top-binds)))))
+                                      (make-state (binds-create top-provides ctx)
+                                                  (initial-nominals language-mod-path top-provides))))
  ;; makes `(require zuo/private/macromod)` work:
- 'macromod-provides (foldl (lambda (sym provides)
-                             (hash-set provides sym (top-binding-ref top-binds sym #f)))
-                           (hash)
-                           (top-binding-syms top-binds))
+ 'macromod-provides top-provides
  ;; for making a new `#lang` with some initial imports:
  'make-read-and-eval-with-initial-imports-from
  (lambda (mod-path)
@@ -469,11 +466,5 @@
        (syntax-error "not a compatible module for initial imports" mod-path))
      (make-read-and-eval
       (lambda (ctx)
-        (let* ([binds (foldl (lambda (sym binds)
-                               (let* ([id (datum->syntax ctx sym)]
-                                      [bind (initial-import (hash-ref provides sym #f))])
-                                 (add-binding* binds id bind)))
-                             empty-binds
-                             (hash-keys provides))])
-          (make-state (binds-set-context binds ctx)
-                      (initial-nominals mod-path (extract-initial-binds binds)))))))))
+        (make-state (binds-create provides ctx)
+                    (initial-nominals mod-path provides)))))))

@@ -2,41 +2,43 @@
 
 ;; Creation of the initial bindings and managing imports/exports
 
+;; A binding can be any non-pair value...
+
 (define make-core-initial-bind
   (lambda (bind)
-    (make-core-bind (as-specific (make-initial-import bind)))))
+    (as-specific (make-initial-import bind))))
 
-(define kernel-binds
+(define kernel-provides
   (let* ([ht (kernel-env)])
-    (foldl (lambda (sym binds)
+    (foldl (lambda (sym provides)
              (cond
                [(or (eq? sym 'eval)
                     (eq? sym 'dynamic-require))
                 ;; skip things related to the `zuo/kernel` evaluator
-                binds]
+                provides]
                [else
-                (add-core-binding binds sym (make-core-initial-bind (hash-ref ht sym #f)))]))
-           empty-binds
+                (hash-set provides sym (make-core-initial-bind (hash-ref ht sym #f)))]))
+           (hash)
            (hash-keys ht))))
 
-(define top-form-binds
-  (foldl (lambda (sym binds)
-           (add-core-binding binds sym (make-core-initial-bind (make-core-form sym))))
-         kernel-binds
+(define top-form-provides
+  (foldl (lambda (sym provides)
+           (hash-set provides sym (make-core-initial-bind (make-core-form sym))))
+         kernel-provides
          '(lambda let letrec quote if begin
                   define define-syntax require provide
                   quote-syntax
                   include)))
 
-(define top-binds
-  (let* ([binds top-form-binds]
-         [add (lambda (binds name val) (add-core-binding binds name (make-core-initial-bind val)))]
-         [binds (add binds 'identifier? identifier?)]
-         [binds (add binds 'syntax-e syntax-e)]
-         [binds (add binds 'syntax->datum syntax->datum)]
-         [binds (add binds 'datum->syntax datum->syntax)]
-         [binds (add binds 'bound-identifier=? bound-identifier=?)])
-    binds))
+(define top-provides
+  (let* ([provides top-form-provides]
+         [add (lambda (provides name val) (hash-set provides name (make-core-initial-bind val)))]
+         [provides (add provides 'identifier? identifier?)]
+         [provides (add provides 'syntax-e syntax-e)]
+         [provides (add provides 'syntax->datum syntax->datum)]
+         [provides (add provides 'datum->syntax datum->syntax)]
+         [provides (add provides 'bound-identifier=? bound-identifier=?)])
+    provides))
 
 ;; convert a local binding into one suitable to import
 (define export-bind
@@ -70,5 +72,7 @@
 ;; in case `all-from-out` is used on the initial import,
 ;; adds all the current ids in `binds` as nominally imported
 (define initial-nominals
-  (lambda (mod-path binds)
-    (list (cons mod-path binds))))
+  (lambda (mod-path provides)
+    (list (cons mod-path
+                (map (lambda (sym) (cons sym (hash-ref provides sym #f)))
+                     (hash-keys provides))))))

@@ -1,5 +1,11 @@
 #lang zuo/datum
 
+;; A module context is just a distinct identity used in binding tables
+(define make-module-context
+  (lambda (mod-path)
+    (string->uninterned-symbol "module")))
+
+;; A syntactic-closure syntax object pairs a symbol with a module context
 (define syntactic-closure-tag (string->uninterned-symbol "identifier"))
 (define syntactic-closure (lambda (sym ctx) (opaque syntactic-closure-tag (cons sym ctx))))
 (define syntactic-closure? (lambda (v) (and (opaque-ref syntactic-closure-tag v #f) #t)))
@@ -24,12 +30,20 @@
                                     [else stx]))])
                         syntax->datum))
 
-(define empty-binds (cons (hash) #f))
-(define binds-set-context (lambda (binds ctx) (cons (car binds) ctx)))
+;; Binding information has a table for the current context (i.e., current module),
+;; a two-level table for all other contexts, and the current context:
+;;   (cons <hash: sym -> bind> (cons <hash: ctx -> sym -> bind> <ctx>))
+(define empty-binds (cons (hash) (cons (hash) #f)))
 (define binds-hash car)
-(define binds-ctx cdr)
-(define top-binding-syms (lambda (binds) (hash-keys (binds-hash binds))))
-(define top-binding-ref (lambda (binds key def) (hash-ref (binds-hash binds) key def)))
+(define binds-ctx-hash cadr)
+(define binds-ctx cddr)
+(define binds-set-hash (lambda (binds ht) (cons ht (cdr binds))))
+(define binds-set-ctx-hash (lambda (binds ctx-ht) (cons (car binds) (cons ctx-ht (cddr binds)))))
+(define binds-set-ctx (lambda (binds ctx) (cons (car binds) (cons (cadr binds) ctx))))
+
+(define binds-create
+  (lambda (ht ctx)
+    (binds-set-ctx (binds-set-hash empty-binds ht) ctx)))
 
 (define make-scope (lambda (name) #f))
 (define add-scope (lambda (e scope) e))
@@ -41,7 +55,7 @@
               [sym (syntactic-closure-sym id)])
           (if (eq? ctx (binds-ctx binds))
               (hash-ref (binds-hash binds) sym #f)
-              (let* ([sc-ht (hash-ref (binds-hash binds) syntactic-closure-tag #f)]
+              (let* ([sc-ht (binds-ctx-hash binds)]
                      [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
                 (and ctx-ht
                      (hash-ref ctx-ht sym #f)))))
@@ -55,20 +69,11 @@
              (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
         (eq? a b))))
 
-(define merge-binds*
+(define merge-binds
   (lambda (binds ctx m-binds)
-    ;; this is so somple that we don't really need the merged-state support
-    ;; of `merge-binds`
-    (let* ([sc-ht (hash-ref (binds-hash binds) syntactic-closure-tag (hash))]
+    (let* ([sc-ht (binds-ctx-hash binds)]
            [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
-      (cons (hash-set (binds-hash binds) syntactic-closure-tag new-sc-ht)
-            (cdr binds)))))
-
-(define extract-initial-binds
-  (lambda (binds)
-    (let ([ht (binds-hash binds)])
-      (map (lambda (sym) (cons sym (hash-ref ht sym #f)))
-           (hash-keys ht)))))
+      (binds-set-ctx-hash binds new-sc-ht))))
 
 (define add-binding*
   (lambda (binds id binding)
@@ -77,26 +82,18 @@
                     (binds-ctx binds))]
            [sym (if (syntactic-closure? id)
                    (syntactic-closure-sym id)
-                   id)]
-           [ht (binds-hash binds)]
-           [new-ht
-            (if (eq? ctx (binds-ctx binds))
-                (hash-set ht id binding)
-                (let* ([sc-ht (hash-ref ht syntactic-closure-tag (hash))]
-                       [ctx-ht (hash-ref sc-ht ctx (hash))]
-                       [new-ctx-ht (hash-set ctx-ht sym binding)]
-                       [new-sc-ht (hash-set sc-ht ctx new-ctx-ht)])
-                  (hash-set ht syntactic-closure-tag sc-ht new-sc-ht)))])
-      (cons new-ht 
-            (cdr binds)))))
+                   id)])
+      (if (eq? ctx (binds-ctx binds))
+          (binds-set-hash binds (hash-set (binds-hash binds) id binding))
+          (let* ([sc-ht (binds-ctx-hash binds)]
+                 [ctx-ht (hash-ref sc-ht ctx (hash))]
+                 [new-ctx-ht (hash-set ctx-ht sym binding)]
+                 [new-sc-ht (hash-set sc-ht ctx new-ctx-ht)])
+            (binds-set-ctx-hash binds new-sc-ht))))))
 
 (define add-core-binding add-binding*)
 
 (include "../mm-common/free-id-eq.zuo")
-
-(define make-core-bind
-  (lambda (bind)
-    bind))
 
 (define syntax-quote
   (lambda (v ctx)
@@ -110,25 +107,21 @@
       (syntax-quote v))))
 
 (define apply-macro
-  (lambda (m s ctx state k)
+  (lambda (m s ctx binds k)
     (let* ([apply-macro
-            (lambda (proc state)
+            (lambda (proc binds)
               (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-                     (proc s (lambda (a b) (free-id=? state a b)))
+                     (proc s (lambda (a b) (free-id=? binds a b)))
                      (proc s))
-                 state))])
+                 binds))])
       (cond
-        [(defined-macro? m) (apply-macro (defined-macro-proc m) state)]
+        [(defined-macro? m) (apply-macro (defined-macro-proc m) binds)]
         [else
          (let* ([implementation (macro-implementation m)]
                 [proc (car implementation)]
                 [ctx (cadr implementation)]
                 [m-binds (cadr (cdr implementation))])
-           (apply-macro proc (merge-binds state ctx m-binds merge-binds*)))]))))
-
-(define make-module-context
-  (lambda (mod-path)
-    (string->uninterned-symbol "module")))
+           (apply-macro proc (merge-binds binds ctx m-binds)))]))))
 
 (define make-exported-macro
   (lambda (proc ctx binds)
