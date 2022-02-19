@@ -1,9 +1,9 @@
-#lang zuo/private/macromod
+#lang zuo/datum
 
 (require "stx.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
-         "list.zuo"
+         "../list.zuo"
          "check-dups.zuo")
 
 (provide (rename-out [let-or-named-let let])
@@ -30,14 +30,14 @@
          (let ([args (map stx-car bindings)]
                [inits (map stx-cadr bindings)])
            (check-duplicates args)
-           (cons (list 'letrec
+           (cons (list (quote-syntax letrec)
                        (list (list name
-                                   (list* 'lambda
+                                   (list* (quote-syntax lambda)
                                           args
                                           (stx-cddr (stx-cdr stx)))))
                        name)
                  inits)))]
-      [else (cons 'let (stx-cdr stx))])))
+      [else (cons (quote-syntax let) (stx-cdr stx))])))
 
 (define-syntax let*
   (lambda (stx)
@@ -53,8 +53,7 @@
       (letrec ([nest-bindings
                 (lambda (bindings)
                   (if (null? bindings)
-                      (cons 'begin (stx-cddr stx))
-                      (list 'let (list (stx-car bindings))
+                      (cons (quote-syntax begin) (stx-cddr stx))
+                      (list (quote-syntax let) (list (stx-car bindings))
                             (nest-bindings (stx-cdr bindings)))))])
         (nest-bindings bindings)))))
-

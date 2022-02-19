@@ -1,9 +1,9 @@
-#lang zuo/private/macromod
+#lang zuo/datum
 
 (require "stx.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
-         "list.zuo"
+         "../list.zuo"
          "let.zuo"
          "check-dups.zuo")
 
@@ -33,5 +33,5 @@
                                [(null? args) '()]
                                [else (bad-syntax stx)]))])
            (check-duplicates arg-names)
-           (list 'define name (list* 'lambda args (stx-cddr stx))))]
+           (list 'define name (list* (quote-syntax lambda) args (stx-cddr stx))))]
         [else (bad-syntax stx)]))))

@@ -25,6 +25,28 @@ typedef unsigned long zuo_uint_t;
 #define MIN_HEAP_SIZE (32*1024*1024)
 
 /*======================================================================*/
+/* runtime configuration                                                */
+/*======================================================================*/
+
+static int zuo_logging = 0;
+static int zuo_probe_each = 0;
+static int zuo_probe_counter = 0;
+
+static void zuo_configure(int argc, char **argv) {
+  const char *s;
+
+  if (getenv("ZUO_LOG"))
+    zuo_logging = 1;
+  
+  if ((s = getenv("ZUO_PROBE_EACH"))) {
+    while (isdigit(*s)) {
+      zuo_probe_each = (zuo_probe_each * 10) + (s[0] - '0');
+      s++;
+    }
+  }
+}     
+      
+/*======================================================================*/
 /* object layouts                                                       */
 /*======================================================================*/
 
@@ -938,14 +960,36 @@ static void zuo_fwrite(FILE *out, zuo_t *obj) {
   zuo_fout(out, obj, zuo_write_mode);
 }
 
+static void done_dump_name(zuo_t *showed_name, int repeats) {
+  if (showed_name != zuo_false) {
+    if (repeats > 0) {
+      fprintf(stderr, " {%d}", repeats+1);
+      repeats = 0;
+    }
+    fprintf(stderr, "\n");
+  }
+}
+
 static void zuo_stack_dump() {
   zuo_t *k = zuo_interp_k;
+  zuo_t *showed_name  = zuo_false;
+  int repeats = 0;
+  
   while (k != zuo_done_k) {
     zuo_t *name = ((zuo_cont_t *)k)->in_proc;
-    if (name->tag == zuo_string_tag)
-      fprintf(stderr, " in %s\n", ZUO_STRING_PTR(name));
+    if (name->tag == zuo_string_tag) {
+      if (name == showed_name)
+        repeats++;
+      else {
+        done_dump_name(showed_name, repeats);
+        repeats = 0;
+        showed_name = name;
+        fprintf(stderr, " in %s", ZUO_STRING_PTR(name));
+      }
+    }
     k = ((zuo_cont_t *)k)->next;
   }
+  done_dump_name(showed_name, repeats);
 }
 
 static void zuo_fail(const char *str) {
@@ -1774,7 +1818,7 @@ static zuo_t *zuo_make_void(zuo_t *args) {
   return zuo_void;
 }
 
-static zuo_t *zuo_kernel_namespace() {
+static zuo_t *zuo_kernel_env() {
   return zuo_top_env;
 }
 
@@ -1935,6 +1979,14 @@ static zuo_t *env_lookup(zuo_t *env, zuo_t *sym) {
 
 static void interp_step() {
   zuo_t *e = zuo_interp_e;
+
+  if (zuo_probe_each) {
+    zuo_probe_counter++;
+    if ((zuo_probe_counter % 1000) == 0) {
+      fprintf(stderr, "probe %d:\n", zuo_probe_counter);
+      zuo_stack_dump();
+    }
+  }
 
   if (e->tag == zuo_symbol_tag) {
     zuo_t *val = env_lookup(zuo_interp_env, e);
@@ -2433,7 +2485,15 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     }
   }
 
-  /* not already to loaded */
+  /* not already loaded */
+  if (zuo_logging) {
+    int i;
+    if (zuo_logging > 1) fprintf(stderr, "\n");
+    for (i = 1; i < zuo_logging; i++) fprintf(stderr, " ");
+    fprintf(stderr, "["); zuo_fdisplay(stderr, module_path);
+    fflush(stderr);
+    zuo_logging++;
+  }
 
   {
     FILE *in;
@@ -2481,6 +2541,14 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
 
       zuo_modules = zuo_cons(zuo_cons(module_path, v), zuo_modules);
 
+      if (zuo_logging) {
+        zuo_logging--;
+        fprintf(stderr, "]");
+        if (zuo_logging == 1)
+          fprintf(stderr, "]\n");
+        fflush(stderr);
+      }
+      
       return v;
     }
   }
@@ -3033,6 +3101,8 @@ static zuo_t *zuo_self_path(char *exec_file) {
   TRIE_SET_TOP_ENV(name, val)
 
 int main(int argc, char **argv) {
+  zuo_configure(argc, argv);
+  
   zuo_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
@@ -3148,7 +3218,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string-all", zuo_read_all);
   ZUO_TOP_ENV_SET_PRIMITIVE1("eval", zuo_eval);
   ZUO_TOP_ENV_SET_PRIMITIVE1("dynamic-require", zuo_dynamic_require);
-  ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-namespace", zuo_kernel_namespace);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
   if (argc > 1)
     (void)zuo_dynamic_require(zuo_string(argv[1]));

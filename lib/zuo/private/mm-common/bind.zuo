@@ -1,0 +1,80 @@
+#lang zuo/datum
+
+;; Creation of the initial bindings and managing imports/exports
+
+(define make-core-initial-bind
+  (lambda (bind)
+    (make-core-bind (as-specific (make-initial-import bind)))))
+
+(define kernel-binds
+  (let* ([ht (kernel-env)])
+    (foldl (lambda (sym binds)
+             (cond
+               [(or (eq? sym 'eval)
+                    (eq? sym 'dynamic-require))
+                ;; skip things related to the `zuo/kernel` evaluator
+                binds]
+               [else
+                (add-core-binding binds sym (make-core-initial-bind (hash-ref ht sym #f)))]))
+           empty-binds
+           (hash-keys ht))))
+
+(define top-form-binds
+  (foldl (lambda (sym binds)
+           (add-core-binding binds sym (make-core-initial-bind (make-core-form sym))))
+         kernel-binds
+         '(lambda let letrec quote if begin
+                  define define-syntax require provide
+                  quote-syntax
+                  include)))
+
+(define top-binds
+  (let* ([binds top-form-binds]
+         [add (lambda (binds name val) (add-core-binding binds name (make-core-initial-bind val)))]
+         [binds (add binds 'identifier? identifier?)]
+         [binds (add binds 'stx-pair? stx-pair?)]
+         [binds (add binds 'stx-car stx-car)]
+         [binds (add binds 'stx-cdr stx-cdr)]
+         [binds (add binds 'stx-list? stx-list?)]
+         [binds (add binds 'stx->list stx->list)]
+         [binds (add binds 'stx-length stx-length)]
+         [binds (add binds 'syntax-e syntax-e)]
+         [binds (add binds 'syntax->datum syntax->datum)]
+         [binds (add binds 'datum->syntax datum->syntax)]
+         [binds (add binds 'bound-identifier=? bound-identifier=?)])
+    binds))
+
+;; convert a local binding into one suitable to import
+(define export-bind
+  (lambda (bind ctx binds)
+    (let* ([label (and (specific? bind)
+                       (specific-label bind))]
+           [bind (unwrap-specific bind)]
+           [bind (if (initial-import? bind)
+                     (initial-import-bind bind)
+                     bind)]
+           [bind (cond
+                   [(defined? bind)
+                    (make-local-variable (variable-var bind))]
+                   [(defined-macro? bind)
+                    (make-exported-macro (defined-macro-proc bind) ctx binds)]
+                   [else bind])])
+      (if label
+          (make-specific (cons bind label))
+          bind))))
+
+(define initial-import
+  (lambda (bind)
+    (let* ([label (and (specific? bind)
+                       (specific-label bind))]
+           [bind (unwrap-specific bind)]
+           [bind (make-initial-import bind)])
+      (if label
+          (make-specific (cons bind label))
+          bind))))
+
+;; in case `all-from-out` is used on the initial import,
+;; adds all the current ids in `binds` as nominally imported
+(define initial-nominals
+  (lambda (mod-path binds)
+    (list (cons mod-path binds))))

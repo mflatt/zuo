@@ -1,0 +1,56 @@
+#lang zuo/datum
+
+;; simple transparent structs
+(define make-maker (lambda (tag) (lambda (v) (cons tag v))))
+(define make-? (lambda (tag) (lambda (v) (and (pair? v) (eq? tag (car v))))))
+(define make-?? (lambda (tag1 tag2) (lambda (v) (and (pair? v) (or (eq? tag1 (car v))
+                                                                   (eq? tag2 (car v)))))))
+(define any-ref cdr) ; not bothering to check a tag
+
+(define make-core-form (make-maker 'core-form))
+(define core-form? (make-? 'core-form))
+(define form-id any-ref)
+
+(define make-local (make-maker 'local))
+(define local? (make-? 'local))
+(define local-id any-ref)
+
+(define make-defined (make-maker 'defined))
+(define defined? (make-? 'defined))
+(define make-local-variable (make-maker 'local-variable))
+(define variable? (make-?? 'local-variable 'defined))
+(define variable-var any-ref)
+
+(define make-macro (make-maker macro-protocol))
+(define macro-implementation any-ref)
+(define make-defined-macro (make-maker 'defined-macro))
+(define defined-macro? (make-? 'defined-macro))
+(define defined-macro-proc any-ref)
+(define macro? (make-?? macro-protocol 'defined-macro))
+
+(define make-literal (make-maker 'literal))
+(define literal? (make-? 'literal))
+(define literal-val any-ref)
+
+(define make-initial-import (make-maker 'initial))
+(define initial-import? (make-? 'initial))
+(define initial-import-bind any-ref)
+
+(define make-specific (make-maker 'specific))
+(define specific? (make-? 'specific))
+(define specific-label (lambda (s) (cdr (any-ref s))))
+
+(define unwrap-specific
+  (lambda (v) (if (specific? v)
+                  (car (any-ref v))
+                  v)))
+
+(define as-specific
+  (lambda (v) (make-specific (cons v (string->uninterned-symbol "u")))))
+
+(define specific=?
+  (lambda (a b) (if (specific? a)
+                    (if (specific? b)
+                        (eq? (specific-label a) (specific-label b))
+                        #f)
+                    (eq? a b))))

@@ -1,13 +1,13 @@
 #lang zuo/private/stitcher
 
-(define macro-protocol 'scope-sets)
-(define language-mod-path 'zuo/private/macromod)
+(define macro-protocol 'defmacro)
+(define language-mod-path 'zuo/private/defmacromod)
 
 (include "mm-common/lib.zuo")
 (include "mm-common/struct.zuo")
 (include "mm-common/state.zuo")
 
-(include "macromod/syntax.zuo")
+(include "defmacromod/s-exp.zuo")
 
 (include "mm-common/bind.zuo")
 (include "mm-common/parse.zuo")

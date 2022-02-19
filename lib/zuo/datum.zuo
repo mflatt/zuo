@@ -1,0 +1,8 @@
+#lang zuo/kernel
+
+;; `#lang zuo/datum` creates a zuodule
+
+(hash 'read-and-eval
+      (lambda (str start mod-path)
+        (let ([es (read-from-string-all (substring str start (string-length str)))])
+          (hash 'datums es))))

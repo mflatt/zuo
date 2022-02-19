@@ -1,9 +1,9 @@
-#lang zuo/private/macromod
+#lang zuo/datum
 
 (require "stx.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
-         "list.zuo"
+         "../list.zuo"
          "let.zuo")
 
 (provide quasiquote)

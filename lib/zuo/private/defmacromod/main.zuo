@@ -1,16 +1,16 @@
-#lang zuo/private/macromod
+#lang zuo/private/defmacromod
 
 (require "and-or.zuo"
          "syntax-error.zuo"
-         "list.zuo"
+         "../list.zuo"
          "let.zuo"
          "define.zuo"
          "quasiquote.zuo")
 
-(provide (all-from-out zuo/private/macromod
+(provide (all-from-out zuo/private/defmacromod
                        "and-or.zuo"
                        "syntax-error.zuo"
-                       "list.zuo"
+                       "../list.zuo"
                        "let.zuo"
                        "define.zuo"
                        "quasiquote.zuo"))

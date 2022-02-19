@@ -1,9 +1,9 @@
 #lang zuo/kernel
 
 ;; The `zuo/private/looper` language is like `zuo/kernel`, but adds
-;; `letrec` and `cond` --- because implementing simple transformations
-;; like `or` and `and` is especially tedious without those. This
-;; language use is to implement `zuo/private/stitcher`.
+;; `letrec`, `cond`, and `let*` --- because implementing simple
+;; transformations like `or` and `and` is especially tedious without
+;; those. This language use is to implement `zuo/private/stitcher`.
 
 (let ([convert-var (variable 'convert)])
   (let ([convert (lambda (s) ((variable-ref convert-var) s))])
@@ -72,10 +72,31 @@
                                          (list 'if (car cl) rhs
                                                (convert (cons 'cond (cdr (cdr s)))))))
                                    (error (~a "cond clause: bad looper syntax: " (~s cl)))))))
-                     (if (eq? (car s) 'quote)
-                         s
-                         (cons (convert (car s))
-                               (convert (cdr s))))))
+                     (if (eq? (car s) 'let*)
+                         (if (if (list? s)
+                                 (if (= (length s) 3)
+                                     (list? (car (cdr s)))
+                                     #f)
+                                 #f)
+                             (let ([clauses (car (cdr s))])
+                               (if (null? clauses)
+                                   (convert (car (cdr (cdr s))))
+                                   (let ([cl (car clauses)])
+                                     (if (if (list? cl)
+                                             (if (= (length cl) 2)
+                                                 (symbol? (car cl))
+                                                 #f)
+                                             #f)
+                                         (convert (list 'let (list cl)
+                                                        (cons 'let*
+                                                              (cons (cdr clauses)
+                                                                    (cdr (cdr s))))))
+                                         (error (~a "let* clause: bad looper syntax: " (~s cl)))))))
+                             (error (~a "let*: bad looper syntax: " (~s s))))
+                         (if (eq? (car s) 'quote)
+                             s
+                             (cons (convert (car s))
+                                   (convert (cdr s)))))))
              (if (eq? s 'eval) ; this is how we make looper's `eval` work at the next layer
                  (lambda (e) (eval (convert e)))
                  s))))

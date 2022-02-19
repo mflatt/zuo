@@ -1,0 +1,3 @@
+#lang zuo/private/defmacromod
+
+(include "../mm-common/syntax-error.zuo")

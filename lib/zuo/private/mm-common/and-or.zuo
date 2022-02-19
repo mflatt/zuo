@@ -1,4 +1,4 @@
-#lang zuo/private/macromod
+#lang zuo/datum
 
 (require "stx.zuo"
          "syntax-error.zuo")
@@ -16,10 +16,10 @@
             #t
             (if (null? (stx-cddr stx))
                 (stx-cadr stx)
-                (list 'let (list (list 'tmp (stx-cadr stx)))
-                      (list 'if 'tmp
+                (list (quote-syntax let) (list (list 'tmp (stx-cadr stx)))
+                      (list (quote-syntax if) 'tmp
                             'tmp
-                            (cons 'or (stx-cddr stx))))))
+                            (cons (quote-syntax or) (stx-cddr stx))))))
         (bad-syntax stx))))
 
 (define-syntax and
@@ -29,8 +29,8 @@
             #t
             (if (null? (stx-cddr stx))
                 (stx-cadr stx)
-                (list 'if (stx-cadr stx)
-                      (cons 'and (stx-cddr stx))
+                (list (quote-syntax if) (stx-cadr stx)
+                      (cons (quote-syntax and) (stx-cddr stx))
                       #f)))
         (bad-syntax stx))))
 
@@ -54,13 +54,13 @@
               [cls (stx-cddr stx)])
           (list 'if (if (and (null? cls)
                              (identifier? (stx-car cl1))
-                             (free-id=? (quote-syntax else) (stx-car cl1)))
+                             (free-id=? 'else (stx-car cl1)))
                         #t
                         (stx-car cl1))
-                (cons 'begin (stx-cdr cl1))
+                (cons (quote-syntax begin) (stx-cdr cl1))
                 (if (null? cls)
                     '(void)
-                    (cons 'cond cls))))
+                    (cons (quote-syntax cond) cls))))
         (bad-syntax stx))))
 
 (define-syntax when
@@ -68,7 +68,7 @@
     (if (and (stx-list? stx)
              (>= (stx-length stx) 3))
         (list 'if (stx-cadr stx)
-              (cons 'begin (stx-cddr stx))
+              (cons (quote-syntax begin) (stx-cddr stx))
               '(void))
         (bad-syntax stx))))
 
@@ -78,5 +78,5 @@
              (>= (stx-length stx) 3))
         (list 'if (stx-cadr stx)
               '(void)
-              (cons 'begin (stx-cddr stx)))
+              (cons (quote-syntax begin) (stx-cddr stx)))
         (bad-syntax stx))))

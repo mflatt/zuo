@@ -1,0 +1,479 @@
+#lang zuo/datum
+
+;; This is the main parser/expander for `zuo/private/macromod`
+;; and `zuo/private/defmacromod`
+
+(include "parse-lib.zuo")
+
+(define expand-define
+  (lambda (s state k)
+    (unless (and (stx-list? s) (= 3 (stx-length s)) (identifier? (stx-cadr s)))
+      (bad-syntax s))
+    (let* ([id (stx-cadr s)]
+           [id-bind (resolve state id)])
+      (when (or (defined? id-bind)
+                (defined-macro? id-bind))
+        (syntax-error "duplicate definition" id))
+      (let* ([sym (identifier-e id)]
+             [def-id (gensym sym)]
+             [var (variable sym)]
+             [new-state (add-binding state id (as-specific (make-defined var)))]
+             ;; construct an expression with the var inlined:
+             [new-s (list variable-set! var (list name-lambda (stx-cadr (stx-cdr s)) id))])
+        (k new-s new-state)))))
+
+(define expand-define-syntax
+  (lambda (s state parse)
+    (unless (and (stx-list? s) (= 3 (stx-length s)) (identifier? (stx-cadr s)))
+      (bad-syntax s))
+    (let* ([id (stx-cadr s)]
+           [id-bind (resolve state id)])
+      (when (or (defined? id-bind)
+                (defined-macro? id-bind))
+        (syntax-error "duplicate definition" id))
+      (let* ([e (parse (stx-cadr (stx-cdr s)) state)]
+             [proc (eval (name-lambda e id))])
+        (add-binding state id (as-specific (make-defined-macro proc)))))))
+
+(define expand-provide
+  (lambda (s state provides mod-path)
+    (unless (stx-list? s) (bad-syntax s))
+    (foldl (lambda (p provides)
+             (let* ([add-provide (lambda (provides id as-sym)
+                                   (let* ([old-id (hash-ref provides as-sym #f)])
+                                     (when (and old-id
+                                                (not (free-id=? state old-id id)))
+                                       (syntax-error "already provided as different binding" as-sym))
+                                     (hash-set provides as-sym id)))]
+                    [bad-provide-form (lambda () (syntax-error "bad provide clause" p))])
+               (cond
+                 [(identifier? p) (add-provide provides p (identifier-e p))]
+                 [(stx-pair? p)
+                  (unless (stx-list? p) (bad-provide-form))
+                  (let ([form (stx-car p)])
+                    (cond
+                      [(id-sym-eq? form 'rename-out)
+                       (foldl (lambda (rn provides)
+                                (unless (and (stx-list? rn) (= 2 (stx-length rn))
+                                             (identifier? (stx-car rn)) (identifier? (stx-cadr rn)))
+                                  (bad-provide-form))
+                                (add-provide provides (stx-car rn) (identifier-e (stx-cadr rn))))
+                              provides
+                              (stx->list (stx-cdr p)))]
+                      [(id-sym-eq? form 'all-from-out)
+                       (foldl (lambda (req-path provides)
+                                (let* ([prov-ctx (stx-car s)]
+                                       [sym+binds (lookup-nominal state (unwrap-mod-path req-path))])
+                                  (unless sym+binds (syntax-error "module not required" req-path))
+                                  (foldl (lambda (sym+bind provides)
+                                           (let* ([sym (car sym+bind)]
+                                                  [id (datum->syntax prov-ctx sym)]
+                                                  [bind (resolve* (state-binds state) id)])
+                                             (cond
+                                               [(not (specific=? bind (cdr sym+bind)))
+                                                ;; shadowed by definition or other import
+                                                provides]
+                                               [else
+                                                (add-provide provides id sym)])))
+                                         provides
+                                         sym+binds)))
+                              provides
+                              (stx->list (stx-cdr p)))]
+                      [else (bad-provide-form)]))]
+                 [else (bad-provide-form)])))
+           provides
+           (stx->list (stx-cdr s)))))
+
+(define expand-require
+  (lambda (s state mod-path)
+    (let* ([check-renames
+            ;; syntax check on renaming clauses `ns`
+            (lambda (r ns id-ok?)
+              (map (lambda (n) (unless (or (and id-ok?
+                                                (identifier? n))
+                                           (and (stx-list? n)
+                                                (= 2 (stx-length n))
+                                                (identifier? (stx-car n))
+                                                (identifier? (stx-cadr n))))
+                                 (bad-syntax r)))
+                   (stx->list ns)))]
+           [make-rename-filter
+            ;; used to apply `ns` renaming clauses to an imported identifier
+            (lambda (ns only?)
+              (lambda (sym)
+                (letrec ([loop (lambda (ns)
+                                 (cond
+                                   [(null? ns) (if only? #f sym)]
+                                   [(id-sym-eq? (stx-car ns) sym) sym]
+                                   [(and (stx-pair? (stx-car ns))
+                                         (id-sym-eq? (stx-caar ns) sym))
+                                    (syntax-e (stx-cadr (stx-car ns)))]
+                                   [else (loop (stx-cdr ns))]))])
+                  (loop ns))))]
+           [make-provides-checker
+            ;; used to check whether set of provided is consistent with `ns`
+            (lambda (ns)
+              (lambda (provides)
+                (map (lambda (n)
+                       (let ([id (if (pair? n) (car n) n)])
+                         (unless (hash-ref provides (identifier-e id) #f)
+                           (syntax-error "identifier is not in required set" id))))
+                     (stx->list ns))))])
+      ;; parse each `require` clause `r:
+      (foldl (lambda (r state)
+               (let* ([req-ctx (stx-car s)]
+                      [req-path+filter+check
+                       (cond
+                         [(string? r) (list r (lambda (sym) sym) void)]
+                         [(identifier? r) (list (identifier-e r) (lambda (sym) sym) void)]
+                         [(stx-pair? r)
+                          (unless (and (stx-list? r) (stx-pair? (stx-cdr r))) (bad-syntax r))
+                          (let* ([ns (stx-cddr r)])
+                            (cond
+                              [(id-sym-eq? (stx-car r) 'only-in)
+                               (check-renames r ns #t)
+                               (list (stx-cadr r) (make-rename-filter ns #t) (make-provides-checker ns))]
+                              [(id-sym-eq? (stx-car r) 'rename-in)
+                               (check-renames r ns #f)
+                               (list (stx-cadr r) (make-rename-filter ns #f) (make-provides-checker ns))]
+                              [else (bad-syntax r)]))]
+                         [else (bad-syntax r)])]
+                      [req-path (car req-path+filter+check)]
+                      [filter (cadr req-path+filter+check)]
+                      [check (cadr (cdr req-path+filter+check))]
+                      [in-mod-path (if (string? req-path)
+                                       (path->complete-path req-path (car (split-path mod-path)))
+                                       (syntax->datum req-path))]
+                      [mod (dynamic-require in-mod-path)]
+                      [provides (hash-ref mod 'macromod-provides #f)]
+                      [state (init-nominal state (unwrap-mod-path req-path))])
+                 (unless provides (syntax-error "not a compatible module" r))
+                 (check provides)
+                 ;; add each provided binding (except as filtered)
+                 (foldl (lambda (sym state)
+                          (let* ([as-sym (filter sym)])
+                            (cond
+                              [(not as-sym) state]
+                              [else
+                               ;; check whether it's bound already
+                               (let* ([as-id (datum->syntax req-ctx as-sym)]
+                                      [current-bind (resolve* (state-binds state) as-id)]
+                                      [req-bind (hash-ref provides sym #f)]
+                                      [add-binding/record-nominal
+                                       (lambda ()
+                                         (let* ([state (add-binding state as-id req-bind)])
+                                           (record-nominal state (unwrap-mod-path req-path) as-sym req-bind)))])
+                                 (cond
+                                   [(not current-bind)
+                                    ;; not already bound, so import is ok
+                                    (add-binding/record-nominal)]
+                                   [(initial-import? (unwrap-specific current-bind))
+                                    ;; `require` can shadow an initial import
+                                    (add-binding/record-nominal)]
+                                   [(specific=? current-bind req-bind)
+                                    ;; re-import of same variable or primitive, also ok
+                                    state]
+                                   [(or (defined? current-bind)
+                                        (defined-macro? current-bind))
+                                    ;; definition shadows import
+                                    state]
+                                   [else
+                                    (syntax-error "identifier is already imported" as-id)]))])))
+                        state
+                        (hash-keys provides))))
+             state
+             (stx->list (stx-cdr s))))))
+
+(define expand-include
+  (lambda (s mod-path)
+    (unless (and (stx-list? s) (= 2 (stx-length s)))
+      (bad-syntax s))
+    (let* ([include-ctx (stx-car s)]
+           [in-mod-path (unwrap-mod-path (stx-cadr s))]
+           [in-mod-path (if (string? in-mod-path)
+                            (path->complete-path in-mod-path (car (split-path mod-path)))
+                            (syntax->datum in-mod-path))]
+           [mod (dynamic-require in-mod-path)]
+           [datums (hash-ref mod 'datums #f)])
+      (unless datums (error "not an includable module" in-mod-path))
+      (map (lambda (e) (datum->syntax include-ctx e)) datums))))
+
+;; expand top-level forms and gather imports and definitions
+(define expand-top-sequence
+  (lambda (es state mod-path ctx parse)
+    (letrec ([expand-top
+              (lambda (es accum state provides)
+                (cond
+                  [(null? es) (list (reverse accum) state provides)]
+                  [else
+                   (let* ([s (stx-car es)])
+                     (cond
+                       [(stx-pair? s)
+                        (let* ([rator (stx-car s)]
+                               [bind (and (identifier? rator)
+                                          (resolve state rator))])
+                          (cond
+                            [(macro? bind)
+                             (apply-macro bind s ctx state
+                                          (lambda (new-s new-state)
+                                            (expand-top (cons new-s (cdr es)) accum new-state provides)))]
+                            [(core-form? bind)
+                             (let ([bind (form-id bind)])
+                               (cond
+                                 [(eq? bind 'begin)
+                                  (unless (stx-list? s) (bad-syntax s))
+                                  (expand-top (append (stx->list (stx-cdr s)) (cdr es)) accum state provides)]
+                                 [(eq? bind 'define)
+                                  (expand-define s
+                                                 state
+                                                 (lambda (new-s new-state)
+                                                   (expand-top (cdr es) (cons new-s accum) new-state provides)))]
+                                 [(eq? bind 'define-syntax)
+                                  (let ([new-state (expand-define-syntax s state parse)])
+                                    (expand-top (cdr es) accum new-state provides))]
+                                 [(eq? bind 'provide)
+                                  (let ([new-provides (expand-provide s state provides mod-path)])
+                                    (expand-top (cdr es) accum state new-provides))]
+                                 [(eq? bind 'require)
+                                  (let ([new-state (expand-require s state mod-path)])
+                                    (expand-top (cdr es) accum new-state provides))]
+                                 [(eq? bind 'include)
+                                  (let ([new-es (append (expand-include s mod-path) (cdr es))])
+                                    (expand-top new-es accum state provides))]
+                                 [else
+                                  (expand-top (cdr es) (cons s accum) state provides)]))]
+                            [else (expand-top (cdr es) (cons s accum) state provides)]))]
+                       [else (expand-top (cdr es) (cons s accum) state provides)]))]))])
+      (expand-top es '() state (hash)))))
+
+(define parse-lambda
+  (lambda (s state parse)
+    (unless (>= (stx-length s) 3) (bad-syntax s))
+    (let* ([formals (stx-cadr s)]
+           [new-formals (letrec ([reformal (lambda (f seen)
+                                             (cond
+                                               [(null? f) '()]
+                                               [(identifier? f)
+                                                (when (ormap (lambda (sn) (bound-identifier=? f sn)) seen)
+                                                  (duplicate-identifier f s))
+                                                (gensym (syntax-e f))]
+                                               [(stx-pair? f)
+                                                (let* ([a (stx-car f)])
+                                                  (unless (identifier? a) (bad-syntax s))
+                                                  (cons (reformal a seen)
+                                                        (reformal (stx-cdr f) (cons a seen))))]
+                                               [else (bad-syntax s)]))])
+                          (reformal formals '()))]
+           [new-scope (make-scope "lambda")]
+           [state (letrec ([add-formals (lambda (state formals new-formals)
+                                          (cond
+                                            [(identifier? formals)
+                                             (let* ([id (add-scope formals new-scope)])
+                                               (add-binding state id (make-local new-formals)))]
+                                            [(pair? new-formals)
+                                             (add-formals (add-formals state (stx-cdr formals) (cdr new-formals))
+                                                          (stx-car formals)
+                                                          (car new-formals))]
+                                            [else state]))])
+                    (add-formals state formals new-formals))])
+      (list 'lambda new-formals
+             (maybe-begin (parse* parse (add-scope (stx-cddr s) new-scope) state))))))
+
+(define nest-bindings
+  (lambda (new-cls body)
+    (letrec ([nest-bindings (lambda (new-cls)
+                              (if (null? new-cls)
+                                  body
+                                  (list 'let (list (car new-cls))
+                                        (nest-bindings (cdr new-cls)))))])
+      (nest-bindings (reverse new-cls)))))
+
+(define parse-let
+  (lambda (s state parse)
+    (unless (>= (stx-length s) 3) (bad-syntax s))
+    (let* ([cls (stx-cadr s)]
+           [orig-state state]
+           [new-scope (make-scope "let")])
+      (unless (stx-list? cls) (bad-syntax s))
+      (letrec ([parse-clauses
+                (lambda (cls new-cls state seen)
+                  (cond
+                    [(null? cls)
+                     (nest-bindings (reverse new-cls)
+                                    (maybe-begin (parse* parse (add-scope (stx-cddr s) new-scope) state)))]
+                    [else
+                     (let* ([cl (stx-car cls)])
+                       (unless (and (stx-list? cl) (= 2 (stx-length cl))) (bad-syntax s))
+                       (let* ([id (stx-car cl)])
+                         (unless (identifier? id) (bad-syntax s))
+                         (when (ormap (lambda (sn) (bound-identifier=? id sn)) seen)
+                           (duplicate-identifier id s))
+                         (let* ([new-id (gensym (identifier-e id))])
+                           (parse-clauses (stx-cdr cls)
+                                          (cons (list new-id (name-lambda
+                                                              (parse (stx-cadr cl) orig-state)
+                                                              id))
+                                                new-cls)
+                                          (add-binding state (add-scope id new-scope) (make-local new-id))
+                                          (cons id seen)))))]))])
+        (parse-clauses cls '() state '())))))
+
+(define parse-letrec
+  (lambda (s state parse)
+    (unless (>= (stx-length s) 3) (bad-syntax s))
+    (let* ([cls (stx-cadr s)]
+           [orig-state state]
+           [new-scope (make-scope "letrec")])
+      (unless (stx-list? cls) (bad-syntax s))
+      ;; use mutable variables to tie knots
+      (letrec ([bind-all (lambda (x-cls new-ids state seen)
+                           (cond
+                             [(null? x-cls)
+                              (nest-bindings
+                               (map (lambda (new-id)
+                                      (list new-id (list variable (list 'quote new-id))))
+                                    new-ids)
+                               (list 'begin
+                                     (cons 'begin (map2 (lambda (cl new-id)
+                                                          (list variable-set! (car new-ids)
+                                                                (name-lambda
+                                                                 (let ([rhs (stx-cadr (stx-car cls))])
+                                                                   (parse (add-scope rhs new-scope) state))
+                                                                 (stx-caar cls))))
+                                                        (stx->list cls)
+                                                        (reverse new-ids)))
+                                     (maybe-begin (parse* parse (add-scope (stx-cddr s) new-scope) state))))]
+                             [else
+                              (let* ([cl (stx-car x-cls)])
+                                (unless (and (stx-list? cl) (= 2 (stx-length cl))) (bad-syntax s))
+                                (let* ([id (stx-car cl)])
+                                  (unless (identifier? id) (bad-syntax s))
+                                  (when (ormap (lambda (sn) (bound-identifier=? id sn)) seen)
+                                    (duplicate-identifier id s))
+                                  (let ([new-id (gensym (identifier-e id))])
+                                    (bind-all (stx-cdr x-cls)
+                                              (cons new-id new-ids)
+                                              (add-binding state (add-scope id new-scope) (make-local-variable new-id))
+                                              (cons id seen)))))]))])
+        (bind-all cls '() state '())))))
+
+(define make-parse
+  (lambda (ctx)
+    (letrec ([parse
+              (lambda (s state)
+                (cond
+                  [(stx-pair? s)
+                   (let* ([rator (stx-car s)]
+                          [bind (and (identifier? rator)
+                                     (resolve state rator))])
+                     (cond
+                       [(macro? bind)
+                        (apply-macro bind s ctx state
+                                     (lambda (new-s new-state)
+                                       (parse new-s new-state)))]
+                       [(core-form? bind)
+                        (unless (stx-list? s) (bad-syntax s))
+                        (let ([bind (form-id bind)])
+                          (cond
+                            [(eq? bind 'lambda)
+                             (parse-lambda s state parse)]
+                            [(eq? bind 'let)
+                             (parse-let s state parse)]
+                            [(eq? bind 'letrec)
+                             (parse-letrec s state parse)]
+                            [(eq? bind 'quote)
+                             (unless (= 2 (stx-length s)) (bad-syntax s))
+                             (list 'quote (syntax->datum (stx-cadr s)))]
+                            [(eq? bind 'quote-syntax)
+                             (unless (= 2 (stx-length s)) (bad-syntax s))
+                             (syntax-quote (stx-cadr s) ctx)]
+                            [(eq? bind 'if)
+                             (unless (= 4 (stx-length s)) (bad-syntax s))
+                             (list 'if
+                                   (parse (stx-cadr s) state)
+                                   (parse (stx-cadr (stx-cdr s)) state)
+                                   (parse (stx-cadr (stx-cddr s)) state))]
+                            [(eq? bind 'begin)
+                             (unless (stx-pair? (stx-cdr s)) (bad-syntax s))
+                             (let ([es (map (lambda (e) (parse e state)) (stx->list (stx-cdr s)))])
+                               (if (null? (cdr es))
+                                   (car es)
+                                   (cons 'begin es)))]
+                            [else
+                             (map (lambda (e) (parse e state)) (stx->list s))]))]
+                       [(eq? rator name-lambda) ; form created by `define` to propagate name
+                        (name-lambda (parse (stx-cadr s) state) (stx-cadr (stx-cdr s)))]
+                       [else (map (lambda (e) (parse e state)) (stx->list s))]))]
+                  [(identifier? s)
+                   (let* ([bind (resolve state s)])
+                     (cond
+                       [(core-form? bind) (bad-syntax s)]
+                       [(local? bind) (local-id bind)]
+                       [(variable? bind) (list variable-ref (variable-var bind))]
+                       [(literal? bind) (literal-val bind)]
+                       [(macro? bind)
+                        (apply-macro bind s ctx state
+                                     (lambda (new-s new-state)
+                                       (parse new-s state)))]
+                       [(not bind) (syntax-error "unbound identifier" s)]
+                       [(pair? bind) (syntax-error "cannot expand foreign syntax" s)]
+                       [else bind]))]
+                  [(null? s) (bad-syntax s)]
+                  [else s]))])
+      parse)))
+
+(define make-read-and-eval
+  (lambda (make-initial-state)
+    (lambda (str start mod-path)
+      (let* ([es (read-from-string-all (substring str start (string-length str)))]
+             [ctx (make-module-context mod-path)]
+             [es (map (lambda (e) (datum->syntax ctx e)) es)]
+             [parse (make-parse ctx)]
+             [initial-state (make-initial-state ctx)]
+             [es+state+provides (expand-top-sequence es initial-state mod-path ctx parse)]
+             [es (car es+state+provides)]
+             [state (cadr es+state+provides)]
+             [binds (state-binds state)]
+             [provides (cadr (cdr es+state+provides))]
+             [outs (foldl (lambda (as-sym outs)
+                            (let* ([id (hash-ref provides as-sym #f)]
+                                   [bind (resolve* (state-binds state) id)])
+                              (unless bind (syntax-error "provided identifier not bound" id))
+                              (hash-set outs as-sym (export-bind bind ctx binds))))
+                          (hash)
+                          (hash-keys provides))]
+             [print-result (lambda (v)
+                             (unless (eq? v (void))
+                               (display (~a (~v v) "\n"))))]
+             [add-print (lambda (s) (list print-result s))])
+        (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
+        (hash 'macromod-provides outs)))))
+
+(hash
+ ;; makes `#lang zuo/private/macromod work:
+ 'read-and-eval (make-read-and-eval (lambda (ctx)
+                                      (make-state (binds-set-context top-binds ctx)
+                                                  (initial-nominals language-mod-path
+                                                                    (extract-initial-binds top-binds)))))
+ ;; makes `(require zuo/private/macromod)` work:
+ 'macromod-provides (foldl (lambda (sym provides)
+                             (hash-set provides sym (top-binding-ref top-binds sym #f)))
+                           (hash)
+                           (top-binding-syms top-binds))
+ ;; for making a new `#lang` with some initial imports:
+ 'make-read-and-eval-with-initial-imports-from
+ (lambda (mod-path)
+   (let* ([mod (dynamic-require mod-path)]
+          [provides (hash-ref mod 'macromod-provides #f)])
+     (unless provides 
+       (syntax-error "not a compatible module for initial imports" mod-path))
+     (make-read-and-eval
+      (lambda (ctx)
+        (let* ([binds (foldl (lambda (sym binds)
+                               (let* ([id (datum->syntax ctx sym)]
+                                      [bind (initial-import (hash-ref provides sym #f))])
+                                 (add-binding* binds id bind)))
+                             empty-binds
+                             (hash-keys provides))])
+          (make-state (binds-set-context binds ctx)
+                      (initial-nominals mod-path (extract-initial-binds binds)))))))))

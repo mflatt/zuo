@@ -1,4 +1,4 @@
-#lang zuo/private/macromod
+#lang zuo/datum
 
 (provide stx-caar
          stx-cadr
