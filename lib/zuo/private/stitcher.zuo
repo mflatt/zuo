@@ -5,11 +5,12 @@
 ;; a `let*` clause in that it can only directly refer to earlier
 ;; definitions.
 
-;; An `include` form 
+;; An `include` form is allowed at the same level as `define`s to
+;; substitute the S-expression content of a module that is implemented
+;; in the `zuo/datum` language.
 
-;; Like `zuo/kernel`, syntactic forms are still used by "keyword" in
-;; the sense that the names cannot be shadowed.
-
+;; Grammar for the right-hand side of a definition:
+;;
 ;; <expr> = <id>
 ;;        | <literal>
 ;;        | (quote <datum>)
@@ -24,6 +25,10 @@
 ;;        | (when <expr> <expr> ...+)
 ;;        | (unless <expr> <expr> ...+)
 ;;        | (begin <expr> ...+)
+
+;; Like `zuo/kernel`, syntactic forms in the stitcher language are
+;; still referenced by "keyword" in the sense that the names cannot be
+;; shadowed.
 
 ;; Definitions are evaluated one at a time, and defined values are
 ;; inlined in place of references later in the module. So, this is

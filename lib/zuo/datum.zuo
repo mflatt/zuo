@@ -1,6 +1,8 @@
 #lang zuo/kernel
 
-;; `#lang zuo/datum` creates a zuodule
+;; `#lang zuo/datum` creates a module that just exports S-expressions,
+;; which can useful with `include` for building `zuo` and `zuo/hygienic`
+;; from a shared source
 
 (hash 'read-and-eval
       (lambda (str start mod-path)

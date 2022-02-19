@@ -9,10 +9,10 @@
 (define identifier? (lambda (v)
                       (or (symbol? v)
                           (syntactic-closure? v))))
-(define identifier-e (lambda (x)
-                       (if (symbol? x)
-                           x
-                           (syntactic-closure-sym x))))
+(define syntax-e (lambda (x)
+                   (if (symbol? x)
+                       x
+                       (syntactic-closure-sym x))))
 
 (define datum->syntax (lambda (ctx d) d))
 (define syntax->datum (letrec ([syntax->datum
@@ -20,10 +20,9 @@
                                   (cond
                                     [(pair? stx) (cons (syntax->datum (car stx))
                                                        (syntax->datum (cdr stx)))]
-                                    [(identifier? stx) (identifier-e stx)]
+                                    [(identifier? stx) (syntax-e stx)]
                                     [else stx]))])
                         syntax->datum))
-(define syntax-e (lambda (s) s))
 
 (define empty-binds (cons (hash) #f))
 (define binds-set-context (lambda (binds ctx) (cons (car binds) ctx)))

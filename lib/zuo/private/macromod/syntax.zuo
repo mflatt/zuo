@@ -137,7 +137,7 @@
            (hash-keys m-binds))))
 
 ;; called on a binding table that just has the initial imports,
-;; extracts an assoictaion list of symbol to bindings
+;; extracts an association list of symbol to bindings
 (define extract-initial-binds
   (lambda (binds)
     (foldl (lambda (sym sym+bs)
