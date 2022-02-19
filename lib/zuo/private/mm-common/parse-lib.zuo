@@ -1,7 +1,7 @@
 #lang zuo/datum
 
 ;; Helpers for "parse.zuo" that depends on the implementation of
-;; syntax (i.e., syntax objects vs. plain S-expressions)
+;; syntax objects
 
 (define maybe-begin
   (lambda (d)
@@ -48,3 +48,12 @@
       (if (initial-import? bind)
           (initial-import-bind bind)
           bind))))
+
+(define nest-bindings
+  (lambda (new-cls body)
+    (letrec ([nest-bindings (lambda (new-cls)
+                              (if (null? new-cls)
+                                  body
+                                  (list 'let (list (car new-cls))
+                                        (nest-bindings (cdr new-cls)))))])
+      (nest-bindings (reverse new-cls)))))

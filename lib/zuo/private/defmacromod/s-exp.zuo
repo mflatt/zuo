@@ -45,36 +45,12 @@
   (lambda (ht ctx)
     (binds-set-ctx (binds-set-hash empty-binds ht) ctx)))
 
+;; We don't need scopes, but these functions are here to line
+;; up with the set-of-scopes API
 (define make-scope (lambda (name) #f))
 (define add-scope (lambda (e scope) e))
 
-(define resolve*
-  (lambda (binds id)
-    (if (syntactic-closure? id)
-        (let ([ctx (syntactic-closure-ctx id)]
-              [sym (syntactic-closure-sym id)])
-          (if (eq? ctx (binds-ctx binds))
-              (hash-ref (binds-hash binds) sym #f)
-              (let* ([sc-ht (binds-ctx-hash binds)]
-                     [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
-                (and ctx-ht
-                     (hash-ref ctx-ht sym #f)))))
-        (hash-ref (binds-hash binds) id #f))))
-
-(define bound-identifier=?
-  (lambda (a b)
-    (or (and (syntactic-closure? a)
-             (syntactic-closure? b)
-             (eq? (syntactic-closure-sym a) (syntactic-closure-sym b))
-             (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
-        (eq? a b))))
-
-(define merge-binds
-  (lambda (binds ctx m-binds)
-    (let* ([sc-ht (binds-ctx-hash binds)]
-           [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
-      (binds-set-ctx-hash binds new-sc-ht))))
-
+;; Install a new binding
 (define add-binding*
   (lambda (binds id binding)
     (let* ([ctx (if (syntactic-closure? id)
@@ -91,10 +67,41 @@
                  [new-sc-ht (hash-set sc-ht ctx new-ctx-ht)])
             (binds-set-ctx-hash binds new-sc-ht))))))
 
-(define add-core-binding add-binding*)
+;; Find the binding for an identifier
+(define resolve*
+  (lambda (binds id)
+    (if (syntactic-closure? id)
+        (let ([ctx (syntactic-closure-ctx id)]
+              [sym (syntactic-closure-sym id)])
+          (if (eq? ctx (binds-ctx binds))
+              (hash-ref (binds-hash binds) sym #f)
+              (let* ([sc-ht (binds-ctx-hash binds)]
+                     [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
+                (and ctx-ht
+                     (hash-ref ctx-ht sym #f)))))
+        (hash-ref (binds-hash binds) id #f))))
+
+;; When we use an imported macro, we need to pull in binding information
+;; from the macro's module; the separate module contexts keep different binding
+;; information from getting mixed up
+(define merge-binds
+  (lambda (binds ctx m-binds)
+    (let* ([sc-ht (binds-ctx-hash binds)]
+           [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
+      (binds-set-ctx-hash binds new-sc-ht))))
+
+(define bound-identifier=?
+  (lambda (a b)
+    (or (and (syntactic-closure? a)
+             (syntactic-closure? b)
+             (eq? (syntactic-closure-sym a) (syntactic-closure-sym b))
+             (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
+        (eq? a b))))
 
 (include "../mm-common/free-id-eq.zuo")
 
+;; syntax-quote turns a symbol into a syntactic closure, and leaves everything
+;; else alone
 (define syntax-quote
   (lambda (v ctx)
     (letrec ([syntax-quote
@@ -106,6 +113,8 @@
                   [else v]))])
       (syntax-quote v))))
 
+;; apply a macro; if it's imported, then we'll have to do some work to
+;; merge binding information for the providing context
 (define apply-macro
   (lambda (m s ctx binds k)
     (let* ([apply-macro
@@ -123,6 +132,7 @@
                 [m-binds (cadr (cdr implementation))])
            (apply-macro proc (merge-binds binds ctx m-binds)))]))))
 
+;; convert a local macro to one that can be used as imported elsewhere
 (define make-exported-macro
   (lambda (proc ctx binds)
     (make-macro (list proc ctx binds))))

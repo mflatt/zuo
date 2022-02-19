@@ -1,5 +1,7 @@
 #lang zuo/private/stitcher
 
+;; Instantiates the expander for hygienic, set-of-scopes macros
+
 (define macro-protocol 'scope-sets)
 (define language-mod-path 'zuo/private/macromod)
 
@@ -11,3 +13,4 @@
 
 (include "mm-common/bind.zuo")
 (include "mm-common/parse.zuo")
+(include "mm-common/entry.zuo")

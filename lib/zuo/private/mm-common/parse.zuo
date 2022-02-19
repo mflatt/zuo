@@ -1,7 +1,11 @@
 #lang zuo/datum
 
-;; This is the main parser/expander for `zuo/private/macromod`
-;; and `zuo/private/defmacromod`
+;; This is the main parser/expander, to be included in a context that
+;; plugs in the implementation of syntax objects and macros (so,
+;; hygienic or not)
+
+;; The `expand-...` functions handle the top-level sequence, while
+;; `parse-...` is for expressions
 
 (include "parse-lib.zuo")
 
@@ -280,15 +284,6 @@
       (list 'lambda new-formals
              (maybe-begin (map (lambda (e) (parse e state)) (add-scope (cddr s) new-scope)))))))
 
-(define nest-bindings
-  (lambda (new-cls body)
-    (letrec ([nest-bindings (lambda (new-cls)
-                              (if (null? new-cls)
-                                  body
-                                  (list 'let (list (car new-cls))
-                                        (nest-bindings (cdr new-cls)))))])
-      (nest-bindings (reverse new-cls)))))
-
 (define parse-let
   (lambda (s state parse)
     (unless (>= (length s) 3) (bad-syntax s))
@@ -358,6 +353,16 @@
                                               (cons id seen)))))]))])
         (bind-all cls '() state '())))))
 
+(define parse-let/cc
+  (lambda (s state parse)
+    (unless (and (>= (length s) 3) (identifier? (cadr s))) (bad-syntax s))
+    (let* ([id (cadr s)]
+           [new-id (gensym (syntax-e id))]
+           [new-scope (make-scope "letcc")]
+           [state (add-binding state (add-scope id new-scope) (make-local new-id))])
+      (list 'let/cc new-id
+            (maybe-begin (map (lambda (s) (parse s state)) (add-scope (cddr s) new-scope)))))))
+
 (define make-parse
   (lambda (ctx)
     (letrec ([parse
@@ -382,6 +387,8 @@
                              (parse-let s state parse)]
                             [(eq? bind 'letrec)
                              (parse-letrec s state parse)]
+                            [(eq? bind 'let/cc)
+                             (parse-let/cc s state parse)]
                             [(eq? bind 'quote)
                              (unless (= 2 (length s)) (bad-syntax s))
                              (list 'quote (syntax->datum (cadr s)))]
@@ -422,49 +429,3 @@
                   [(null? s) (bad-syntax s)]
                   [else s]))])
       parse)))
-
-(define make-read-and-eval
-  (lambda (make-initial-state)
-    (lambda (str start mod-path)
-      (let* ([es (read-from-string-all (substring str start (string-length str)))]
-             [ctx (make-module-context mod-path)]
-             [es (map (lambda (e) (datum->syntax ctx e)) es)]
-             [parse (make-parse ctx)]
-             [initial-state (make-initial-state ctx)]
-             [es+state+provides (expand-top-sequence es initial-state mod-path ctx parse)]
-             [es (car es+state+provides)]
-             [state (cadr es+state+provides)]
-             [binds (state-binds state)]
-             [provides (cadr (cdr es+state+provides))]
-             [outs (foldl (lambda (as-sym outs)
-                            (let* ([id (hash-ref provides as-sym #f)]
-                                   [bind (resolve* (state-binds state) id)])
-                              (unless bind (syntax-error "provided identifier not bound" id))
-                              (hash-set outs as-sym (export-bind bind ctx binds))))
-                          (hash)
-                          (hash-keys provides))]
-             [print-result (lambda (v)
-                             (unless (eq? v (void))
-                               (display (~a (~v v) "\n"))))]
-             [add-print (lambda (s) (list print-result s))])
-        (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
-        (hash 'macromod-provides outs)))))
-
-(hash
- ;; makes `#lang zuo/private/macromod work:
- 'read-and-eval (make-read-and-eval (lambda (ctx)
-                                      (make-state (binds-create top-provides ctx)
-                                                  (initial-nominals language-mod-path top-provides))))
- ;; makes `(require zuo/private/macromod)` work:
- 'macromod-provides top-provides
- ;; for making a new `#lang` with some initial imports:
- 'make-read-and-eval-with-initial-imports-from
- (lambda (mod-path)
-   (let* ([mod (dynamic-require mod-path)]
-          [provides (hash-ref mod 'macromod-provides #f)])
-     (unless provides 
-       (syntax-error "not a compatible module for initial imports" mod-path))
-     (make-read-and-eval
-      (lambda (ctx)
-        (make-state (binds-create provides ctx)
-                    (initial-nominals mod-path provides)))))))

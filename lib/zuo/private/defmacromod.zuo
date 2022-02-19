@@ -1,5 +1,7 @@
 #lang zuo/private/stitcher
 
+;; Instantiates the expander for non-hygenic-by-default macros
+
 (define macro-protocol 'defmacro)
 (define language-mod-path 'zuo/private/defmacromod)
 
@@ -11,3 +13,4 @@
 
 (include "mm-common/bind.zuo")
 (include "mm-common/parse.zuo")
+(include "mm-common/entry.zuo")

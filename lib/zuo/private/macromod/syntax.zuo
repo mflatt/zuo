@@ -1,5 +1,9 @@
 #lang zuo/datum
 
+;; This set-of-scopes implementation is based on the "pico" branch of
+;;
+;;   https://github.com/mflatt/expander/
+
 (define make-scope (lambda (name) (string->uninterned-symbol name)))
 (define set-add (lambda (ht v) (hash-set ht v #t)))
 (define set-remove hash-remove)
@@ -14,6 +18,7 @@
     (and (hash-keys-subset? sc1 sc2)
          (hash-keys-subset? sc2 sc1))))
 
+;; A syntax object is an opaque record combining a symbol with scopes
 (define syntax-tag (string->uninterned-symbol "syntax"))
 (define identifier (lambda (sym scopes) (opaque syntax-tag (cons sym scopes))))
 (define identifier? (lambda (v) (symbol? (car (opaque-ref syntax-tag v '(#f . #f))))))
@@ -38,6 +43,7 @@
                               [else s]))])
     syntax->datum))
 
+;; Note: no lazy propagation, so this isn't going to scale well
 (define adjust-scope
   (letrec ([adjust-scope
             (lambda (s scope op)
@@ -53,15 +59,17 @@
 (define remove-scope (lambda (s scope) (adjust-scope s scope set-remove)))
 (define flip-scope (lambda (s scope) (adjust-scope s scope set-flip)))
 
+;; Unlike the "pico" expander, this one has some support for modules.
+;; To avoid a global mutable table (which the kernel does not allow!),
+;; we pull in binding information from another module whenever we
+;; apply an imported macro. That merge is somewhat expensive, so as a
+;; shortcut, a `binds` pairs the binding table with a "merged" table
+;; to record when a merge has already been performed from each module.
 (define make-binds cons)
 (define empty-binds (make-binds (hash) (hash)))
 (define binds-hash car)
 (define binds-merged cdr)
 (define binds-set-hash (lambda (binds ht) (cons ht (cdr binds))))
-
-(define binds-set-context (lambda (binds ctx) binds))
-(define top-binding-syms (lambda (binds) (hash-keys (binds-hash binds))))
-(define top-binding-ref (lambda (binds sym defval) (hash-ref (binds-hash binds) sym defval)))
 
 (define add-binding*
   (lambda (binds id binding)
@@ -124,6 +132,9 @@
          (scope-set=? (identifier-scopes id1)
                       (identifier-scopes id2)))))
 
+(include "../mm-common/free-id-eq.zuo")
+
+;; The merge step described above at `make-binds`
 (define merge-binds
   (lambda (binds key m-binds)
     (let* ([merged (binds-merged binds)])
@@ -151,25 +162,33 @@
                                (hash-keys m-ht))])
            (make-binds new-ht merged))]))))
 
-(include "../mm-common/free-id-eq.zuo")
+;; A fresh module context has a fresh scope
+(define make-module-context
+  (lambda (mod-path)
+    (let* ([mod-scope (make-scope "module")]
+           [ctx (identifier 'module (hash mod-scope #t))])
+      ctx)))
 
-(define core-sc (hash 'core #t))
-
+;; Creates a binding table from an initial imports and a
+;; context that was just created from `make-module-context`
 (define binds-create
-  (lambda (top-binds-ht ctx)
+  (lambda (provides ctx)
     (let* ([sc (identifier-scopes ctx)]
            [scope (car (hash-keys sc))])
       (let ([binds-ht (foldl (lambda (sym binds-ht)
-                               (let ([bind (hash-ref top-binds-ht sym #f)])
+                               (let ([bind (hash-ref provides sym #f)])
                                  (hash-set binds-ht sym (hash scope (list (cons sc bind))))))
                              (hash)
-                             (hash-keys top-binds-ht))])
+                             (hash-keys provides))])
         (binds-set-hash empty-binds binds-ht)))))
 
+;; Implements the `quote-syntax` form
 (define syntax-quote
   (lambda (v ctx)
     (list 'quote v)))
 
+;; apply a macro; if it's imported, then we'll have to do some work to
+;; merge binding information for the providing context
 (define apply-macro
   (lambda (m s ctx binds k)
     (let* ([apply-macro
@@ -192,12 +211,7 @@
                 [m-binds (cadr (cddr implementation))])
            (apply-macro proc ctx (merge-binds binds key m-binds)))]))))
 
-(define make-module-context
-  (lambda (mod-path)
-    (let* ([mod-scope (make-scope "module")]
-           [ctx (identifier 'module (set-add core-sc mod-scope))])
-      ctx)))
-
+;; convert a local macro to one that can be used as imported elsewhere
 (define make-exported-macro
   (lambda (proc ctx binds)
     (let ([mod-scope (ormap (lambda (s)
