@@ -16,19 +16,17 @@
 
        [show (lambda (v) (display (~a (~s v) "\n")))] ; debugging aid
 
-       [map (lambda (f vs)
-              (letrec ([map (lambda (vs)
+       [map (letrec ([map (lambda (f vs)
+                            (if (null? vs)
+                                '()
+                                (cons (f (car vs)) (map f (cdr vs)))))])
+              map)]
+       [map2 (letrec ([map2 (lambda (f vs v2s)
                               (if (null? vs)
                                   '()
-                                  (cons (f (car vs)) (map (cdr vs)))))])
-                (map vs)))]
-       [map2 (lambda (f vs v2s)
-               (letrec ([map (lambda (vs v2s)
-                               (if (null? vs)
-                                   '()
-                                   (cons (f (car vs) (car v2s))
-                                         (map (cdr vs) (cdr v2s)))))])
-                 (map vs v2s)))]
+                                  (cons (f (car vs) (car v2s))
+                                        (map2 f (cdr vs) (cdr v2s)))))])
+               map2)]
        [foldl (lambda (f init vs)
                 (letrec ([fold (lambda (vs accum)
                                  (if (null? vs)
@@ -456,7 +454,7 @@
                       (if (and (pair? form)
                                (eq? (car form) 'lambda))
                           ;; `zuo/kernel` recognizes this pattern to name the form
-                          `(lambda ,(cadr form) ,(symbol->string (identifier-e id)) ,(cadr (cdr form)))
+                          (list 'lambda (cadr form) (symbol->string (identifier-e id)) (cadr (cdr form)))
                           form))]
 
        [syntax-error (lambda (msg s) (error (~a msg ": " (~s (syntax->datum s)))))]
@@ -496,7 +494,8 @@
                                  [def-id (gensym sym)]
                                  [var (variable sym)]
                                  [new-state (add-binding state id (as-specific (make-defined var)))]
-                                 [new-s `(,variable-set! ,var (,name-lambda ,(stx-cadr (stx-cdr s)) ,id))])
+                                 ;; construct an expression with the var inlined:
+                                 [new-s (list variable-set! var (list name-lambda (stx-cadr (stx-cdr s)) id))])
                             (k new-s new-state))))]
 
        [expand-define-syntax (lambda (s state parse)
@@ -731,15 +730,15 @@
                                                                              (car new-formals))]
                                                                [else state]))])
                                        (add-formals state formals new-formals))])
-                         `(lambda ,new-formals
-                            ,(parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state))))]
+                         (list 'lambda new-formals
+                               (parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state))))]
 
        [nest-bindings (lambda (new-cls body)
                         (letrec ([nest-bindings (lambda (new-cls)
                                                   (if (null? new-cls)
                                                       body
-                                                      `(let (,(car new-cls))
-                                                         ,(nest-bindings (cdr new-cls)))))])
+                                                      (list 'let (list (car new-cls))
+                                                            (nest-bindings (cdr new-cls)))))])
                           (nest-bindings (reverse new-cls))))]
        [parse-let (lambda (s state parse)
                     (unless (>= (stx-length s) 3) (bad-syntax s))
@@ -782,18 +781,18 @@
                                                 [(null? x-cls)
                                                  (nest-bindings
                                                   (map (lambda (new-id)
-                                                         `[,new-id (,variable ',new-id)])
+                                                         (list new-id (list variable (list 'quote new-id))))
                                                        new-ids)
-                                                  `(begin
-                                                     (begin . ,(map2 (lambda (cl new-id)
-                                                                       `(,variable-set! ,(car new-ids)
-                                                                                        ,(name-lambda
-                                                                                          (let ([rhs (stx-cadr (stx-car cls))])
-                                                                                            (parse (add-scope rhs new-scope) state))
-                                                                                          (stx-caar cls))))
-                                                                     (stx->list cls)
-                                                                     (reverse new-ids)))
-                                                     ,(parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state)))]
+                                                  (list 'begin
+                                                        (cons 'begin (map2 (lambda (cl new-id)
+                                                                             (list variable-set! (car new-ids)
+                                                                                   (name-lambda
+                                                                                    (let ([rhs (stx-cadr (stx-car cls))])
+                                                                                      (parse (add-scope rhs new-scope) state))
+                                                                                    (stx-caar cls))))
+                                                                           (stx->list cls)
+                                                                           (reverse new-ids)))
+                                                        (parse (maybe-begin (add-scope (stx-cddr s) new-scope)) state)))]
                                                 [else
                                                  (let* ([cl (stx-car x-cls)])
                                                    (unless (and (stx-list? cl) (= 2 (stx-length cl))) (bad-syntax s))
@@ -834,15 +833,16 @@
                                    (parse-letrec s state parse)]
                                   [(eq? bind 'quote)
                                    (unless (= 2 (stx-length s)) (bad-syntax s))
-                                   `(quote ,(syntax->datum (stx-cadr s)))]
+                                   (list 'quote (syntax->datum (stx-cadr s)))]
                                   [(eq? bind 'quote-syntax)
                                    (unless (= 2 (stx-length s)) (bad-syntax s))
-                                   `(quote ,(stx-cadr s))]
+                                   (list 'quote (stx-cadr s))]
                                   [(eq? bind 'if)
                                    (unless (= 4 (stx-length s)) (bad-syntax s))
-                                   `(if ,(parse (stx-cadr s) state)
-                                        ,(parse (stx-cadr (stx-cdr s)) state)
-                                        ,(parse (stx-cadr (stx-cddr s)) state))]
+                                   (list 'if
+                                         (parse (stx-cadr s) state)
+                                         (parse (stx-cadr (stx-cdr s)) state)
+                                         (parse (stx-cadr (stx-cddr s)) state))]
                                   [(eq? bind 'begin)
                                    (unless (stx-pair? (stx-cdr s)) (bad-syntax s))
                                    (let ([es (map (lambda (e) (parse e state)) (stx->list (stx-cdr s)))])
@@ -859,7 +859,7 @@
                            (cond
                              [(core-form? bind) (bad-syntax s)]
                              [(local? bind) (local-id bind)]
-                             [(variable? bind) `(,variable-ref ,(variable-var bind))]
+                             [(variable? bind) (list variable-ref (variable-var bind))]
                              [(literal? bind) (literal-val bind)]
                              [(macro? bind)
                               (apply-macro bind s ctx state
@@ -895,7 +895,7 @@
                    [print-result (lambda (v)
                                    (unless (eq? v (void))
                                      (display (~a (~v v) "\n"))))]
-                   [add-print (lambda (s) `(,print-result ,s))])
+                   [add-print (lambda (s) (list print-result s))])
               (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
               (hash 'macromod-provides outs))))])
 

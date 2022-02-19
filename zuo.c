@@ -22,7 +22,7 @@ typedef long zuo_int_t;
 typedef unsigned long zuo_uint_t;
 #define ZUO_RECUR_LIMIT 100
 
-#define MIN_HEAP_SIZE (8*1024*1024)
+#define MIN_HEAP_SIZE (32*1024*1024)
 
 /*======================================================================*/
 /* object layouts                                                       */
