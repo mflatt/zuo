@@ -934,6 +934,10 @@ static void zuo_fdisplay(FILE *out, zuo_t *obj) {
   zuo_fout(out, obj, zuo_display_mode);
 }
 
+static void zuo_fwrite(FILE *out, zuo_t *obj) {
+  zuo_fout(out, obj, zuo_write_mode);
+}
+
 static void zuo_stack_dump() {
   zuo_t *k = zuo_interp_k;
   while (k != zuo_done_k) {
@@ -1798,7 +1802,9 @@ static void zuo_undump(zuo_t *d) {
 }
 
 static void bad_form(zuo_t *e) {
-  zuo_fail1("bad form", e);
+  fprintf(stderr, "bad kernel syntax: ");
+  zuo_fwrite(stderr, e);
+  zuo_fail("");
 }
 
 /* Not strictly necessary, but a handy sanity check on input expressions: */
