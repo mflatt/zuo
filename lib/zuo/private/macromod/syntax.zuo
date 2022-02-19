@@ -14,33 +14,15 @@
     (and (hash-keys-subset? sc1 sc2)
          (hash-keys-subset? sc2 sc1))))
 
-(define empty-prop (hash))
-(define prop-add (lambda (prop s) (hash-set prop s 'add)))
-(define prop-remove (lambda (prop s) (hash-set prop s 'remove)))
-(define prop-flip
-  (lambda (prop s)
-    (let ([v (hash-ref prop s #f)])
-      (cond
-        [(not v) (hash-set prop s 'flip)]
-        [(eq? v 'flip) (hash-remove prop s)]
-        [(eq? v 'add) (hash-set prop s 'remove)]
-        [else (hash-set prop s 'add)]))))
-
 (define syntax-tag (string->uninterned-symbol "syntax"))
 (define identifier (lambda (id scopes) (opaque syntax-tag (cons id scopes))))
-(define lazy-prop-pair (lambda (vec) (opaque syntax-tag vec)))
-
-(define syntax? (lambda (v) (and (opaque-ref syntax-tag v #f) #t)))
 (define identifier? (lambda (v) (symbol? (car (opaque-ref syntax-tag v '(#f . #f))))))
-(define lazy-prop-pair? (lambda (v) (pair? (car (opaque-ref syntax-tag v '(#f . #f))))))
-(define identifier-e (lambda (v) (car (opaque-ref syntax-tag v #f))))
+(define syntax-e (lambda (v) (car (opaque-ref syntax-tag v #f))))
 (define identifier-scopes (lambda (v) (cdr (opaque-ref syntax-tag v #f))))
-(define syntax-raw-content (lambda (v) (opaque-ref syntax-tag v #f))) ; returns # for non-syntaz
 
 (define datum->syntax
   (letrec ([datum->syntax (lambda (ctx v)
                             (cond
-                              [(syntax? v) v]
                               [(symbol? v) (identifier v (identifier-scopes ctx))]
                               [(pair? v) (cons (datum->syntax ctx (car v))
                                                (datum->syntax ctx (cdr v)))]
@@ -50,118 +32,26 @@
 (define syntax->datum
   (letrec ([syntax->datum (lambda (s)
                             (cond
-                              [(identifier? s) (identifier-e s)]
-                              [(lazy-prop-pair? s) (syntax->datum (car (syntax-raw-content s)))]
+                              [(identifier? s) (syntax-e s)]
                               [(pair? s) (cons (syntax->datum (car s))
                                                (syntax->datum (cdr s)))]
                               [else s]))])
     syntax->datum))
 
 (define adjust-scope
-  (lambda (s scope op prop-op)
-    (cond
-      [(pair? s) (lazy-prop-pair (cons s (prop-op empty-prop scope)))]
-      [else (let* ([c (syntax-raw-content s)])
-              (if c
-                  (let ([a (car c)])
-                    (if (symbol? a)
-                        (identifier a (op (cdr c) scope))
-                        (lazy-prop-pair (cons (car c)
-                                              (prop-op (cdr c) scope)))))
-                  s))])))
-(define add-scope (lambda (s scope) (adjust-scope s scope set-add prop-add)))
-(define remove-scope (lambda (s scope) (adjust-scope s scope set-remove prop-remove)))
-(define flip-scope (lambda (s scope) (adjust-scope s scope set-flip prop-flip)))
-
-(define apply-prop
-  (lambda (prop s)
-    (cond
-      [(pair? s) (lazy-prop-pair (cons s prop))]
-      [else (foldl (lambda (scope s)
-                     (let ([op (hash-ref prop scope #f)])
-                       (cond
-                         [(eq? op 'add) (add-scope s scope)]
-                         [(eq? op 'remove) (remove-scope s scope)]
-                         [else (flip-scope s scope)])))
-                   s
-                   (hash-keys prop))])))
-
-(define syntax-e
-  (lambda (s) (let ([c (syntax-raw-content s)])
-                (if c
-                    (let ([a (car c)])
-                      (if (symbol? a)
-                          a
-                          (let ([prop (cdr c)])
-                            (cons (apply-prop prop (car a))
-                                  (apply-prop prop (cdr a))))))
-                    s))))
-
-(define stx-pair?
-  (lambda (p) (or (pair? p) (lazy-prop-pair? p))))
-
-(define stx-car
-  (lambda (p) (if (pair? p)
-                  (car p)
-                  (let ([c (syntax-raw-content p)])
-                    (if (and c (pair? (car c)))
-                        (apply-prop (cdr c) (car (car c)))
-                        (error "stx-car: not a syntax pair" p))))))
-(define stx-cdr
-  (lambda (p) (if (pair? p)
-                  (cdr p)
-                  (let ([c (syntax-raw-content p)])
-                    (if (and c (pair? (car c)))
-                        (apply-prop (cdr c) (cdr (car c)))
-                        (error "stx-cdr: not a syntax pair" p))))))
-(define stx-list?
-  (letrec ([stx-list?
-            (lambda (p)
+  (letrec ([adjust-scope
+            (lambda (s scope op)
               (cond
-                [(null? p) #t]
-                [(pair? p) (stx-list? (cdr p))]
-                [else (let ([c (syntax-raw-content p)])
-                        (and c
-                             (let ([pr (car c)])
-                               (and (pair? pr) (stx-list? (cdr pr))))))]))])
-    stx-list?))
+                [(pair? s) (cons (adjust-scope (car s) scope op)
+                                 (adjust-scope (cdr s) scope op))]
+                [(identifier? s) (identifier (syntax-e s)
+                                             (op (identifier-scopes s) scope))]
+                [else s]))])
+    adjust-scope))
 
-(define stx->list
-  (letrec ([stx->list
-            (lambda (p)
-              (cond
-                [(null? p) '()]
-                [(pair? p) (let ([r (stx->list (cdr p))])
-                             (and r (cons (car p) r)))]
-                [else (let ([c (syntax-raw-content p)])
-                        (and c
-                             (let* ([a (car c)])
-                               (and (pair? a)
-                                    (let* ([prop (cdr c)]
-                                           [r (stx->list (apply-prop prop (cdr a)))])
-                                      (and r (cons (apply-prop prop (car a))
-                                                   r)))))))]))])
-    stx->list))
-
-(define stx-length
-  (letrec ([stx-length
-            (lambda (p)
-              (cond
-                [(null? p) 0]
-                [(pair? p) (+ 1 (stx-length (cdr p)))]
-                [else (let ([c (syntax-raw-content p)])
-                        (if c
-                            (let ([a (car c)])
-                              (if (pair? a)
-                                  (+ 1 (stx-length (cdr a)))
-                                  0))
-                            0))]))])
-    stx-length))
-
-(define stx-caar (lambda (p) (stx-car (stx-car p))))
-(define stx-cadr (lambda (p) (stx-car (stx-cdr p))))
-(define stx-cdar (lambda (p) (stx-cdr (stx-car p))))
-(define stx-cddr (lambda (p) (stx-cdr (stx-cdr p))))
+(define add-scope (lambda (s scope) (adjust-scope s scope set-add)))
+(define remove-scope (lambda (s scope) (adjust-scope s scope set-remove)))
+(define flip-scope (lambda (s scope) (adjust-scope s scope set-flip)))
 
 (define empty-binds (hash))
 (define binds-set-context (lambda (binds ctx) binds))
@@ -170,7 +60,7 @@
 
 (define add-binding*
   (lambda (binds id binding)
-    (let* ([sym (identifier-e id)]
+    (let* ([sym (syntax-e id)]
            [sc (identifier-scopes id)]
            [sym-binds (hash-ref binds sym (hash))]
            [k-scope (car (hash-keys sc))] ; relying on deterministic order
@@ -180,7 +70,7 @@
 
 (define find-all-matching-bindings
   (lambda (binds id)
-    (let* ([sym (identifier-e id)]
+    (let* ([sym (syntax-e id)]
            [id-sc (identifier-scopes id)]
            [sym-binds (hash-ref binds sym #f)])
       (if (not sym-binds)
@@ -201,7 +91,7 @@
     (map (lambda (sc+b)
            (unless (hash-keys-subset? (car sc+b)
                                       (car max-sc+b))
-             (error "ambiguous" (identifier-e id))))
+             (error "ambiguous" (syntax-e id))))
          candidate-sc+bs)))
 
 (define resolve*
@@ -224,7 +114,7 @@
   (lambda (id1 id2)
     (unless (identifier? id1) (error "bound-identifier=?: not an identifier" id1))
     (unless (identifier? id2) (error "bound-identifier=?: not an identifier" id2))
-    (and (eq? (identifier-e id1) (identifier-e id2))
+    (and (eq? (syntax-e id1) (syntax-e id2))
          (scope-set=? (identifier-scopes id1)
                       (identifier-scopes id2)))))
 

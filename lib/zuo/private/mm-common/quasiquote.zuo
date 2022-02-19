@@ -1,6 +1,6 @@
 #lang zuo/datum
 
-(require "stx.zuo"
+(require "../pair.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
          "../list.zuo"
@@ -10,34 +10,34 @@
 
 (define-syntax quasiquote
   (lambda (stx)
-    (unless (and (stx-list? stx) (= (stx-length stx) 2))
+    (unless (and (list? stx) (= (length stx) 2))
       (bad-syntax stx))
-    (let loop ([s (stx-cadr stx)] [depth 0])
+    (let loop ([s (cadr stx)] [depth 0])
       (let ([loop-pair (lambda (combine combine-name a d depth)
                          (let ([a (loop a depth)]
                                [d (loop d depth)])
-                           (if (and (stx-pair? a)
-                                    (eq? (stx-car a) 'quote)
-                                    (stx-pair? d)
-                                    (eq? (stx-car d) 'quote))
-                               (list 'quote (combine (stx-cadr a) (stx-cadr d)))
+                           (if (and (pair? a)
+                                    (eq? (car a) 'quote)
+                                    (pair? d)
+                                    (eq? (car d) 'quote))
+                               (list 'quote (combine (cadr a) (cadr d)))
                                (list combine-name a d))))])
         (cond
-          [(stx-pair? s)
-           (let ([a (stx-car s)])
+          [(pair? s)
+           (let ([a (car s)])
              (cond
                [(and (identifier? a)
                      (eq? (syntax-e a) 'unquote))
-                (unless (= (stx-length s) 2)
+                (unless (= (length s) 2)
                   (bad-syntax s))
                 (if (= depth 0)
-                    (stx-cadr s)
-                    (loop-pair list 'list a (stx-cadr s) (- depth 1)))]
+                    (cadr s)
+                    (loop-pair list 'list a (cadr s) (- depth 1)))]
                [(and (identifier? a)
                      (eq? (syntax-e a) 'quasiquote))
-                (unless (= (stx-length s) 2)
+                (unless (= (length s) 2)
                   (bad-syntax s))
-                (loop-pair list 'list a (stx-cadr s) (- depth 1))]
+                (loop-pair list 'list a (cadr s) (- depth 1))]
                [else
-                (loop-pair cons 'cons a (stx-cdr s) depth)]))]
+                (loop-pair cons 'cons a (cdr s) depth)]))]
           [else (list 'quote s)])))))

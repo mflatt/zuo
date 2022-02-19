@@ -1,6 +1,6 @@
 #lang zuo/datum
 
-(require "stx.zuo"
+(require "../pair.zuo"
          "and-or.zuo"
          "syntax-error.zuo"
          "../list.zuo"
@@ -11,27 +11,27 @@
 
 (define-syntax define-var-or-proc
   (lambda (stx)
-    (unless (and (stx-list? stx) (>= (stx-length stx) 3)) (bad-syntax stx))
-    (let ([head (stx-cadr stx)])
+    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
+    (let ([head (cadr stx)])
       (cond
         [(identifier? head)
          ;; regular define
-         (cons 'define (stx-cdr stx))]
-        [(and (stx-pair? head)
-              (identifier? (stx-car head)))
+         (cons 'define (cdr stx))]
+        [(and (pair? head)
+              (identifier? (car head)))
          ;; procedure shorthand
-         (let* ([name (stx-car head)]
-                [args (stx-cdr head)]
+         (let* ([name (car head)]
+                [args (cdr head)]
                 [arg-names (let loop ([args args])
                              (cond
                                [(identifier? args) ; rest arg
                                 (list args)]
-                               [(stx-pair? args)
+                               [(pair? args)
                                 (unless (identifier? (car args))
                                   (syntax-error "define: bad argument" (car args)))
-                                (cons (stx-car args) (loop (stx-cdr args)))]
+                                (cons (car args) (loop (cdr args)))]
                                [(null? args) '()]
                                [else (bad-syntax stx)]))])
            (check-duplicates arg-names)
-           (list 'define name (list* (quote-syntax lambda) args (stx-cddr stx))))]
+           (list 'define name (list* (quote-syntax lambda) args (cddr stx))))]
         [else (bad-syntax stx)]))))

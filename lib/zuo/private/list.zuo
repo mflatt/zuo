@@ -1,8 +1,6 @@
 #lang zuo/private/defmacromod
 
-;; This module could be implemented in either `macromod` or
-;; `defmacromod`, but use use `defmacromod` to keep it faster
-;; (at last for `defmacromod`-only programs)
+;; See note in "pair.zuo" about language choice
 
 (require "defmacromod/and-or.zuo")
 

@@ -6,7 +6,6 @@
 (define syntactic-closure-sym (lambda (sc) (car (opaque-ref syntactic-closure-tag sc #f))))
 (define syntactic-closure-ctx (lambda (sc) (cdr (opaque-ref syntactic-closure-tag sc #f))))
 
-(define syntax? (lambda (v) #f))
 (define identifier? (lambda (v)
                       (or (symbol? v)
                           (syntactic-closure? v))))
@@ -25,13 +24,6 @@
                                     [else stx]))])
                         syntax->datum))
 (define syntax-e (lambda (s) s))
-
-(define stx-pair? pair?)
-(define stx-car car)
-(define stx-cdr cdr)
-(define stx-list? list?)
-(define stx->list (lambda (l) (and (list? l) l)))
-(define stx-length (lambda (l) (if (list? l) (length l) 0)))
 
 (define empty-binds (cons (hash) #f))
 (define binds-set-context (lambda (binds ctx) (cons (car binds) ctx)))

@@ -1,6 +1,6 @@
 #lang zuo/datum
 
-(require "stx.zuo"
+(require "../pair.zuo"
          "syntax-error.zuo")
 
 (provide or
@@ -11,26 +11,26 @@
 
 (define-syntax or
   (lambda (stx)
-    (if (stx-list? stx)
-        (if (null? (stx-cdr stx))
+    (if (list? stx)
+        (if (null? (cdr stx))
             #t
-            (if (null? (stx-cddr stx))
-                (stx-cadr stx)
-                (list (quote-syntax let) (list (list 'tmp (stx-cadr stx)))
+            (if (null? (cddr stx))
+                (cadr stx)
+                (list (quote-syntax let) (list (list 'tmp (cadr stx)))
                       (list (quote-syntax if) 'tmp
                             'tmp
-                            (cons (quote-syntax or) (stx-cddr stx))))))
+                            (cons (quote-syntax or) (cddr stx))))))
         (bad-syntax stx))))
 
 (define-syntax and
   (lambda (stx)
-    (if (stx-list? stx)
-        (if (null? (stx-cdr stx))
+    (if (list? stx)
+        (if (null? (cdr stx))
             #t
-            (if (null? (stx-cddr stx))
-                (stx-cadr stx)
-                (list (quote-syntax if) (stx-cadr stx)
-                      (cons (quote-syntax and) (stx-cddr stx))
+            (if (null? (cddr stx))
+                (cadr stx)
+                (list (quote-syntax if) (cadr stx)
+                      (cons (quote-syntax and) (cddr stx))
                       #f)))
         (bad-syntax stx))))
 
@@ -40,24 +40,24 @@
 
 (define-syntax cond
   (lambda (stx free-id=?)
-    (if (and (stx-list? stx)
-             (stx-pair? (stx-cdr stx))
+    (if (and (list? stx)
+             (pair? (cdr stx))
              (letrec ([ok-clauses?
                        (lambda (l)
                          (or (null? l)
-                             (let ([cl (stx-car l)])
-                               (and (stx-list? cl)
-                                    (>= (stx-length cl) 2)
-                                    (ok-clauses? (stx-cdr l))))))])
-               (ok-clauses? (stx-cdr stx))))
-        (let ([cl1 (stx-cadr stx)]
-              [cls (stx-cddr stx)])
+                             (let ([cl (car l)])
+                               (and (list? cl)
+                                    (>= (length cl) 2)
+                                    (ok-clauses? (cdr l))))))])
+               (ok-clauses? (cdr stx))))
+        (let ([cl1 (cadr stx)]
+              [cls (cddr stx)])
           (list 'if (if (and (null? cls)
-                             (identifier? (stx-car cl1))
-                             (free-id=? 'else (stx-car cl1)))
+                             (identifier? (car cl1))
+                             (free-id=? 'else (car cl1)))
                         #t
-                        (stx-car cl1))
-                (cons (quote-syntax begin) (stx-cdr cl1))
+                        (car cl1))
+                (cons (quote-syntax begin) (cdr cl1))
                 (if (null? cls)
                     '(void)
                     (cons (quote-syntax cond) cls))))
@@ -65,18 +65,18 @@
 
 (define-syntax when
   (lambda (stx)
-    (if (and (stx-list? stx)
-             (>= (stx-length stx) 3))
-        (list 'if (stx-cadr stx)
-              (cons (quote-syntax begin) (stx-cddr stx))
+    (if (and (list? stx)
+             (>= (length stx) 3))
+        (list 'if (cadr stx)
+              (cons (quote-syntax begin) (cddr stx))
               '(void))
         (bad-syntax stx))))
 
 (define-syntax unless
   (lambda (stx)
-    (if (and (stx-list? stx)
-             (>= (stx-length stx) 3))
-        (list 'if (stx-cadr stx)
+    (if (and (list? stx)
+             (>= (length stx) 3))
+        (list 'if (cadr stx)
               '(void)
-              (cons (quote-syntax begin) (stx-cddr stx)))
+              (cons (quote-syntax begin) (cddr stx)))
         (bad-syntax stx))))

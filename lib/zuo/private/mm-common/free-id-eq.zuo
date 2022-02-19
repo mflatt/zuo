@@ -7,4 +7,4 @@
       (or (specific=? bind1 bind2)
           (and (not bind1)
                (not bind2)
-               (eq? (identifier-e id1) (identifier-e id2)))))))
+               (eq? (syntax-e id1) (syntax-e id2)))))))

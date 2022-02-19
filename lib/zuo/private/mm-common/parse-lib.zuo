@@ -3,11 +3,6 @@
 ;; Helpers for "parse.zuo" that depends on the implementation of
 ;; syntax (i.e., syntax objects vs. plain S-expressions)
 
-(define stx-caar (lambda (p) (stx-car (stx-car p))))
-(define stx-cadr (lambda (p) (stx-car (stx-cdr p))))
-(define stx-cdar (lambda (p) (stx-cdr (stx-car p))))
-(define stx-cddr (lambda (p) (stx-cdr (stx-cdr p))))
-
 (define maybe-begin
   (lambda (d)
     (if (null? d)
@@ -19,7 +14,7 @@
     (if (and (pair? form)
              (eq? (car form) 'lambda))
         ;; `zuo/kernel` recognizes this pattern to name the form
-        (list 'lambda (cadr form) (symbol->string (identifier-e id)) (cadr (cdr form)))
+        (list 'lambda (cadr form) (symbol->string (syntax-e id)) (cadr (cdr form)))
         form)))
 
 (define syntax-error
@@ -29,17 +24,17 @@
   (lambda (s) (syntax-error "bad syntax" s)))
 
 (define duplicate-identifier
-  (lambda (id s) (error "duplicate identifier:" (identifier-e id) (syntax->datum s))))
+  (lambda (id s) (error "duplicate identifier:" (syntax-e id) (syntax->datum s))))
 
 (define id-sym-eq?
   (lambda (id sym)
     (and (identifier? id)
-         (eq? (identifier-e id) sym))))
+         (eq? (syntax-e id) sym))))
 
 (define unwrap-mod-path
   (lambda (mod-path)
     (if (identifier? mod-path)
-        (identifier-e mod-path)
+        (syntax-e mod-path)
         mod-path)))
 
 (define add-binding
@@ -53,12 +48,3 @@
       (if (initial-import? bind)
           (initial-import-bind bind)
           bind))))
-
-(define parse*
-  (lambda (parse es state)
-    (letrec ([parse* (lambda (es)
-                       (cond
-                         [(null? es) '()]
-                         [else (cons (parse (stx-car es) state)
-                                     (parse* (stx-cdr es)))]))])
-      (parse* es))))
