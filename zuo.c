@@ -10,6 +10,7 @@
 # include <windows.h>
 # include <direct.h>
 #else
+# include <fcntl.h>
 # include <unistd.h>
 # include <errno.h>
 #endif
@@ -180,18 +181,23 @@ typedef struct {
 typedef enum {
   zuo_handle_open_fd_in_status,
   zuo_handle_open_fd_out_status,
-  zuo_handle_closed_fd_status,
+  zuo_handle_closed_status,
   zuo_handle_process_running_status,
   zuo_handle_process_done_status,
 } zuo_handle_status_t;
 
 typedef struct zuo_handle_t {
   zuo_t obj;
-  zuo_raw_handle_t handle;
-  zuo_handle_status_t status;
+  union {
+    struct {
+      zuo_raw_handle_t handle;
+      zuo_handle_status_t status;
+    } h;
+    zuo_t *forward; /* make sure the object is big enough */
+  } u;
 } zuo_handle_t;
 
-#define ZUO_HANDLE_RAW(obj) (((zuo_handle_t *)(obj))->handle)
+#define ZUO_HANDLE_RAW(obj) (((zuo_handle_t *)(obj))->u.h.handle)
 
 typedef struct {
   zuo_t obj;
@@ -900,10 +906,10 @@ static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_handle(zuo_raw_handle_t handle, zuo_handle_status_t status){
+static zuo_t *zuo_handle(zuo_raw_handle_t handle, zuo_handle_status_t status) {
   zuo_handle_t *obj = (zuo_handle_t *)zuo_new(zuo_handle_tag, sizeof(zuo_handle_t));
-  obj->handle = handle;
-  obj->status = status;
+  obj->u.h.handle = handle;
+  obj->u.h.status = status;
   return (zuo_t *)obj;
 }
 
@@ -2825,12 +2831,16 @@ static zuo_t *zuo_command_line_arguments() {
 /* files/streams                                                        */
 /*======================================================================*/
 
-static char *zuo_drain(FILE *f, zuo_raw_handle_t fd, zuo_int_t *_len) {
+static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
+                       zuo_int_t amount, zuo_int_t *_len) {
   char *s;
   zuo_int_t sz = 256, offset = 0;
+
+  if ((amount >= 0) && (sz > amount))
+    sz = amount;
   
-  s = malloc(sz);
-  while (1) {
+  s = malloc(sz+1);
+  while ((amount < 0) || (offset < amount)) {
     zuo_int_t got;
     if (f) {
       got = fread(s + offset, 1, sz - offset, f);
@@ -2843,20 +2853,30 @@ static char *zuo_drain(FILE *f, zuo_raw_handle_t fd, zuo_int_t *_len) {
       zuo_fail("error reading stream");
     
     if (got == 0) {
-      s[offset] = 0;
-      *_len = offset;
-      return s;
+      break;
     } else {
       offset += got;
       if (offset == sz) {
-        char *new_s = malloc(sz * 2);
+        char *new_s;
+        zuo_int_t new_sz = sz*2;
+        if ((amount >= 0) && (new_sz > amount))
+          new_sz = amount;
+        new_s = malloc(new_sz+1);
         memcpy(new_s, s, sz);
         free(s);
-        sz = sz * 2;
+        sz = new_sz;
         s = new_s;
       }
     }
   }
+
+  s[offset] = 0;
+  *_len = offset;
+
+  if ((offset == 0) && (amount != 0))
+    return NULL;
+
+  return s;
 }
 
 static void zuo_fill(const char *s, zuo_int_t len, FILE *f, zuo_int_t fd) {
@@ -2886,39 +2906,97 @@ static void zuo_close(zuo_raw_handle_t handle)
 #endif
 }
 
-zuo_t *zuo_write_fd(zuo_t *fd_h, zuo_t *str) {
-  const char *who = "write-fd";
+static zuo_t *zuo_open_input_file(zuo_t *path) {
+  const char *who = "open-input-file";
+  zuo_raw_handle_t fd;
+
+  check_string(who, path);
+
+  fd = open(ZUO_STRING_PTR(path), O_RDONLY);
+  if (fd == -1)
+    zuo_fail1w(who, "file open failed", path);
+
+  return zuo_handle(fd, zuo_handle_open_fd_in_status);
+}
+
+static zuo_t *zuo_open_output_file(zuo_t *path) {
+  const char *who = "open-output-file";
+  zuo_raw_handle_t fd;
+
+  check_string(who, path);
+
+  fd = open(ZUO_STRING_PTR(path), O_WRONLY | O_CREAT | O_TRUNC);
+  if (fd == -1)
+    zuo_fail1w(who, "file open failed", path);
+
+  return zuo_handle(fd, zuo_handle_open_fd_out_status);
+}
+
+static zuo_t *zuo_current_input_port() {
+  return zuo_handle(0, zuo_handle_open_fd_in_status);
+}
+
+static zuo_t *zuo_current_output_port() {
+  return zuo_handle(1, zuo_handle_open_fd_out_status);
+}
+
+static zuo_t *zuo_current_error_port() {
+  return zuo_handle(2, zuo_handle_open_fd_out_status);
+}
+
+static zuo_t *zuo_close_port(zuo_t *fd_h) {
+  if (fd_h->tag == zuo_handle_tag) {
+    zuo_handle_t *h = (zuo_handle_t *)fd_h;
+    if ((h->u.h.status == zuo_handle_open_fd_out_status)
+        || (h->u.h.status == zuo_handle_open_fd_in_status)) {
+      zuo_close(h->u.h.handle);
+      h->u.h.status = zuo_handle_closed_status;
+      return z.o_void;
+    }
+  }
+
+  zuo_fail1w("close-port", "not an open input or ouput port", fd_h);
+  return z.o_undefined;
+}
+
+zuo_t *zuo_write_string(zuo_t *str, zuo_t *fd_h) {
+  const char *who = "write-string";
 
   if ((fd_h->tag != zuo_handle_tag)
-      || ((zuo_handle_t *)fd_h)->status != zuo_handle_open_fd_out_status)
-    zuo_fail1w(who, "not an open ouput handle", fd_h);
+      || ((zuo_handle_t *)fd_h)->u.h.status != zuo_handle_open_fd_out_status)
+    zuo_fail1w(who, "not an open ouput port", fd_h);
 
-  check_integer(who, fd_h);
   check_string(who, str);
 
   zuo_fill(ZUO_STRING_PTR(str), ZUO_STRING_LEN(str), NULL, ZUO_HANDLE_RAW(fd_h));
 
-  zuo_close(ZUO_HANDLE_RAW(fd_h));
-  ((zuo_handle_t *)fd_h)->status = zuo_handle_closed_fd_status;
-
   return z.o_void;
 }
 
-static zuo_t *zuo_read_fd(zuo_t *fd_h) {
-  const char *who = "read-fd";
+static zuo_t *zuo_read_string(zuo_t *amount, zuo_t *fd_h) {
+  const char *who = "read-string";
   char *data;
-  zuo_int_t len;
+  zuo_int_t len, amt;
   zuo_t *str;
   
   if ((fd_h->tag != zuo_handle_tag)
-      || ((zuo_handle_t *)fd_h)->status != zuo_handle_open_fd_in_status)
-    zuo_fail1w(who, "not an open input handle", fd_h);
+      || ((zuo_handle_t *)fd_h)->u.h.status != zuo_handle_open_fd_in_status)
+    zuo_fail1w(who, "not an open input port", fd_h);
+  if (((amount != z.o_false)
+       && (amount->tag != zuo_integer_tag))
+      || (ZUO_INT_I(amount) < 0))
+    zuo_fail1w(who, "not a nonnegative integer or #f", amount);
 
-  data = zuo_drain(NULL, ZUO_HANDLE_RAW(fd_h), &len);
+  if (amount == z.o_false)
+    amt = -1;
+  else
+    amt = ZUO_INT_I(amount);
+  
+  data = zuo_drain(NULL, ZUO_HANDLE_RAW(fd_h), amt, &len);
+  if (data == NULL)
+    return z.o_eof;
+  
   str = zuo_sized_string(data, len);
-
-  zuo_close(ZUO_HANDLE_RAW(fd_h));
-  ((zuo_handle_t *)fd_h)->status = zuo_handle_closed_fd_status;
 
   return str;
 }
@@ -2941,8 +3019,13 @@ static zuo_t *zuo_dump_heap_and_exit(zuo_t *file_in) {
   zuo_int_t len;
   char *file, *dump;
 
-  check_string("dump-heap-and-exit", file_in);
-  file = zuo_string_to_c(file_in);
+  if (file_in == z.o_false)
+    file = NULL;
+  else {
+    if (!zuo_is_path_string(file_in))
+      zuo_fail1w("dump-heap-and-exit", "not a path string or #f", file_in);
+    file = zuo_string_to_c(file_in);
+  }
 
   /* no runtime state is preserved */
   {
@@ -2957,9 +3040,9 @@ static zuo_t *zuo_dump_heap_and_exit(zuo_t *file_in) {
   dump = zuo_fasl_dump(&len);
 
   {
-    FILE *f = fopen(file, "w");
+    FILE *f = (file ? fopen(file, "w") : stdout);
     fwrite(dump, len, 1, f);
-    fclose(f);
+    if (file) fclose(f);
   }
 
   exit(0);
@@ -3065,7 +3148,7 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     if (in == NULL)
       zuo_fail1("could not open module file", file_path);
     
-    input = zuo_drain(in, 0, &in_len);
+    input = zuo_drain(in, 0, -1, &in_len);
     fclose(in);
 
     return zuo_eval_module(module_path, input, in_len);
@@ -3342,18 +3425,18 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
 
 static int is_process_handle(zuo_t *p) {
   return ((p->tag == zuo_handle_tag)
-          && ((((zuo_handle_t *)p)->status != zuo_handle_process_done_status)
-              || (((zuo_handle_t *)p)->status != zuo_handle_process_running_status)));
+          && ((((zuo_handle_t *)p)->u.h.status != zuo_handle_process_done_status)
+              || (((zuo_handle_t *)p)->u.h.status != zuo_handle_process_running_status)));
 }
 
 zuo_t *zuo_process_status(zuo_t *p) {
   if (!is_process_handle(p))
     zuo_fail1w("process-status", "not a process handle", p);
 
-  if (((zuo_handle_t *)p)->status == zuo_handle_process_running_status)
+  if (((zuo_handle_t *)p)->u.h.status == zuo_handle_process_running_status)
     return zuo_symbol("running");
   else
-    return zuo_integer((zuo_int_t)((zuo_handle_t *)p)->handle);
+    return zuo_integer((zuo_int_t)((zuo_handle_t *)p)->u.h.handle);
 }
 
 zuo_t *zuo_process_wait(zuo_t *pids_i) {
@@ -3380,8 +3463,8 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
       DWORD w;
       if (GetExitCodeProcess(sci, &w)) {
         if (w != STILL_ACTIVE) {
-          ((zuo_handle_t *)p)->status = zuo_handle_process_done_status;
-          ((zuo_handle_t *)p)->handle = (zuo_raw_handle_t)w;
+          ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
+          ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)w;
           return p;
         } else
           zuo_fail1w("process-wait", "status query failed", p);
@@ -3399,7 +3482,7 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
     
     for (l = pids_i; l != z.o_null; l = _zuo_cdr(l)) {
       zuo_t *p = _zuo_car(l);
-      if (((zuo_handle_t *)p)->status == zuo_handle_process_done_status)
+      if (((zuo_handle_t *)p)->u.h.status == zuo_handle_process_done_status)
         return p;
     }
     
@@ -3409,8 +3492,8 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
     if ((pid >= 0) && WIFEXITED(stat_loc)) {
       zuo_t *p = trie_lookup(Z.o_pid_table, pid);
       if (p->tag == zuo_handle_tag) {
-        ((zuo_handle_t *)p)->status = zuo_handle_process_done_status;
-        ((zuo_handle_t *)p)->handle = (zuo_raw_handle_t)WEXITSTATUS(stat_loc);
+        ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
+        ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)WEXITSTATUS(stat_loc);
         trie_set(Z.o_pid_table, pid, z.o_undefined, z.o_undefined);
       }
     }
@@ -3786,11 +3869,19 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
 
+  ZUO_TOP_ENV_SET_PRIMITIVE1("open-input-file", zuo_open_input_file);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("open-output-file", zuo_open_output_file);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("current-input-port", zuo_current_input_port);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("current-output-port", zuo_current_output_port);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("current-error-port", zuo_current_error_port);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("close-port", zuo_close_port);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("read-string", zuo_read_string);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("write-string", zuo_write_string);
+  ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
+
   ZUO_TOP_ENV_SET_PRIMITIVE2("process", zuo_process);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_wait);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("read-fd", zuo_read_fd);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("write-fd", zuo_write_fd);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("display", zuo_display);
   ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error, 0);
@@ -3813,7 +3904,7 @@ int main(int argc, char **argv) {
   if (boot_dump) {
     FILE *f = fopen(boot_dump, "r");
     zuo_int_t len;
-    char *dump = zuo_drain(f, 0, &len);
+    char *dump = zuo_drain(f, 0, -1, &len);
     fclose(f);
     zuo_fasl_restore(dump, len);
     free(dump);
@@ -3844,7 +3935,7 @@ int main(int argc, char **argv) {
     (void)zuo_dynamic_require(zuo_string(load_file));
   else {
     zuo_int_t in_len;
-    char *input = zuo_drain(stdin, 0, &in_len);
+    char *input = zuo_drain(stdin, 0, -1, &in_len);
     zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("-"), z.o_false);
     (void)zuo_eval_module(stdin_path, input, in_len);
   }
