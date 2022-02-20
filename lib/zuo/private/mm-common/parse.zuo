@@ -145,9 +145,7 @@
                       [req-path (car req-path+filter+check)]
                       [filter (cadr req-path+filter+check)]
                       [check (cadr (cdr req-path+filter+check))]
-                      [in-mod-path (if (string? req-path)
-                                       (path->complete-path req-path (car (split-path mod-path)))
-                                       (syntax->datum req-path))]
+                      [in-mod-path (module-path-join req-path mod-path)]
                       [mod (dynamic-require in-mod-path)]
                       [provides (hash-ref mod 'macromod-provides #f)]
                       [state (init-nominal state (unwrap-mod-path req-path))])
@@ -194,9 +192,7 @@
       (bad-syntax s))
     (let* ([include-ctx (car s)]
            [in-mod-path (unwrap-mod-path (cadr s))]
-           [in-mod-path (if (string? in-mod-path)
-                            (path->complete-path in-mod-path (car (split-path mod-path)))
-                            (syntax->datum in-mod-path))]
+           [in-mod-path (module-path-join in-mod-path mod-path)]
            [mod (dynamic-require in-mod-path)]
            [datums (hash-ref mod 'datums #f)])
       (unless datums (error "not an includable module" in-mod-path))

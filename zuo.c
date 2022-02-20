@@ -1693,7 +1693,7 @@ static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
       break;
   }
   if (!j || !((s[o+i+j] == 0) || isspace(s[o+i+j])))
-    zuo_fail("read: expected symbolic module path after #lang");
+    zuo_fail("read: expected module library path after #lang");
 
   r = malloc(j+1);
   memcpy(r, s+o+i, j);
@@ -2551,18 +2551,48 @@ zuo_t *zuo_eval(zuo_t *e) {
 /* paths                                                                */
 /*======================================================================*/
 
-static void check_path_string(const char *who, zuo_t *obj) {
+static int zuo_is_path_string(zuo_t *obj) {
   zuo_int_t i;
-  const char *msg = "not a path string";
   
   if ((obj->tag != zuo_string_tag)
       || ZUO_STRING_LEN(obj) == 0)
-    zuo_fail1w(who, msg, obj);
+    return 0;
 
   for (i = ZUO_STRING_LEN(obj); i--; ) {
     if (((zuo_string_t *)obj)->s[i] == 0)
-      zuo_fail1w(who, msg, obj);
+      return 0;
   }
+
+  return 1;
+}
+
+static int zuo_is_module_path(zuo_t *obj, int *_saw_slash) {
+  if (obj->tag == zuo_symbol_tag) {
+    zuo_string_t *str = (zuo_string_t *)((zuo_symbol_t *)obj)->str;
+    if (str->len == 0)
+      str = NULL;
+    else {
+      zuo_int_t i;
+      for (i = 0; i < str->len; i++) {
+        if (str->s[i] == '/') *_saw_slash = 1;
+        if (!zuo_is_symbol_module_char(str->s[i]))
+          return 0;
+      }
+    }
+    return 1;
+  } else
+    return zuo_is_path_string(obj);
+}
+
+static void check_path_string(const char *who, zuo_t *obj) {
+  if (!zuo_is_path_string(obj))
+    zuo_fail1w(who, "not a path string", obj);
+}
+
+static void check_module_path(const char *who, zuo_t *obj) {
+  int saw_slash = 0;
+  if (!zuo_is_module_path(obj, &saw_slash))
+    zuo_fail1w(who, "not a module path", obj);
 }
 
 static int path_is_absolute(const char *p) {
@@ -2682,36 +2712,98 @@ static zuo_t *zuo_path_to_complete_path(zuo_t *path, zuo_t *rel_to) {
 }
 
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
-  zuo_string_t *str;
   zuo_t *strobj;
   int saw_slash = 0;
 
-  if (path->tag == zuo_symbol_tag) {
-    str = (zuo_string_t *)((zuo_symbol_t *)path)->str;
-    if (str->len == 0)
-      str = NULL;
-    else {
-      zuo_int_t i;
-      for (i = 0; i < str->len; i++) {
-        if (str->s[i] == '/') saw_slash = 1;
-        if (!zuo_is_symbol_module_char(str->s[i])) {
-          str = NULL;
-          break;
-        }
-      }
-    }
-  } else
-    str = NULL;
-    
-  if (str == NULL)
-    zuo_fail1w("module-path->path", "not a module-path symbol", path);
-  
-  strobj = zuo_tilde_a(zuo_cons((zuo_t *)str,
+  if ((path->tag != zuo_symbol_tag)
+      || !zuo_is_module_path(path, &saw_slash))
+    zuo_fail1w("module-path->path", "not a module library path", path);
+
+  strobj = zuo_tilde_a(zuo_cons(((zuo_symbol_t *)path)->str,
                                 zuo_cons(saw_slash ? zuo_string("") : zuo_string("/main"),
                                          zuo_cons(zuo_string(".zuo"),
                                                   z.o_null))));
 
   return zuo_build_path(Z.o_library_path, strobj);
+}
+
+zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
+  const char *who = "module-path-join";
+  int saw_slash = 0;
+  check_module_path(who, rel_mod_path);
+  if (!zuo_is_module_path(base_mod_path, &saw_slash))
+    zuo_fail1w(who, "not a module path", base_mod_path);
+
+  if (rel_mod_path->tag == zuo_symbol_tag)
+    return rel_mod_path;
+
+  if (zuo_path_is_absolute(rel_mod_path))
+    return rel_mod_path;
+
+  if (base_mod_path->tag == zuo_symbol_tag) {
+    /* This is the complicated case: string relative to symbolic */
+    zuo_int_t i = 0, len = ZUO_STRING_LEN(rel_mod_path);
+    unsigned char *s = (unsigned char *)ZUO_STRING_PTR(rel_mod_path);
+    int bad = 0, ups = 1, ups_until = 0, saw_non_dot = 0, suffix = 0;
+    zuo_t *mod_path;
+
+    while (i < len) {
+      if (!saw_non_dot && (s[i] == '.')) {
+        if (s[i+1] == '/')
+          i += 2;
+        else if (s[i+1] == '.') {
+          if (s[i+2] == '/')
+            i += 3;
+          else
+            bad = 1;
+          ups++;
+        } else
+          bad = 1;
+        ups_until = i;
+      } else if (zuo_is_symbol_module_char(s[i])) {
+        saw_non_dot = 1;
+        if (s[i] == '/')
+          bad = 1;
+        else if (s[i+1] == '/')
+          i += 2;
+        else
+          i++;
+      } else if ((s[i] == '.')
+                 && (s[i+1] == 'z')
+                 && (s[i+2] == 'u')
+                 && (s[i+3] == 'o')
+                 && (s[i+4] == 0)) {
+        suffix = 4;
+        i += 4;
+      } else
+        bad = 1;
+      if (bad)
+        zuo_fail1w(who, "not a relative module library path", rel_mod_path);
+    }
+
+    if (suffix == 0)
+      zuo_fail1w(who, "relative module library path lacks \".zou\"", rel_mod_path);
+
+    mod_path = ((zuo_symbol_t *)base_mod_path)->str;
+    if (!saw_slash)
+      mod_path = zuo_tilde_a(zuo_cons(mod_path, zuo_cons(zuo_string("/main"), z.o_null)));
+
+    while (ups) {
+      zuo_t *l = zuo_split_path(mod_path);
+      mod_path = _zuo_car(l);
+      if (mod_path == z.o_false)
+        zuo_fail1w(who, "too many \"up\" elements", rel_mod_path);
+      ups--;
+    }
+
+    mod_path = zuo_tilde_a(zuo_cons(mod_path,
+                                    zuo_cons(zuo_sized_string((char *)s + ups_until,
+                                                              len - ups_until - suffix),
+                                             z.o_null)));
+
+    return zuo_string_to_symbol(mod_path);
+  } else
+    return zuo_path_to_complete_path(rel_mod_path, base_mod_path);
 }
 
 static zuo_t *zuo_find_exe() {
@@ -2899,7 +2991,9 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
     module_path = _zuo_car(Z.o_stash);
     v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_sized_string(input, input_len),
                                          zuo_cons(zuo_integer(post),
-                                                  zuo_cons(module_path,
+                                                  zuo_cons(zuo_cons(z.o_quote_symbol,
+                                                                    zuo_cons(module_path,
+                                                                             z.o_null)),
                                                            z.o_null)))));
   }
   free(lang);
@@ -2926,11 +3020,12 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
 }
 
 static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
+  zuo_t *file_path;
   
   if (module_path->tag == zuo_symbol_tag)
-    module_path = zuo_library_path_to_file_path(module_path);
+    file_path = zuo_library_path_to_file_path(module_path);
   else if (module_path->tag == zuo_string_tag)
-    module_path = zuo_path_to_complete_path(module_path, z.o_false);
+    file_path = zuo_path_to_complete_path(module_path, z.o_false);
   else
     zuo_fail1w("dynamic-require", "not a module path", module_path);
 
@@ -2940,8 +3035,13 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     
     for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
       zuo_t *a = _zuo_car(l);
-      if (zuo_string_eql(_zuo_car(a), module_path) == z.o_true)
-        return _zuo_cdr(a);
+      if (module_path->tag == zuo_symbol_tag) {
+        if (_zuo_car(a) == module_path)
+          return _zuo_cdr(a);
+      } else if (_zuo_car(a)->tag == zuo_string_tag) {
+        if (zuo_string_eql(_zuo_car(a), module_path) == z.o_true)
+          return _zuo_cdr(a);
+      } 
     }
   }
 
@@ -2960,10 +3060,10 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     char *filename, *input;
     zuo_int_t in_len;
     
-    filename = ZUO_STRING_PTR(module_path);
+    filename = ZUO_STRING_PTR(file_path);
     in = fopen(filename, "r");
     if (in == NULL)
-      zuo_fail1("could not open module file", module_path);
+      zuo_fail1("could not open module file", file_path);
     
     input = zuo_drain(in, 0, &in_len);
     fclose(in);
@@ -3702,6 +3802,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("read-from-string-all", zuo_read_all);
   ZUO_TOP_ENV_SET_PRIMITIVE1("eval", zuo_eval);
   ZUO_TOP_ENV_SET_PRIMITIVE1("dynamic-require", zuo_dynamic_require);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE0("find-exe", zuo_find_exe);

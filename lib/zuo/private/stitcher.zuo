@@ -244,10 +244,7 @@
                                   (if (= 2 (length e))
                                       (let* ([name (car (cdr e))]
                                              [mod-path (cdr e+path)]
-                                             [mod-path (if (string? name)
-                                                           (path->complete-path name
-                                                                                (car (split-path mod-path)))
-                                                           name)]
+                                             [mod-path (module-path-join name mod-path)]
                                              [mod (dynamic-require mod-path)])
                                         (let ([inc-es (hash-ref mod 'datums #f)])
                                           (if inc-es
