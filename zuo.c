@@ -16,7 +16,10 @@
 # define ASSERT(x) do { } while (0)
 #endif
 
-#define ZUO_LIB_PATH "lib"
+#ifndef ZUO_LIB_PATH
+# define ZUO_LIB_PATH "lib"
+#endif
+static const char *zuo_lib_path = ZUO_LIB_PATH;
 
 typedef long zuo_int_t;
 typedef unsigned long zuo_uint_t;
@@ -32,8 +35,12 @@ static int zuo_logging = 0;
 static int zuo_probe_each = 0;
 static int zuo_probe_counter = 0;
 
-static void zuo_configure(int argc, char **argv) {
+static void zuo_configure() {
   const char *s;
+
+  if ((s = getenv("ZUO_LIB_PATH"))) {
+    zuo_lib_path = s;
+  }
 
   if (getenv("ZUO_LOG"))
     zuo_logging = 1;
@@ -44,8 +51,8 @@ static void zuo_configure(int argc, char **argv) {
       s++;
     }
   }
-}     
-      
+}
+
 /*======================================================================*/
 /* object layouts                                                       */
 /*======================================================================*/
@@ -226,6 +233,10 @@ static zuo_t *zuo_if_symbol;
 
 /* process status table (for Unix) */
 static zuo_t *zuo_pid_table;
+
+/* startup info */
+static zuo_t *zuo_exe_path;
+static zuo_t *zuo_cmdline_arguments;
 
 /* data to save across a GC that's possibly triggered by interp */
 static zuo_t *zuo_stash;
@@ -426,6 +437,9 @@ static void zuo_collect() {
   zuo_update(&zuo_if_symbol);
 
   zuo_update(&zuo_pid_table);
+
+  zuo_update(&zuo_exe_path);
+  zuo_update(&zuo_cmdline_arguments);
   
   zuo_update(&zuo_stash);
 
@@ -2361,6 +2375,21 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
   return zuo_build_path(zuo_library_path, strobj);
 }
 
+static zuo_t *zuo_find_exe() {
+  return zuo_exe_path;
+}
+
+static zuo_t *zuo_make_cmdline_arguments(int argc, char **argv) {
+  zuo_t *l = zuo_null;
+  while (argc-- > 0)
+    l = zuo_cons(zuo_string(argv[argc]), l);
+  return l;
+}
+
+static zuo_t *zuo_command_line_arguments() {
+  return zuo_cmdline_arguments;
+}
+
 /*======================================================================*/
 /* files/streams                                                        */
 /*======================================================================*/
@@ -2477,6 +2506,54 @@ static char *zuo_string_to_c(zuo_t *obj) {
 /* modules                                                              */
 /*======================================================================*/
 
+static zuo_t *zuo_dynamic_require(zuo_t *module_path);
+
+static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free) {
+  char *input = input_to_read_and_free;
+  char *lang;
+  zuo_int_t post;
+  zuo_t *v;
+
+  lang = zuo_read_language(input, &post);
+  zuo_stash = zuo_cons(module_path, zuo_stash);
+
+  if (!strcmp(lang, "zuo/kernel")) {
+    zuo_t *e = zuo_read_one_str(input + post);
+    v = zuo_eval(e);
+  } else {
+    zuo_t *env = zuo_dynamic_require(zuo_symbol(lang));
+    zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
+    if (proc->tag != zuo_closure_tag)
+      zuo_fail1("not a language module path", zuo_symbol(lang));
+    module_path = _zuo_car(zuo_stash);
+    v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_string(input),
+                                         zuo_cons(zuo_integer(post),
+                                                  zuo_cons(module_path,
+                                                           zuo_null)))));
+  }
+  free(lang);
+
+  module_path = _zuo_car(zuo_stash);
+  zuo_stash = _zuo_cdr(zuo_stash);
+
+  free(input);
+
+  if (v->tag != zuo_trie_node_tag)
+    zuo_fail1("module did not produce a hash table", module_path);
+
+  zuo_modules = zuo_cons(zuo_cons(module_path, v), zuo_modules);
+
+  if (zuo_logging) {
+    zuo_logging--;
+    fprintf(stderr, "]");
+    if (zuo_logging == 1)
+      fprintf(stderr, "]\n");
+    fflush(stderr);
+  }
+
+  return v;
+}
+
 static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
   
   if (module_path->tag == zuo_symbol_tag)
@@ -2519,50 +2596,7 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     input = zuo_drain(in, 0);
     fclose(in);
 
-    {
-      char *lang;
-      zuo_int_t post;
-      zuo_t *v;
-
-      lang = zuo_read_language(input, &post);
-      zuo_stash = zuo_cons(module_path, zuo_stash);
-
-      if (!strcmp(lang, "zuo/kernel")) {
-        zuo_t *e = zuo_read_one_str(input + post);
-        v = zuo_eval(e);
-      } else {
-        zuo_t *env = zuo_dynamic_require(zuo_symbol(lang));
-        zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
-        if (proc->tag != zuo_closure_tag)
-          zuo_fail1("not a language module path", zuo_symbol(lang));
-        module_path = _zuo_car(zuo_stash);
-        v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_string(input),
-                                             zuo_cons(zuo_integer(post),
-                                                      zuo_cons(module_path,
-                                                               zuo_null)))));
-      }
-      free(lang);
-
-      module_path = _zuo_car(zuo_stash);
-      zuo_stash = _zuo_cdr(zuo_stash);
-      
-      free(input);
-
-      if (v->tag != zuo_trie_node_tag)
-        zuo_fail1("module did not produce a hash table", module_path);
-
-      zuo_modules = zuo_cons(zuo_cons(module_path, v), zuo_modules);
-
-      if (zuo_logging) {
-        zuo_logging--;
-        fprintf(stderr, "]");
-        if (zuo_logging == 1)
-          fprintf(stderr, "]\n");
-        fflush(stderr);
-      }
-      
-      return v;
-    }
+    return zuo_eval_module(module_path, input);
   }
 }
 
@@ -2938,7 +2972,7 @@ static char *zuo_self_path_c(char *exec_file)
   }
   s[len] = 0;
 
-  return buf;
+  return s;
 }
 
 #elif defined(__FreeBSD__) || defined(__NetBSD__)
@@ -3113,8 +3147,11 @@ static zuo_t *zuo_self_path(char *exec_file) {
   TRIE_SET_TOP_ENV(name, val)
 
 int main(int argc, char **argv) {
-  zuo_configure(argc, argv);
-  
+  zuo_t *load_file;
+  char *argv0 = argv[0];
+
+  zuo_configure();
+
   zuo_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   zuo_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
@@ -3138,13 +3175,15 @@ int main(int argc, char **argv) {
 
   zuo_pid_table = zuo_trie_node();
 
+  zuo_exe_path = zuo_self_path(argv0);
+
   zuo_stash = zuo_false;
   
   zuo_top_env = zuo_trie_node();
   zuo_modules = zuo_null;
-  zuo_library_path = zuo_string(ZUO_LIB_PATH);
+  zuo_library_path = zuo_string(zuo_lib_path);
   if (!zuo_path_is_absolute(zuo_library_path))
-    zuo_library_path = zuo_build_path(_zuo_car(zuo_split_path(zuo_self_path(argv[0]))),
+    zuo_library_path = zuo_build_path(_zuo_car(zuo_split_path(zuo_exe_path)),
                                       zuo_library_path);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("pair?", zuo_pair_p);
@@ -3232,20 +3271,75 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("dynamic-require", zuo_dynamic_require);
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
-  if (argc > 1)
-    (void)zuo_dynamic_require(zuo_string(argv[1]));
+  ZUO_TOP_ENV_SET_PRIMITIVE0("find-exe", zuo_find_exe);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("current-command-line-arguments", zuo_command_line_arguments);
+
+  argc--;
+  argv++;
+  load_file = zuo_undefined;
+
+  while (argc > 0) {
+    if (!strcmp(argv[0], "-h") || !strcmp(argv[0], "--help")) {
+      fprintf(stdout, ("\n"
+                       "usage: %s [<option> ...] <argument> ...\n"
+                       "\n"
+                       "supported <option>s:\n"
+                       "\n"
+                       "  -X <dir>, --collects <dir>\n"
+                       "     Use <dir> as the library-collection root, overriding `ZUO_LIB;\n"
+                       "     the default is \"%s\" relative to the executable\n"
+                       "  -\n"
+                       "     Read module from stdin instead of first <argument>\n"
+                       "  --\n"
+                       "     No argument following this switch is used as a switch\n"
+                       "  -h, --help\n"
+                       "     Show this information and exit, ignoring other options\n"
+                       "\n"
+                       "Unless `-` is provided, the first <argument> is used as a module\n"
+                       "path to load. Additional <argument>s are made available from the\n"
+                       "`current-command-lne-arguments` procedure. If an <option> switch is\n"
+                       "provided multiple times, the last one takes precedence.\n\n"),
+              argv0, ZUO_LIB_PATH);
+      exit(0);
+    } else if (!strcmp(argv[0], "-X") || !strcmp(argv[0], "--collects")) {
+      if (argc > 1) {
+        zuo_library_path = zuo_path_to_complete_path(zuo_string(argv[1]),
+                                                     zuo_false);
+        argc -= 2;
+        argv += 2;
+      } else {
+        fprintf(stderr, "%s: expected a path after -X", argv0);
+        zuo_fail("");
+      }
+    } else if (!strcmp(argv[0], "--")) {
+      argc--;
+      argv++;
+      break;
+    } else if (!strcmp(argv[0], "-")) {
+      load_file = zuo_false;
+      argc--;
+      argv++;
+    } else if (argv[0][0] == '-') {
+      fprintf(stderr, "%s: unrecognized flag: %s", argv0, argv[0]);
+      zuo_fail("");
+    } else
+      break;
+  }
+
+  if ((load_file == zuo_undefined) && (argc > 0)) {
+    load_file = zuo_string(argv[0]);
+    argc--;
+    argv++;
+  }
+
+  zuo_cmdline_arguments = zuo_make_cmdline_arguments(argc, argv);
+
+  if (load_file->tag == zuo_string_tag)
+    (void)zuo_dynamic_require(load_file);
   else {
     char *input = zuo_drain(stdin, 0);
-    zuo_t *es = zuo_read_all_str(input);
-    free(input);
-    while (es != zuo_null) {
-      zuo_t *v;
-      zuo_stash = _zuo_cdr(es);
-      v = zuo_eval(_zuo_car(es));
-      zuo_fprint(stdout, v);
-      fprintf(stdout, "\n");
-      es = zuo_stash;
-    }
+    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("-"), zuo_false);
+    (void)zuo_eval_module(stdin_path, input);
   }
 
   return 0;
