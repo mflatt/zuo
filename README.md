@@ -20,8 +20,8 @@ Building Zuo
 ------------
 
 Compile `zuo.c` with a C compiler. No additional are files needed,
-other than system and C-library headers. No compiler flags are needed,
-although niceties like `-o zuo` or `-O2` are a good idea.
+other than system and C-library headers. No compiler flags should be
+needed, although flags like `-o zuo` or `-O2` are a good idea.
 
 
 Running Zuo
@@ -41,11 +41,33 @@ your shell uses for an end-of-file. But it's more expected that you
 put the above in a file `hello.zuo` and supply that file's path on the
 command line.
 
+
+Library Modules and Startup Performance
+---------------------------------------
+
 Except for the built-in `zuo/kernel` language module, Zuo finds
 languages in library collections. By default, Zuo looks for a
 directory `lib` relative to the executable as the root of the
 collection tree. You can supply an alternate collection-root path with
 the `-X` command-line flag.
+
+You can also create an instance of Zuo with a set of libraries
+embedded as a heap image. Embedding a heap image has two advantages:
+
+ * No extra directory of module sources is needed.
+
+ * Zuo can start much faster.
+
+The `embed-heap.zuo` script generates a `.c` file that is a copy of
+`zuo.c` plus embedded modules. Byt default, the `zuo` module and its
+dependencies are included, but you can specify others with `++lib`. In
+addition, the default collection-root path is disabled in the
+generated copy, unless you supply `--keep-collects` to
+`embed-heap.zo`.
+
+You can use heap images without embedding. The `dump-heap-and-exit`
+Zuo kernel permitive creates a heap image, and a `-B` or `--boot`
+command-line flag for Zuo uses the given boot image on startup.
 
 
 Kernel Language
@@ -78,6 +100,7 @@ An error in Zuo always terminates the program. If you have a
 subroutine that needs to be able to fail, you can run a separate Zuo
 process. (The `find-exe` function reports the path to the current Zuo
 executable, and you can use that with `process`.)
+
 
 Macros
 ------

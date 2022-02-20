@@ -2,6 +2,7 @@
 
 (require "and-or.zuo"
          "syntax-error.zuo"
+         "../pair.zuo"
          "../list.zuo"
          "let.zuo"
          "define.zuo"
@@ -10,6 +11,7 @@
 (provide (all-from-out zuo/private/defmacromod
                        "and-or.zuo"
                        "syntax-error.zuo"
+                       "../pair.zuo"
                        "../list.zuo"
                        "let.zuo"
                        "define.zuo"

@@ -5,8 +5,6 @@
 (define cdar (lambda (p) (cdr (car p))))
 (define cddr (lambda (p) (cdr (cdr p))))
 
-(define show (lambda (v) (display (~a (~s v) "\n")))) ; debugging aid
-
 (define map
   (letrec ([map (lambda (f vs)
                   (if (null? vs)

@@ -1,0 +1,97 @@
+#lang zuo
+
+(define (current-program) "embed-lib.zuo")
+
+(define (need-arg args)
+  (when (null? (cdr args))
+    (error (~a (current-program) ": flag " (car args) " needs an argument"))))
+
+(define cmd
+  (let loop ([args (current-command-line-arguments)] [cmd (hash)])
+    (cond
+      [(null? args) cmd]
+      [(string=? (car args) "-o")
+       (need-arg args)
+       (loop (cddr args) (hash-set cmd 'output (cadr args)))]
+      [(or (string=? (car args) "+l") (string=? (car args) "++lib"))
+       (need-arg args)
+       (loop (cddr args) (hash-set cmd 'libs (cons (cadr args)
+                                                   (hash-ref cmd 'libs '()))))]
+      [(string=? (car args) "--keep-collects")
+       (loop (cdr args) (hash-set cmd 'keep-collects? #t))]
+      [else
+       (error (~a (current-program) ": unrecognized argument " (car args)))])))
+
+(define given-libs (hash-ref cmd 'libs '()))
+(define libs (if (null? given-libs)
+                 '(zuo)
+                 given-libs))
+
+(define heap
+  (let ([a (lambda (l p) (apply p l))])
+    (a (process (list (find-exe)) '(redirect-in redirect-out))
+       (lambda (p in out err)
+         (fd-write in "#lang zuo/kernel\n")
+         (fd-write in "(begin\n")
+         (for-each (lambda (lib)
+                     (fd-write in (~a "(dynamic-require '" lib ")\n")))
+                   libs)
+         (fd-write in "(dump-heap-and-exit (fd-open-output 'stdout)))\n")
+         (fd-close in)
+         (let ([heap (fd-read out eof)])
+           (fd-close out)
+           (process-wait p)
+           (unless (= 0 (process-status p))
+             (error "heap dump failed"))
+           heap)))))
+
+(define out-file (hash-ref cmd 'output #f))
+
+(define zuo.c (fd-read (fd-open-input "zuo.c") eof))
+(define out (fd-open-output (or out-file 'stdout)))
+
+(define-syntax char
+  (lambda (stx)
+    (string-ref (cadr stx) 0)))
+
+(define lines
+  (let loop ([start 0] [i 0])
+    (cond
+      [(= i (string-length zuo.c))
+       (if (= start i)
+           '()
+           (list (substring zuo.c start i)))]
+      [(= (string-ref zuo.c i) (char "\n"))
+       (cons (substring zuo.c start i)
+             (loop (+ i 1) (+ i 1)))]
+      [else (loop start (+ i 1))])))
+
+(for-each
+ (lambda (line)
+   (cond
+     [(string=? line "#define EMBEDDED_BOOT_HEAP 0")
+      (unless (hash-ref cmd 'keep-collects? #f)
+        (fd-write out (~a "#define ZUO_LIB_PATH NULL\n")))
+      (fd-write out (~a "#define EMBEDDED_BOOT_HEAP 1\n"))
+      (fd-write out (~a "static int emedded_boot_heap_len = "
+                        (string-length heap)
+                        ";\n"))
+      (fd-write out (~a "static char emedded_boot_heap[] = {\n"))
+      (let ([accum->line (lambda (accum) (apply ~a (reverse (cons "\n" accum))))])
+        (let loop ([i 0] [col 0] [accum '()])
+          (cond
+            [(= i (string-length heap))
+             (unless (null? accum)
+               (fd-write out (accum->line accum)))]
+            [(= col 20)
+             (fd-write out (accum->line accum))
+             (loop i 0 '())]
+            [else
+             (loop (+ i 1) (+ col 1)
+                   (cons (~a " " (string-ref heap i) ",")
+                         accum))])))
+      (fd-write out (~a " 0 };\n"))]
+     [else
+      (fd-write out (~a line "\n"))]))
+ lines)
+

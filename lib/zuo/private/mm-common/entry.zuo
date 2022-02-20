@@ -24,7 +24,7 @@
                           (hash-keys provides))]
              [print-result (lambda (v)
                              (unless (eq? v (void))
-                               (display (~a (~v v) "\n"))))]
+                               (alert (~v v))))]
              [add-print (lambda (s) (list print-result s))])
         (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
         (hash 'macromod-provides outs)))))
