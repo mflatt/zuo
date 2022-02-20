@@ -33,7 +33,18 @@
                     (bad-syntax s))
                   (if (= depth 0)
                       (cadr s)
-                      (loop-pair list 'list a (cadr s) (- depth 1)))]
+                      (loop-pair list (quote-syntax list) a (cadr s) (- depth 1)))]
+                 [(and (identifier? a)
+                       (eq? (syntax-e a) 'unquote-splicing))
+                  (syntax-error "misplaced splicing unquote" s)]
+                 [(and (pair? a)
+                       (identifier? (car a))
+                       (eq? (syntax-e (car a)) 'unquote-splicing))
+                  (unless (= (length a) 2)
+                    (bad-syntax a))
+                  (if (= depth 0)
+                      (list (quote-syntax append) (cadr a) (loop (cdr s) depth))
+                      (loop-pair cons (quote-syntax cons) a (cdr s) depth))]
                  [(and (identifier? a)
                        (eq? (syntax-e a) 'quasiquote))
                   (unless (= (length s) 2)
