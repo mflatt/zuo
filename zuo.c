@@ -13,6 +13,8 @@
 # include <fcntl.h>
 # include <unistd.h>
 # include <errno.h>
+# include <sys/types.h>
+# include <sys/wait.h>
 #endif
 
 #if 0
@@ -22,18 +24,22 @@
 # define ASSERT(x) do { } while (0)
 #endif
 
+#include <stdint.h>
+
+/* `zuo_int_t` should be a 64-bit integer type, so we don't have to
+   worry about Y2038 or large file sizes. `zuo_int32_t` should be a
+   32-bit integer type, obviously. */
+typedef int64_t zuo_int_t;
+typedef uint64_t zuo_uint_t;
+
+typedef int32_t zuo_int32_t;
+typedef uint32_t zuo_uint32_t;
+
 #ifdef WIN32
-typedef long long zuo_int_t;
-typedef unsigned long long zuo_uint_t;
 typedef HANDLE zuo_raw_handle_t;
 #else
-typedef long zuo_int_t;
-typedef unsigned long zuo_uint_t;
 typedef int zuo_raw_handle_t;
 #endif
-
-typedef int zuo_int32_t;
-typedef unsigned int zuo_uint32_t;
 
 /* the "embed-lib.zuo" script looks for this line: */
 #define EMBEDDED_BOOT_HEAP 0
@@ -42,10 +48,6 @@ typedef unsigned int zuo_uint32_t;
 # define ZUO_LIB_PATH "lib"
 #endif
 static const char *zuo_lib_path = ZUO_LIB_PATH;
-
-/* `zuo_int_t` should be a 64-bit integer type, so we don't have to
-    worry about Y2038 or large file sizes. `zuo_int32_t` should be a
-    32-bit integer type, obviously. */
 
 #define ZUO_RECUR_LIMIT 100
 
@@ -3837,7 +3839,7 @@ int main(int argc, char **argv) {
                        "`current-command-lne-arguments` procedure. If an <option> switch is\n"
                        "provided multiple times, the last one takes precedence.\n\n"),
               argv0,
-              ((ZUO_LIB_PATH == NULL) ? ZUO_LIB_PATH : "[disabled]"));
+              ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
       exit(0);
     } else if (!strcmp(argv[0], "-B") || !strcmp(argv[0], "--boot")) {
       if (argc > 1) {
