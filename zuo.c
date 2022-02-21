@@ -3314,10 +3314,10 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
     return z.o_false;
   }
 
-  if (S_ISDIR(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("directory"));
-  else if (S_ISDIR(stat_buf.st_mode))
+  if (S_ISREG(stat_buf.st_mode))
     result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("file"));
+  else if (S_ISDIR(stat_buf.st_mode))
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("directory"));
   else if (S_ISLNK(stat_buf.st_mode))
     result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("link"));
   else
@@ -3574,7 +3574,8 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
       execv(argv[0], argv);
       {
         char *msg = "exec failed";
-        (void)write(2, msg, strlen(msg));
+        int r = write(2, msg, strlen(msg));
+        if (r != 0) abort();
       }
 
       _exit(1);
@@ -3927,13 +3928,16 @@ int main(int argc, char **argv) {
                        "     the default is \"%s\" relative to the executable\n"
                        "  -\n"
                        "     Read module from \"zuofile.zuo\" instead of first <argument>\n"
+                       "  --in\n"
+                       "     Read module from stdin instead of first <argument>\n"
                        "  --\n"
                        "     No argument following this switch is used as a switch\n"
                        "  -h, --help\n"
                        "     Show this information and exit, ignoring other options\n"
                        "\n"
-                       "Unless `-` is provided, the first <argument> is used as a module\n"
-                       "path to load; otherwise, \"zuofile.zuo\" is loaded (if it exists).\n"
+                       "Unless `-` is provided, the first <argument> is used as a module path to\n"
+                       "load; otherwise, \"zuofile.zuo\" is loaded (if it exists). Use \"\" to read\n"
+                       "from stdin."
                        "Additional <argument>s are made available from the `command-line-arguments`\n"
                        "procedure. If an <option> switch is provided multiple times, the last\n"
                        "instance takes precedence.\n\n"),
@@ -4150,7 +4154,13 @@ int main(int argc, char **argv) {
     }
   }
 
-  (void)zuo_dynamic_require(zuo_string(load_file));
+  if (load_file[0] == 0) {
+    zuo_int_t in_len;
+    char *input = zuo_drain(stdin, 0, -1, &in_len);
+    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("-"), z.o_false);
+    (void)zuo_eval_module(stdin_path, input, in_len);
+  } else
+    (void)zuo_dynamic_require(zuo_string(load_file));
 
   return 0;
 }

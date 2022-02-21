@@ -29,7 +29,7 @@
 
 (define heap
   (let ([a (lambda (l p) (apply p l))])
-    (a (process (list (find-exe)) '(redirect-in redirect-out))
+    (a (process (list (find-exe) "") '(redirect-in redirect-out))
        (lambda (p in out err)
          (fd-write in "#lang zuo/kernel\n")
          (fd-write in "(begin\n")
