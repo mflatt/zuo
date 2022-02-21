@@ -2895,7 +2895,7 @@ static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
   s[offset] = 0;
   *_len = offset;
 
-  if ((offset == 0) && (amount != 0))
+  if ((offset == 0) && (amount > 0))
     return NULL;
 
   return s;
