@@ -2,32 +2,32 @@
 
 ;; The `read-and-eval` entry point for a language using the expander
 
-(define make-read-and-eval
-  (lambda (make-initial-state)
-    (lambda (str start mod-path)
-      (let* ([es (read-from-string-all (substring str start (string-length str)))]
-             [ctx (make-module-context mod-path)]
-             [es (map (lambda (e) (datum->syntax ctx e)) es)]
-             [parse (make-parse ctx)]
-             [initial-state (make-initial-state ctx)]
-             [es+state+provides (expand-top-sequence es initial-state mod-path ctx parse)]
-             [es (car es+state+provides)]
-             [state (cadr es+state+provides)]
-             [binds (state-binds state)]
-             [provides (cadr (cdr es+state+provides))]
-             [outs (foldl (lambda (as-sym outs)
-                            (let* ([id (hash-ref provides as-sym #f)]
-                                   [bind (resolve* (state-binds state) id)])
-                              (unless bind (syntax-error "provided identifier not bound" id))
-                              (hash-set outs as-sym (export-bind bind ctx binds))))
-                          (hash)
-                          (hash-keys provides))]
-             [print-result (lambda (v)
-                             (unless (eq? v (void))
-                               (alert (~v v))))]
-             [add-print (lambda (s) (list print-result s))])
-        (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
-        (hash 'macromod-provides outs)))))
+(define (make-read-and-eval make-initial-state)
+  (lambda (str start mod-path)
+    (let* ([es (read-from-string-all str start)]
+           [ctx (make-module-context mod-path)]
+           [es (map (lambda (e) (datum->syntax ctx e)) es)]
+           [parse (make-parse ctx mod-path)]
+           [initial-state (make-initial-state ctx)]
+           [initial-provides (hash)]
+           [es+state+provides (expand-sequence es initial-state initial-provides mod-path ctx parse)]
+           [es (car es+state+provides)]
+           [state (cadr es+state+provides)]
+           [binds (state-binds state)]
+           [provides (cadr (cdr es+state+provides))]
+           [outs (foldl (lambda (as-sym outs)
+                          (let* ([id (hash-ref provides as-sym #f)]
+                                 [bind (resolve* (state-binds state) id #f)])
+                            (unless bind (syntax-error "provided identifier not bound" id))
+                            (hash-set outs as-sym (export-bind bind ctx binds))))
+                        (hash)
+                        (hash-keys provides))]
+           [print-result (lambda (v)
+                           (unless (eq? v (void))
+                             (alert (~v v))))]
+           [add-print (lambda (s) (list print-result s))])
+      (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
+      (hash 'macromod-provides outs))))
 
 (hash
  ;; makes `#lang zuo/private/macromod work:

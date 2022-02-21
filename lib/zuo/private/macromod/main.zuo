@@ -1,18 +1,6 @@
 #lang zuo/private/macromod
 
-(require "and-or.zuo"
-         "syntax-error.zuo"
-         "../pair.zuo"
-         "../list.zuo"
-         "let.zuo"
-         "define.zuo"
-         "quasiquote.zuo")
 
-(provide (all-from-out zuo/private/macromod
-                       "and-or.zuo"
-                       "syntax-error.zuo"
-                       "../pair.zuo"
-                       "../list.zuo"
-                       "let.zuo"
-                       "define.zuo"
-                       "quasiquote.zuo"))
+(provide (all-from-out zuo/private/macromod))
+
+(include "../mm-common/main.zuo")

@@ -1,10 +1,10 @@
 #lang zuo/datum
 
 ;; simple transparent structs
-(define make-maker (lambda (tag) (lambda (v) (cons tag v))))
-(define make-? (lambda (tag) (lambda (v) (and (pair? v) (eq? tag (car v))))))
-(define make-?? (lambda (tag1 tag2) (lambda (v) (and (pair? v) (or (eq? tag1 (car v))
-                                                                   (eq? tag2 (car v)))))))
+(define (make-maker tag) (lambda (v) (cons tag v)))
+(define (make-? tag) (lambda (v) (and (pair? v) (eq? tag (car v)))))
+(define (make-?? tag1 tag2) (lambda (v) (and (pair? v) (or (eq? tag1 (car v))
+                                                           (eq? tag2 (car v))))))
 (define any-ref cdr) ; not bothering to check a tag
 
 ;; A binding that's a core form recognized by the expander
@@ -56,30 +56,29 @@
 ;; imports
 (define make-specific (make-maker 'specific))
 (define specific? (make-? 'specific))
-(define specific-label (lambda (s) (cdr (any-ref s))))
+(define (specific-label s) (cdr (any-ref s)))
 
-(define unwrap-specific
-  (lambda (v) (if (specific? v)
-                  (car (any-ref v))
-                  v)))
+(define (unwrap-specific v)
+  (if (specific? v)
+      (car (any-ref v))
+      v))
 
-(define as-specific
-  (lambda (v) (make-specific (cons v (string->uninterned-symbol "u")))))
+(define (as-specific v)
+  (make-specific (cons v (string->uninterned-symbol "u"))))
 
-(define specific=?
-  (lambda (a b) (if (specific? a)
-                    (if (specific? b)
-                        (eq? (specific-label a) (specific-label b))
-                        #f)
-                    (eq? a b))))
+(define (specific=? a b)
+  (if (specific? a)
+      (if (specific? b)
+          (eq? (specific-label a) (specific-label b))
+          #f)
+      (eq? a b)))
 
 ;; bubbles `specific` outside `initial-import`
-(define initial-import
-  (lambda (bind)
-    (let* ([label (and (specific? bind)
-                       (specific-label bind))]
-           [bind (unwrap-specific bind)]
-           [bind (make-initial-import bind)])
-      (if label
-          (make-specific (cons bind label))
-          bind))))
+(define (initial-import bind)
+  (let* ([label (and (specific? bind)
+                     (specific-label bind))]
+         [bind (unwrap-specific bind)]
+         [bind (make-initial-import bind)])
+    (if label
+        (make-specific (cons bind label))
+        bind)))

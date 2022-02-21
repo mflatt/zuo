@@ -4,19 +4,18 @@
 ;;
 ;;   https://github.com/mflatt/expander/
 
-(define make-scope (lambda (name) (string->uninterned-symbol name)))
-(define set-add (lambda (ht v) (hash-set ht v #t)))
+(define (make-scope name) (string->uninterned-symbol name))
+(define (set-add ht v) (hash-set ht v #t))
 (define set-remove hash-remove)
-(define set-flip (lambda (ht v)
-                   (let ([ht2 (hash-remove ht v)])
-                     (if (eq? ht ht2)
-                         (hash-set ht v #t)
-                         ht2))))
+(define (set-flip ht v)
+  (let ([ht2 (hash-remove ht v)])
+    (if (eq? ht ht2)
+        (hash-set ht v #t)
+        ht2)))
 
-(define scope-set=?
-  (lambda (sc1 sc2)
-    (and (hash-keys-subset? sc1 sc2)
-         (hash-keys-subset? sc2 sc1))))
+(define (scope-set=? sc1 sc2)
+  (and (hash-keys-subset? sc1 sc2)
+       (hash-keys-subset? sc2 sc1)))
 
 ;; A syntax object is an opaque record combining a symbol with scopes
 (define syntax-tag (string->uninterned-symbol "syntax"))
@@ -55,9 +54,9 @@
                 [else s]))])
     adjust-scope))
 
-(define add-scope (lambda (s scope) (adjust-scope s scope set-add)))
-(define remove-scope (lambda (s scope) (adjust-scope s scope set-remove)))
-(define flip-scope (lambda (s scope) (adjust-scope s scope set-flip)))
+(define (add-scope s scope) (adjust-scope s scope set-add))
+(define (remove-scope s scope) (adjust-scope s scope set-remove))
+(define (flip-scope s scope) (adjust-scope s scope set-flip))
 
 ;; Unlike the "pico" expander, this one has some support for modules.
 ;; To avoid a global mutable table (which the kernel does not allow!),
@@ -66,155 +65,151 @@
 ;; shortcut, a `binds` pairs the binding table with a "merged" table
 ;; to record when a merge has already been performed from each module.
 (define make-binds cons)
-(define empty-binds (make-binds (hash) (hash)))
 (define binds-hash car)
 (define binds-merged cdr)
-(define binds-set-hash (lambda (binds ht) (cons ht (cdr binds))))
+(define (binds-set-hash binds ht) (cons ht (cdr binds)))
 
-(define add-binding*
-  (lambda (binds id binding)
-    (let* ([sym (syntax-e id)]
-           [sc (identifier-scopes id)]
-           [ht (binds-hash binds)]
-           [sym-binds (hash-ref ht sym (hash))]
-           [k-scope (car (hash-keys sc))] ; relying on deterministic order
-           [sc+bs (hash-ref sym-binds k-scope '())]
-           [sym-binds (hash-set sym-binds k-scope (cons (cons sc binding) sc+bs))])
-      (binds-set-hash binds (hash-set ht sym sym-binds)))))
+(define (add-binding* binds id binding)
+  (let* ([sym (syntax-e id)]
+         [sc (identifier-scopes id)]
+         [ht (binds-hash binds)]
+         [sym-binds (hash-ref ht sym (hash))]
+         [k-scope (car (hash-keys sc))] ; relying on deterministic order
+         [sc+bs (hash-ref sym-binds k-scope '())]
+         [sym-binds (hash-set sym-binds k-scope (cons (cons sc binding) sc+bs))])
+    (binds-set-hash binds (hash-set ht sym sym-binds))))
 
-(define find-all-matching-bindings
-  (lambda (binds id)
-    (let* ([sym (syntax-e id)]
-           [id-sc (identifier-scopes id)]
-           [sym-binds (hash-ref (binds-hash binds) sym #f)])
-      (if (not sym-binds)
-          '()
-          (foldl (lambda (scope lst)
-                   (foldl (lambda (sc+b lst)
-                            (let* ([sc (car sc+b)])
-                              (if (hash-keys-subset? sc id-sc)
-                                  (cons sc+b lst)
-                                  lst)))
-                          lst
-                          (hash-ref sym-binds scope '())))
-                 '()
-                 (hash-keys sym-binds))))))
+(define (find-all-matching-bindings binds id)
+  (let* ([sym (syntax-e id)]
+         [id-sc (identifier-scopes id)]
+         [sym-binds (hash-ref (binds-hash binds) sym #f)])
+    (if (not sym-binds)
+        '()
+        (foldl (lambda (scope lst)
+                 (foldl (lambda (sc+b lst)
+                          (let* ([sc (car sc+b)])
+                            (if (hash-keys-subset? sc id-sc)
+                                (cons sc+b lst)
+                                lst)))
+                        lst
+                        (hash-ref sym-binds scope '())))
+               '()
+               (hash-keys sym-binds)))))
 
-(define check-unambiguous
-  (lambda (id max-sc+b candidate-sc+bs)
-    (map (lambda (sc+b)
-           (unless (hash-keys-subset? (car sc+b)
-                                      (car max-sc+b))
-             (error "ambiguous" (syntax-e id))))
-         candidate-sc+bs)))
+(define (check-unambiguous id max-sc+b candidate-sc+bs)
+  (map (lambda (sc+b)
+         (unless (hash-keys-subset? (car sc+b)
+                                    (car max-sc+b))
+           (error "ambiguous" (syntax-e id))))
+       candidate-sc+bs))
 
-(define resolve*
-  (lambda (binds id)
-    (let* ([candidate-sc+bs (find-all-matching-bindings binds id)])
-      (cond
-        [(pair? candidate-sc+bs)
-         (let* ([max-sc+binding (foldl (lambda (sc+b max-sc+b)
-                                         (if (> (hash-count (car max-sc+b))
-                                                (hash-count (car sc+b)))
-                                             max-sc+b
-                                             sc+b))
-                                       (car candidate-sc+bs)
-                                       (cdr candidate-sc+bs))])
-           (check-unambiguous id max-sc+binding candidate-sc+bs)
-           (cdr max-sc+binding))]
-        [else #f]))))
+(define (resolve* binds id same-defn-ctx?)
+  (let* ([candidate-sc+bs (find-all-matching-bindings binds id)])
+    (cond
+      [(pair? candidate-sc+bs)
+       (let* ([max-sc+binding (foldl (lambda (sc+b max-sc+b)
+                                       (if (> (hash-count (car max-sc+b))
+                                              (hash-count (car sc+b)))
+                                           max-sc+b
+                                           sc+b))
+                                     (car candidate-sc+bs)
+                                     (cdr candidate-sc+bs))])
+         (check-unambiguous id max-sc+binding candidate-sc+bs)
+         (if same-defn-ctx?
+             (and (scope-set=? (identifier-scopes id)
+                               (car max-sc+binding))
+                  (cdr max-sc+binding))
+             (cdr max-sc+binding)))]
+      [else #f])))
 
-(define bound-identifier=?
-  (lambda (id1 id2)
-    (unless (identifier? id1) (error "bound-identifier=?: not an identifier" id1))
-    (unless (identifier? id2) (error "bound-identifier=?: not an identifier" id2))
-    (and (eq? (syntax-e id1) (syntax-e id2))
-         (scope-set=? (identifier-scopes id1)
-                      (identifier-scopes id2)))))
+(define (bound-identifier=? id1 id2)
+  (unless (identifier? id1) (error "bound-identifier=?: not an identifier" id1))
+  (unless (identifier? id2) (error "bound-identifier=?: not an identifier" id2))
+  (and (eq? (syntax-e id1) (syntax-e id2))
+       (scope-set=? (identifier-scopes id1)
+                    (identifier-scopes id2))))
 
 (include "../mm-common/free-id-eq.zuo")
 
+;; Definition-context tracking is covered by scopes
+(define (new-defn-context* binds)
+  binds)
+
 ;; The merge step described above at `make-binds`
-(define merge-binds
-  (lambda (binds key m-binds)
-    (let* ([merged (binds-merged binds)])
-      (cond
-        [(hash-ref merged key #f)
-         ;; already merged
-         binds]
-        [else
-         (let* ([merged (hash-set merged key #t)]
-                [ht (binds-hash binds)]
-                [m-ht (binds-hash m-binds)]
-                [new-ht (foldl (lambda (sym ht)
-                                 (let* ([sym-ht (hash-ref ht sym (hash))]
-                                        [m-sym-ht (hash-ref m-ht sym #f)]
-                                        [new-sym-ht
-                                         (foldl (lambda (s sym-ht)
-                                                  (hash-set sym-ht
-                                                            s
-                                                            (append (hash-ref m-sym-ht s '())
-                                                                    (hash-ref sym-ht s '()))))
-                                                sym-ht
-                                                (hash-keys m-sym-ht))])
-                                   (hash-set ht sym new-sym-ht)))
-                               ht
-                               (hash-keys m-ht))])
-           (make-binds new-ht merged))]))))
+(define (merge-binds binds key m-binds)
+  (let* ([merged (binds-merged binds)])
+    (cond
+      [(hash-ref merged key #f)
+       ;; already merged
+       binds]
+      [else
+       (let* ([merged (hash-set merged key #t)]
+              [ht (binds-hash binds)]
+              [m-ht (binds-hash m-binds)]
+              [new-ht (foldl (lambda (sym ht)
+                               (let* ([sym-ht (hash-ref ht sym (hash))]
+                                      [m-sym-ht (hash-ref m-ht sym #f)]
+                                      [new-sym-ht
+                                       (foldl (lambda (s sym-ht)
+                                                (hash-set sym-ht
+                                                          s
+                                                          (append (hash-ref m-sym-ht s '())
+                                                                  (hash-ref sym-ht s '()))))
+                                              sym-ht
+                                              (hash-keys m-sym-ht))])
+                                 (hash-set ht sym new-sym-ht)))
+                             ht
+                             (hash-keys m-ht))])
+         (make-binds new-ht merged))])))
 
 ;; A fresh module context has a fresh scope
-(define make-module-context
-  (lambda (mod-path)
-    (let* ([mod-scope (make-scope "module")]
-           [ctx (identifier 'module (hash mod-scope #t))])
-      ctx)))
+(define (make-module-context mod-path)
+  (let* ([mod-scope (make-scope "module")]
+         [ctx (identifier 'module (hash mod-scope #t))])
+    ctx))
 
 ;; Creates a binding table from an initial imports and a
 ;; context that was just created from `make-module-context`
-(define binds-create
-  (lambda (provides ctx)
-    (let* ([sc (identifier-scopes ctx)]
-           [scope (car (hash-keys sc))])
-      (let ([binds-ht (foldl (lambda (sym binds-ht)
-                               (let ([bind (hash-ref provides sym #f)])
-                                 (hash-set binds-ht sym (hash scope (list (cons sc bind))))))
-                             (hash)
-                             (hash-keys provides))])
-        (binds-set-hash empty-binds binds-ht)))))
+(define (binds-create provides ctx)
+  (let* ([sc (identifier-scopes ctx)]
+         [scope (car (hash-keys sc))])
+    (let ([binds-ht (foldl (lambda (sym binds-ht)
+                             (let ([bind (hash-ref provides sym #f)])
+                               (hash-set binds-ht sym (hash scope (list (cons sc bind))))))
+                           (hash)
+                           (hash-keys provides))])
+      (make-binds binds-ht (hash)))))
 
 ;; Implements the `quote-syntax` form
-(define syntax-quote
-  (lambda (v ctx)
-    (list 'quote v)))
+(define (syntax-quote v ctx)
+  (list 'quote v))
 
 ;; apply a macro; if it's imported, then we'll have to do some work to
 ;; merge binding information for the providing context
-(define apply-macro
-  (lambda (m s ctx binds k)
-    (let* ([apply-macro
-            (lambda (proc ctx binds)
-              (let* ([new-scope (make-scope "macro")]
-                     [s (add-scope s new-scope)]
-                     [s (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-                            (proc s (lambda (a b) (free-id=? binds (datum->syntax ctx a) (datum->syntax ctx b))))
-                            (proc s))]
-                     [s (datum->syntax ctx s)]
-                     [s (flip-scope s new-scope)])
-                (k s binds)))])
-      (cond
-        [(defined-macro? m) (apply-macro (defined-macro-proc m) ctx binds)]
-        [else
-         (let* ([implementation (macro-implementation m)]
-                [proc (car implementation)]
-                [key (cadr implementation)]
-                [ctx (cadr (cdr implementation))]
-                [m-binds (cadr (cddr implementation))])
-           (apply-macro proc ctx (merge-binds binds key m-binds)))]))))
+(define (apply-macro m s ctx binds k)
+  (let* ([apply-macro
+          (lambda (proc ctx binds)
+            (let* ([new-scope (make-scope "macro")]
+                   [s (add-scope s new-scope)]
+                   [s (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
+                          (proc s (lambda (a b) (free-id=? binds (datum->syntax ctx a) (datum->syntax ctx b))))
+                          (proc s))]
+                   [s (datum->syntax ctx s)]
+                   [s (flip-scope s new-scope)])
+              (k s binds)))])
+    (cond
+      [(defined-macro? m) (apply-macro (defined-macro-proc m) ctx binds)]
+      [else
+       (let* ([implementation (macro-implementation m)]
+              [proc (car implementation)]
+              [key (cadr implementation)]
+              [ctx (cadr (cdr implementation))]
+              [m-binds (cadr (cddr implementation))])
+         (apply-macro proc ctx (merge-binds binds key m-binds)))])))
 
 ;; convert a local macro to one that can be used as imported elsewhere
-(define make-exported-macro
-  (lambda (proc ctx binds)
-    (let ([mod-scope (ormap (lambda (s)
-                              (and (not (eq? s 'core)) s))
-                            (hash-keys (identifier-scopes ctx)))])
-      (make-macro (list proc mod-scope ctx binds)))))
+(define (make-exported-macro proc ctx binds)
+  (let ([mod-scope (ormap (lambda (s)
+                            (and (not (eq? s 'core)) s))
+                          (hash-keys (identifier-scopes ctx)))])
+    (make-macro (list proc mod-scope ctx binds))))

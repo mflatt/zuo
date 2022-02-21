@@ -1,138 +1,143 @@
 #lang zuo/datum
 
 ;; A module context is just a distinct identity used in binding tables
-(define make-module-context
-  (lambda (mod-path)
-    (string->uninterned-symbol "module")))
+(define (make-module-context mod-path)
+  (string->uninterned-symbol "module"))
 
 ;; A syntactic-closure syntax object pairs a symbol with a module context
 (define syntactic-closure-tag (string->uninterned-symbol "identifier"))
-(define syntactic-closure (lambda (sym ctx) (opaque syntactic-closure-tag (cons sym ctx))))
-(define syntactic-closure? (lambda (v) (and (opaque-ref syntactic-closure-tag v #f) #t)))
-(define syntactic-closure-sym (lambda (sc) (car (opaque-ref syntactic-closure-tag sc #f))))
-(define syntactic-closure-ctx (lambda (sc) (cdr (opaque-ref syntactic-closure-tag sc #f))))
+(define (syntactic-closure sym ctx) (opaque syntactic-closure-tag (cons sym ctx)))
+(define (syntactic-closure? v) (and (opaque-ref syntactic-closure-tag v #f) #t))
+(define (syntactic-closure-sym sc) (car (opaque-ref syntactic-closure-tag sc #f)))
+(define (syntactic-closure-ctx sc) (cdr (opaque-ref syntactic-closure-tag sc #f)))
 
-(define identifier? (lambda (v)
-                      (or (symbol? v)
-                          (syntactic-closure? v))))
-(define syntax-e (lambda (x)
-                   (if (symbol? x)
-                       x
-                       (syntactic-closure-sym x))))
+(define (identifier? v)
+  (or (symbol? v)
+      (syntactic-closure? v)))
+(define (syntax-e x)
+  (if (symbol? x)
+      x
+      (syntactic-closure-sym x)))
 
-(define datum->syntax (lambda (ctx d) d))
-(define syntax->datum (letrec ([syntax->datum
-                                (lambda (stx)
-                                  (cond
-                                    [(pair? stx) (cons (syntax->datum (car stx))
-                                                       (syntax->datum (cdr stx)))]
-                                    [(identifier? stx) (syntax-e stx)]
-                                    [else stx]))])
-                        syntax->datum))
+(define (datum->syntax ctx d) d)
+(define syntax->datum
+  (letrec ([syntax->datum
+            (lambda (stx)
+              (cond
+                [(pair? stx) (cons (syntax->datum (car stx))
+                                   (syntax->datum (cdr stx)))]
+                [(identifier? stx) (syntax-e stx)]
+                [else stx]))])
+    syntax->datum))
 
 ;; Binding information has a table for the current context (i.e., current module),
-;; a two-level table for all other contexts, and the current context:
-;;   (cons <hash: sym -> bind> (cons <hash: ctx -> sym -> bind> <ctx>))
-(define empty-binds (cons (hash) (cons (hash) #f)))
+;; a two-level table for all other contexts, and the current module and definition contexts:
+;;   (cons <hash: sym -> bind> (cons <hash: ctx -> sym -> bind> (cons <ctx> <def-ctx>)))
+;; The binding table has a "definition context", but that's not recorded in a syntactic
+;; closure; it's used only to dtect duplicate definitions.
 (define binds-hash car)
 (define binds-ctx-hash cadr)
-(define binds-ctx cddr)
-(define binds-set-hash (lambda (binds ht) (cons ht (cdr binds))))
-(define binds-set-ctx-hash (lambda (binds ctx-ht) (cons (car binds) (cons ctx-ht (cddr binds)))))
-(define binds-set-ctx (lambda (binds ctx) (cons (car binds) (cons (cadr binds) ctx))))
+(define (binds-ctx x) (car (cdr (cdr x))))
+(define (binds-def-ctx x) (cdr (cdr (cdr x))))
+(define (binds-set-hash binds ht) (cons ht (cdr binds)))
+(define (binds-set-ctx-hash binds ctx-ht) (cons (car binds) (cons ctx-ht (cddr binds))))
+(define (binds-set-ctx binds ctx) (cons (car binds) (cons (cadr binds) (cons ctx (cdr (cddr binds))))))
+(define (binds-set-def-ctx binds def-ctx) (cons (car binds) (cons (cadr binds) (cons (car (cddr binds)) def-ctx))))
 
-(define binds-create
-  (lambda (ht ctx)
-    (binds-set-ctx (binds-set-hash empty-binds ht) ctx)))
+(define (binds-create ht ctx)
+  (cons (foldl (lambda (sym bind-ht)
+                 (hash-set bind-ht sym (cons (hash-ref ht sym #f) 'top)))
+               (hash)
+               (hash-keys ht))
+        (cons (hash)
+              (cons ctx 'top))))
 
 ;; We don't need scopes, but these functions are here to line
 ;; up with the set-of-scopes API
-(define make-scope (lambda (name) #f))
-(define add-scope (lambda (e scope) e))
+(define (make-scope name) #f)
+(define (add-scope e scope) e)
 
 ;; Install a new binding
-(define add-binding*
-  (lambda (binds id binding)
-    (let* ([ctx (if (syntactic-closure? id)
-                    (syntactic-closure-ctx id)
-                    (binds-ctx binds))]
-           [sym (if (syntactic-closure? id)
-                   (syntactic-closure-sym id)
-                   id)])
-      (if (eq? ctx (binds-ctx binds))
-          (binds-set-hash binds (hash-set (binds-hash binds) id binding))
-          (let* ([sc-ht (binds-ctx-hash binds)]
-                 [ctx-ht (hash-ref sc-ht ctx (hash))]
-                 [new-ctx-ht (hash-set ctx-ht sym binding)]
-                 [new-sc-ht (hash-set sc-ht ctx new-ctx-ht)])
-            (binds-set-ctx-hash binds new-sc-ht))))))
+(define (add-binding* binds id bind)
+  (let* ([ctx (if (syntactic-closure? id)
+                  (syntactic-closure-ctx id)
+                  (binds-ctx binds))]
+         [sym (if (syntactic-closure? id)
+                  (syntactic-closure-sym id)
+                  id)])
+    (if (eq? ctx (binds-ctx binds))
+        (let ([bind+ctx (cons bind (binds-def-ctx binds))])
+          (binds-set-hash binds (hash-set (binds-hash binds) id bind+ctx)))
+        (error (~a "cannot bind identifier from other context: " sym)))))
 
 ;; Find the binding for an identifier
-(define resolve*
-  (lambda (binds id)
-    (if (syntactic-closure? id)
-        (let ([ctx (syntactic-closure-ctx id)]
-              [sym (syntactic-closure-sym id)])
-          (if (eq? ctx (binds-ctx binds))
-              (hash-ref (binds-hash binds) sym #f)
-              (let* ([sc-ht (binds-ctx-hash binds)]
-                     [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
-                (and ctx-ht
-                     (hash-ref ctx-ht sym #f)))))
-        (hash-ref (binds-hash binds) id #f))))
+(define (resolve* binds id same-defn-ctx?)
+  (let ([bind+def-ctx
+         (if (syntactic-closure? id)
+             (let ([ctx (syntactic-closure-ctx id)]
+                   [sym (syntactic-closure-sym id)])
+               (if (eq? ctx (binds-ctx binds))
+                   (hash-ref (binds-hash binds) sym '(#f . #f))
+                   (let* ([sc-ht (binds-ctx-hash binds)]
+                          [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
+                     (and ctx-ht
+                          (hash-ref ctx-ht sym '(#f . #f))))))
+             (hash-ref (binds-hash binds) id '(#f . #f)))])
+    (if same-defn-ctx?
+        (and (eq? (cdr bind+def-ctx) (binds-def-ctx binds))
+             (car bind+def-ctx))
+        (car bind+def-ctx))))
+
+(define (new-defn-context* binds)
+  (binds-set-def-ctx binds (string->uninterned-symbol "def")))
 
 ;; When we use an imported macro, we need to pull in binding information
 ;; from the macro's module; the separate module contexts keep different binding
 ;; information from getting mixed up
-(define merge-binds
-  (lambda (binds ctx m-binds)
-    (let* ([sc-ht (binds-ctx-hash binds)]
-           [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
-      (binds-set-ctx-hash binds new-sc-ht))))
+(define (merge-binds binds ctx m-binds)
+  (let* ([sc-ht (binds-ctx-hash binds)]
+         [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
+    (binds-set-ctx-hash binds new-sc-ht)))
 
-(define bound-identifier=?
-  (lambda (a b)
-    (or (and (syntactic-closure? a)
-             (syntactic-closure? b)
-             (eq? (syntactic-closure-sym a) (syntactic-closure-sym b))
-             (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
-        (eq? a b))))
+(define (bound-identifier=? a b)
+  (or (and (syntactic-closure? a)
+           (syntactic-closure? b)
+           (eq? (syntactic-closure-sym a) (syntactic-closure-sym b))
+           (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
+      (eq? a b)))
 
 (include "../mm-common/free-id-eq.zuo")
 
 ;; syntax-quote turns a symbol into a syntactic closure, and leaves everything
 ;; else alone
-(define syntax-quote
-  (lambda (v ctx)
-    (letrec ([syntax-quote
-              (lambda (v)
-                (cond
-                  [(pair? v) (list 'cons (syntax-quote (car v)) (syntax-quote (cdr v)))]
-                  [(null? v) '()]
-                  [(symbol? v) (list 'quote (syntactic-closure v ctx))]
-                  [else v]))])
-      (syntax-quote v))))
+(define (syntax-quote v ctx)
+  (letrec ([syntax-quote
+            (lambda (v)
+              (cond
+                [(pair? v) (list 'cons (syntax-quote (car v)) (syntax-quote (cdr v)))]
+                [(null? v) '()]
+                [(symbol? v) (list 'quote (syntactic-closure v ctx))]
+                [else v]))])
+    (syntax-quote v)))
 
 ;; apply a macro; if it's imported, then we'll have to do some work to
 ;; merge binding information for the providing context
-(define apply-macro
-  (lambda (m s ctx binds k)
-    (let* ([apply-macro
-            (lambda (proc binds)
-              (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-                     (proc s (lambda (a b) (free-id=? binds a b)))
-                     (proc s))
-                 binds))])
-      (cond
-        [(defined-macro? m) (apply-macro (defined-macro-proc m) binds)]
-        [else
-         (let* ([implementation (macro-implementation m)]
-                [proc (car implementation)]
-                [ctx (cadr implementation)]
-                [m-binds (cadr (cdr implementation))])
-           (apply-macro proc (merge-binds binds ctx m-binds)))]))))
+(define (apply-macro m s ctx binds k)
+  (let* ([apply-macro
+          (lambda (proc binds)
+            (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
+                   (proc s (lambda (a b) (free-id=? binds a b)))
+                   (proc s))
+               binds))])
+    (cond
+      [(defined-macro? m) (apply-macro (defined-macro-proc m) binds)]
+      [else
+       (let* ([implementation (macro-implementation m)]
+              [proc (car implementation)]
+              [ctx (cadr implementation)]
+              [m-binds (cadr (cdr implementation))])
+         (apply-macro proc (merge-binds binds ctx m-binds)))])))
 
 ;; convert a local macro to one that can be used as imported elsewhere
-(define make-exported-macro
-  (lambda (proc ctx binds)
-    (make-macro (list proc ctx binds))))
+(define (make-exported-macro proc ctx binds)
+  (make-macro (list proc ctx binds)))

@@ -6,5 +6,5 @@
 
 (hash 'read-and-eval
       (lambda (str start mod-path)
-        (let ([es (read-from-string-all (substring str start (string-length str)))])
+        (let ([es (read-from-string-all str start)])
           (hash 'datums es))))

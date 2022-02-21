@@ -1,18 +1,5 @@
 #lang zuo/private/defmacromod
 
-(require "and-or.zuo"
-         "syntax-error.zuo"
-         "../pair.zuo"
-         "../list.zuo"
-         "let.zuo"
-         "define.zuo"
-         "quasiquote.zuo")
+(provide (all-from-out zuo/private/defmacromod))
 
-(provide (all-from-out zuo/private/defmacromod
-                       "and-or.zuo"
-                       "syntax-error.zuo"
-                       "../pair.zuo"
-                       "../list.zuo"
-                       "let.zuo"
-                       "define.zuo"
-                       "quasiquote.zuo"))
+(include "../mm-common/main.zuo")

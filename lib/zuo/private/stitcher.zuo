@@ -218,7 +218,7 @@
                   [else s])))])
     (hash 'read-and-eval
           (lambda (str start mod-path)
-            (let ([es (read-from-string-all (substring str start (string-length str)))])
+            (let ([es (read-from-string-all str start)])
               (letrec ([stitch
                         (lambda (es env)
                           (cond
@@ -233,13 +233,22 @@
                                       (eval (compile e env #f))
                                       (error (~a "stitcher hash is not last: " (~s e))))]
                                  [(eq? a 'define)
-                                  (let ([id (if (= 3 (length e))
-                                                (car (cdr e))
-                                                #f)])
-                                    (if (symbol? id)
-                                        (let ([v (eval (compile (car (cdr (cdr e))) env id))])
-                                          (stitch (cdr es) (hash-set env id v)))
-                                        (bad-syntax e)))]
+                                  (let ([lhs (if (>= (length e) 3)
+                                                 (car (cdr e))
+                                                 #f)])
+                                    (cond
+                                      [(symbol? lhs)
+                                       (if (= (length e) 3)
+                                           (let ([v (eval (compile (car (cdr (cdr e))) env lhs))])
+                                             (stitch (cdr es) (hash-set env lhs v)))
+                                           (bad-syntax e))]
+                                      [(pair? lhs)
+                                       (let ([id (car lhs)])
+                                         (if (symbol? id)
+                                             (let ([v (eval (compile (cons 'lambda (cons (cdr lhs) (cdr (cdr e)))) env id))])
+                                               (stitch (cdr es) (hash-set env id v)))
+                                             (bad-syntax e)))]
+                                      [else (bad-syntax e)]))]
                                  [(eq? a 'include)
                                   (if (= 2 (length e))
                                       (let* ([name (car (cdr e))]

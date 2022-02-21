@@ -3,57 +3,48 @@
 ;; Helpers for "parse.zuo" that depends on the implementation of
 ;; syntax objects
 
-(define maybe-begin
-  (lambda (d)
-    (if (null? d)
-        (car d)
-        (cons 'begin d))))
+(define (name-lambda form id)
+  (if (and (pair? form)
+           (eq? (car form) 'lambda))
+      ;; `zuo/kernel` recognizes this pattern to name the form
+      (list 'lambda (cadr form) (symbol->string (syntax-e id)) (cadr (cdr form)))
+      form))
 
-(define name-lambda
-  (lambda (form id)
-    (if (and (pair? form)
-             (eq? (car form) 'lambda))
-        ;; `zuo/kernel` recognizes this pattern to name the form
-        (list 'lambda (cadr form) (symbol->string (syntax-e id)) (cadr (cdr form)))
-        form)))
+(define (syntax-error msg s)
+  (error (~a msg ": " (~s (syntax->datum s)))))
 
-(define syntax-error
-  (lambda (msg s) (error (~a msg ": " (~s (syntax->datum s))))))
+(define (bad-syntax s)
+  (syntax-error "bad syntax" s))
 
-(define bad-syntax
-  (lambda (s) (syntax-error "bad syntax" s)))
+(define (duplicate-identifier id s)
+  (error "duplicate identifier:" (syntax-e id) (syntax->datum s)))
 
-(define duplicate-identifier
-  (lambda (id s) (error "duplicate identifier:" (syntax-e id) (syntax->datum s))))
+(define (id-sym-eq? id sym)
+  (and (identifier? id)
+       (eq? (syntax-e id) sym)))
 
-(define id-sym-eq?
-  (lambda (id sym)
-    (and (identifier? id)
-         (eq? (syntax-e id) sym))))
+(define (unwrap-mod-path mod-path)
+  (if (identifier? mod-path)
+      (syntax-e mod-path)
+      mod-path))
 
-(define unwrap-mod-path
-  (lambda (mod-path)
-    (if (identifier? mod-path)
-        (syntax-e mod-path)
-        mod-path)))
+(define (add-binding state id binding)
+  (state-set-binds state (add-binding* (state-binds state) id binding)))
 
-(define add-binding
-  (lambda (state id binding)
-    (state-set-binds state (add-binding* (state-binds state) id binding))))
+(define (resolve state id same-defn-ctx?)
+  (let* ([bind (resolve* (state-binds state) id same-defn-ctx?)]
+         [bind (unwrap-specific bind)])
+    (if (initial-import? bind)
+        (initial-import-bind bind)
+        bind)))
 
-(define resolve
-  (lambda (state id)
-    (let* ([bind (resolve* (state-binds state) id)]
-           [bind (unwrap-specific bind)])
-      (if (initial-import? bind)
-          (initial-import-bind bind)
-          bind))))
+(define (new-defn-context state)
+  (state-set-binds state (new-defn-context* (state-binds state))))
 
-(define nest-bindings
-  (lambda (new-cls body)
-    (letrec ([nest-bindings (lambda (new-cls)
-                              (if (null? new-cls)
-                                  body
-                                  (list 'let (list (car new-cls))
-                                        (nest-bindings (cdr new-cls)))))])
-      (nest-bindings (reverse new-cls)))))
+(define (nest-bindings new-cls body)
+  (letrec ([nest-bindings (lambda (new-cls)
+                            (if (null? new-cls)
+                                body
+                                (list 'let (list (car new-cls))
+                                      (nest-bindings (cdr new-cls)))))])
+    (nest-bindings (reverse new-cls))))
