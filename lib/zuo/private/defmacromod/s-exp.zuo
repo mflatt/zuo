@@ -1,10 +1,10 @@
 #lang zuo/datum
 
-;; A module context is just a distinct identity used in binding tables
+;; A context is just a distinct identity used in binding tables
 (define (make-module-context mod-path)
   (string->uninterned-symbol "module"))
 
-;; A syntactic-closure syntax object pairs a symbol with a module context
+;; A syntactic-closure syntax object pairs a symbol with a context
 (define syntactic-closure-tag (string->uninterned-symbol "identifier"))
 (define (syntactic-closure sym ctx) (opaque syntactic-closure-tag (cons sym ctx)))
 (define (syntactic-closure? v) (and (opaque-ref syntactic-closure-tag v #f) #t))
@@ -30,27 +30,24 @@
                 [else stx]))])
     syntax->datum))
 
-;; Binding information has a table for the current context (i.e., current module),
-;; a two-level table for all other contexts, and the current module and definition contexts:
-;;   (cons <hash: sym -> bind> (cons <hash: ctx -> sym -> bind> (cons <ctx> <def-ctx>)))
-;; The binding table has a "definition context", but that's not recorded in a syntactic
-;; closure; it's used only to dtect duplicate definitions.
-(define binds-hash car)
-(define binds-ctx-hash cadr)
-(define (binds-ctx x) (car (cdr (cdr x))))
-(define (binds-def-ctx x) (cdr (cdr (cdr x))))
-(define (binds-set-hash binds ht) (cons ht (cdr binds)))
-(define (binds-set-ctx-hash binds ctx-ht) (cons (car binds) (cons ctx-ht (cddr binds))))
-(define (binds-set-ctx binds ctx) (cons (car binds) (cons (cadr binds) (cons ctx (cdr (cddr binds))))))
-(define (binds-set-def-ctx binds def-ctx) (cons (car binds) (cons (cadr binds) (cons (car (cddr binds)) def-ctx))))
+;; Binding information has three parts:
+;;   * ctx                : the current binding context
+;;   * sym -> ctx         : the per-symbol default context for plain symbols
+;;   * ctx -> sym -> bind : the binding table
+(define (make-binds ctx sym-hash ctx-hash) (cons ctx (cons sym-hash ctx-hash)))
+(define binds-ctx car)
+(define binds-sym-hash cadr)
+(define binds-ctx-hash cddr)
+(define (binds-set-ctx binds ctx) (cons ctx (cdr binds)))
+(define (binds-set-ctx-hash binds ctx-hash) (cons (car binds) (cons (cadr binds) ctx-hash)))
 
 (define (binds-create ht ctx)
-  (cons (foldl (lambda (sym bind-ht)
-                 (hash-set bind-ht sym (cons (hash-ref ht sym #f) 'top)))
-               (hash)
-               (hash-keys ht))
-        (cons (hash)
-              (cons ctx 'top))))
+  (make-binds ctx
+              (foldl (lambda (sym sym-hash)
+                       (hash-set sym-hash sym ctx))
+                     (hash)
+                     (hash-keys ht))
+              (hash ctx ht)))
 
 ;; We don't need scopes, but these functions are here to line
 ;; up with the set-of-scopes API
@@ -58,46 +55,46 @@
 (define (add-scope e scope) e)
 
 ;; Install a new binding
+(define (add-binding-at binds sym ctx bind)
+  (let* ([sym-hash (binds-sym-hash binds)]
+         [ctx-hash (binds-ctx-hash binds)])
+    (make-binds (binds-ctx binds)
+                (hash-set sym-hash sym ctx)
+                (hash-set ctx-hash ctx (hash-set (hash-ref ctx-hash ctx (hash)) sym bind)))))
 (define (add-binding* binds id bind)
-  (let* ([ctx (if (syntactic-closure? id)
-                  (syntactic-closure-ctx id)
-                  (binds-ctx binds))]
-         [sym (if (syntactic-closure? id)
-                  (syntactic-closure-sym id)
-                  id)])
-    (if (eq? ctx (binds-ctx binds))
-        (let ([bind+ctx (cons bind (binds-def-ctx binds))])
-          (binds-set-hash binds (hash-set (binds-hash binds) id bind+ctx)))
-        (error (~a "cannot bind identifier from other context: " sym)))))
+  (if (symbol? id)
+      (add-binding-at binds
+                      id (binds-ctx binds)
+                      bind)
+      (add-binding-at binds
+                      (syntactic-closure-sym id) (syntactic-closure-ctx id)
+                      bind)))
 
 ;; Find the binding for an identifier
+(define (resolve-at binds sym ctx same-defn-ctx?)
+  (and (or (not same-defn-ctx?)
+           (eq? ctx (binds-ctx binds)))
+       (hash-ref (hash-ref (binds-ctx-hash binds) ctx (hash)) sym #f)))
 (define (resolve* binds id same-defn-ctx?)
-  (let ([bind+def-ctx
-         (if (syntactic-closure? id)
-             (let ([ctx (syntactic-closure-ctx id)]
-                   [sym (syntactic-closure-sym id)])
-               (if (eq? ctx (binds-ctx binds))
-                   (hash-ref (binds-hash binds) sym '(#f . #f))
-                   (let* ([sc-ht (binds-ctx-hash binds)]
-                          [ctx-ht (and sc-ht (hash-ref sc-ht ctx #f))])
-                     (and ctx-ht
-                          (hash-ref ctx-ht sym '(#f . #f))))))
-             (hash-ref (binds-hash binds) id '(#f . #f)))])
-    (if same-defn-ctx?
-        (and (eq? (cdr bind+def-ctx) (binds-def-ctx binds))
-             (car bind+def-ctx))
-        (car bind+def-ctx))))
+  (if (symbol? id)
+      (resolve-at binds
+                  id (hash-ref (binds-sym-hash binds) id (binds-ctx binds))
+                  same-defn-ctx?)
+      (resolve-at binds
+                  (syntactic-closure-sym id) (syntactic-closure-ctx id)
+                  same-defn-ctx?)))
 
 (define (new-defn-context* binds)
-  (binds-set-def-ctx binds (string->uninterned-symbol "def")))
+  (binds-set-ctx binds (string->uninterned-symbol "def")))
 
 ;; When we use an imported macro, we need to pull in binding information
 ;; from the macro's module; the separate module contexts keep different binding
 ;; information from getting mixed up
 (define (merge-binds binds ctx m-binds)
-  (let* ([sc-ht (binds-ctx-hash binds)]
-         [new-sc-ht (hash-set sc-ht ctx (binds-hash m-binds))])
-    (binds-set-ctx-hash binds new-sc-ht)))
+  (let* ([ctx-hash (binds-ctx-hash binds)]
+         [m-ctx-hash (binds-ctx-hash m-binds)]
+         [new-ctx-hash (hash-set ctx-hash ctx (hash-ref m-ctx-hash ctx (hash)))])
+    (binds-set-ctx-hash binds new-ctx-hash)))
 
 (define (bound-identifier=? a b)
   (or (and (syntactic-closure? a)

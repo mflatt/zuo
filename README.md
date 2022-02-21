@@ -112,8 +112,8 @@ The Zuo library includes two variants of the macro expander:
 
  * The `#lang zuo` expander is non-hygienic by default. It offers only
    a limited form of composition by having `quote-syntax` close over
-   the enclosing module context. That doesn't support macro-generating
-   macros well, but it's good enough to be useful, and it's fast.
+   the enclosing context. That doesn't support macro-generating macros
+   well, but it's good enough to be useful, and it's fast.
 
  * The `#lang zuo/hygienic` language implements the set-of-scopes
    model (with no phase separation). It's more expressive, but also
@@ -121,5 +121,5 @@ The Zuo library includes two variants of the macro expander:
 
 The two expanders share an implementation that is parameterized over
 the implementation of syntax objects. You can mix and match modules in
-the two dialects, but you can't use macros from one language from a
-context in the other language.
+the two dialects, but you can't use macros from one language in the
+other language.

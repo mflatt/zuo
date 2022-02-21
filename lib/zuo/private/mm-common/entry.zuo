@@ -18,7 +18,8 @@
            [outs (foldl (lambda (as-sym outs)
                           (let* ([id (hash-ref provides as-sym #f)]
                                  [bind (resolve* (state-binds state) id #f)])
-                            (unless bind (syntax-error "provided identifier not bound" id))
+                            (unless bind
+                              (syntax-error "provided identifier not bound" id))
                             (hash-set outs as-sym (export-bind bind ctx binds))))
                         (hash)
                         (hash-keys provides))]
