@@ -1,4 +1,4 @@
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__MINGW32__)
 # define WIN32
 #endif
 
@@ -2753,6 +2753,10 @@ static char *zuo_getcwd() {
   if (!dir)
     zuo_fail("error getting current directory");
 
+#ifdef WIN32
+  dir = zuo_to_narrow(s);
+#endif
+  
   return dir;
 }
 
@@ -3347,6 +3351,27 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
 }
 
 /*======================================================================*/
+/* optional arguments through a hash table                              */
+/*======================================================================*/
+
+static zuo_t *zuo_consume_option(zuo_t **_options, const char *name) {
+  zuo_t *sym = zuo_symbol(name);
+  zuo_t *opt = zuo_hash_ref(*_options, sym, z.o_undefined);
+  
+  if (opt != z.o_undefined)
+    *_options = zuo_hash_remove(*_options, sym);
+  
+  return opt;
+}
+
+static void check_options_consumed(const char *who, zuo_t *options) {
+  if (((zuo_trie_node_t *)options)->count > 0) {
+    options = zuo_hash_keys(options);
+    zuo_fail1w(who, "unrecognized option", _zuo_car(options));
+  }
+}
+
+/*======================================================================*/
 /* processes                                                            */
 /*======================================================================*/
 
@@ -3431,26 +3456,31 @@ static char *zuo_cmdline_protect(const char *s)
 #endif
 
 
-zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
+zuo_t *zuo_process(zuo_t *command_and_args)
 {
-  zuo_t *l, *p_handle;
+  const char *who = "process";
+  zuo_t *command = _zuo_car(command_and_args);
+  zuo_t *args = _zuo_cdr(command_and_args);
+  zuo_t *options = z.o_empty_hash, *opt;
+  zuo_t *l, *p_handle, *result;
   int redirect_in, redirect_out, redirect_err;
   zuo_raw_handle_t pid, in, in_r, out, out_w, err, err_w;
-  int argc, i, ok;
+  int argc = 1, i, ok;
   char **argv;
 
-  /* need at least the command part */
-  if (command_and_args->tag != zuo_pair_tag)
-    l = z.o_false;
-  else {
-    for (l = command_and_args; l->tag == zuo_pair_tag; l = _zuo_cdr(l))
-      if (_zuo_car(l)->tag != zuo_string_tag)
-        break;
+  check_path_string(who, command);
+  for (l = args; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
+    if (_zuo_car(l)->tag != zuo_string_tag) {
+      if (_zuo_cdr(l) == z.o_null) {
+        options = _zuo_car(l);
+        if (options->tag != zuo_trie_node_tag)
+          zuo_fail1w(who, "not a string or hash table", options);
+      } else
+        zuo_fail1w(who, "not a string", _zuo_car(l));
+    } else
+      argc++;
   }
-  if (l != z.o_null)
-    zuo_fail1w("process", "not a list of strings", command_and_args);
 
-  argc = zuo_length_int(command_and_args);
   argv = malloc(sizeof(char*) * (argc + 1));
 
   for (i = 0; i < argc; i++) {
@@ -3460,45 +3490,54 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
   argv[i] = NULL;
 
   redirect_in = redirect_out = redirect_err = 0;
-  if (options != z.o_null) {
-    zuo_t *redirect_in_sym = zuo_symbol("redirect-in");
-    zuo_t *redirect_out_sym = zuo_symbol("redirect-out");
-    zuo_t *redirect_err_sym = zuo_symbol("redirect-err");
-    
-    for (l = options; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
-      zuo_t *a = _zuo_car(l);
-      if (redirect_in_sym == a)
-        redirect_in = 1;
-      else if (redirect_out_sym == a)
-        redirect_out = 1;
-      else if (redirect_err_sym == a)
-        redirect_err = 1;
-      else
-        break;
-    }
-    if (l != z.o_null)
-      zuo_fail1w("process", "not a list of option symbols", options);
+  in_r = in = 0;
+  out = out_w = 1;
+  err = err_w = 2;
+
+  opt = zuo_consume_option(&options, "stdin");
+  if (opt != z.o_undefined) {
+    if (opt == zuo_symbol("pipe")) {
+      redirect_in = 1;
+      zuo_pipe(&in_r, &in);
+    } else if ((opt->tag == zuo_handle_tag)
+               && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_in_status)) {
+      in_r = ((zuo_handle_t *)opt)->u.h.handle;
+    } else
+      zuo_fail1w(who, "not 'pipe or an open input file descriptor", opt);
+  }
+  
+  opt = zuo_consume_option(&options, "stdout");
+  if (opt != z.o_undefined) {
+    if (opt == zuo_symbol("pipe")) {
+      redirect_out = 1;
+      zuo_pipe(&out, &out_w);
+    } else if ((opt->tag == zuo_handle_tag)
+               && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_out_status)) {
+      out_w = ((zuo_handle_t *)opt)->u.h.handle;
+    } else
+      zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
+  }
+  
+  opt = zuo_consume_option(&options, "stderr");
+  if (opt != z.o_undefined) {
+    if (opt == zuo_symbol("pipe")) {
+      redirect_err = 1;
+      zuo_pipe(&err, &err_w);
+    } else if ((opt->tag == zuo_handle_tag)
+               && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_out_status)) {
+      err_w = ((zuo_handle_t *)opt)->u.h.handle;
+    } else
+      zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
   }
 
-  if (redirect_in)
-    zuo_pipe(&in_r, &in);
-  else
-    in_r = in = 0;
-  if (redirect_out)
-    zuo_pipe(&out, &out_w);
-  else
-    out = out_w = 0;
-  if (redirect_err)
-    zuo_pipe(&err, &err_w);
-  else
-    err = err_w = 0;
+  check_options_consumed(who, options);
   
 #ifdef WIN32
   /*--------------------------------------*/
   /*              Windows                 */
   /*--------------------------------------*/
   {
-    wchar_t *command_w = zuo_to_wide(argv[0]), *cmline_w;
+    wchar_t *command_w = zuo_to_wide_no_free(argv[0]), *cmline_w;
     char *cmdline;
     int len = 9;
     STARTUPINFOW startup;
@@ -3524,7 +3563,6 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
     cmdline[len-1] = 0;
 
     cmdline_w = zuo_to_wide(cmdline);
-    free(cmdline);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(*startup);
@@ -3558,17 +3596,20 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
       ok = 1;
     } else if (pid == 0) {
       /* This is the new child process */
-      if (redirect_in) {
+      if (in_r != 0) {
         dup2(in_r, 0);
-        close(in);
+        if (redirect_in)
+          close(in);
       }
-      if (redirect_out) {
+      if (out_w != 1) {
         dup2(out_w, 1);
-        close(out);
+        if (redirect_out)
+          close(out);
       }
-      if (redirect_err) {
+      if (err_w != 2) {
         dup2(err_w, 2);
-        close(err);
+        if (redirect_err)
+          close(err);
       }
 
       execv(argv[0], argv);
@@ -3608,11 +3649,16 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
   trie_set(Z.o_pid_table, pid, p_handle, p_handle);
 #endif
 
-  return zuo_cons(p_handle,
-                  zuo_cons(redirect_in ? zuo_handle(in, zuo_handle_open_fd_out_status) : z.o_false,
-                           zuo_cons(redirect_out ? zuo_handle(out, zuo_handle_open_fd_in_status) : z.o_false,
-                                    zuo_cons(redirect_err ? zuo_handle(err, zuo_handle_open_fd_in_status) : z.o_false,
-                                             z.o_null))));
+  result = z.o_empty_hash;
+  result = zuo_hash_set(result, zuo_symbol("process"), p_handle);
+  if (redirect_in)
+    result = zuo_hash_set(result, zuo_symbol("stdin"), zuo_handle(in, zuo_handle_open_fd_out_status));
+  if (redirect_out)
+    result = zuo_hash_set(result, zuo_symbol("stdout"), zuo_handle(out, zuo_handle_open_fd_in_status));
+  if (redirect_err)
+    result = zuo_hash_set(result, zuo_symbol("stderr"), zuo_handle(err, zuo_handle_open_fd_in_status));
+
+  return result;
 }
 
 static int is_process_handle(zuo_t *p) {
@@ -3809,7 +3855,7 @@ static char *zuo_self_path_c(char *exec_file)
       break;
   }
 
-  return zuo_from_wide_free(path);
+  return zuo_to_narrow(path);
 }
 
 #else
@@ -4089,7 +4135,7 @@ int main(int argc, char **argv) {
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE2("process", zuo_process);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, 1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
 
