@@ -1,0 +1,28 @@
+#lang zuo
+
+(for-each
+ alert
+ (append
+  (list ""
+        "Welcome to Zuo!"
+        ""
+        "This message is from \"zuofile.zuo\"."
+        "")
+  (if (null? (command-line-arguments))
+      (list
+       "Probably, you're seeing this message because you ran Zuo with no arguments,"
+       "in which case \"zuofile.zuo\" in the current directory is loaded by default."
+       ""
+       "If you want to run your own program, supply the program file as an argument."
+       "Additional arguments are made available to the target program through the"
+       "`command-line-arguments` procedure (in languages like `#lang zuo`, at least).")
+      (list*
+       "I see command-line arguments, so you either called Zuo with \"zuofile.zuo\""
+       "explicitly, or you used `-` as the file name, in which case \"zuofile.zuo\" is"
+       "used."
+       ""
+       "Here are the arguments you provided:"
+       (map (lambda (arg)
+              (~a "  " (~v arg)))
+            (command-line-arguments))))
+  (list "")))

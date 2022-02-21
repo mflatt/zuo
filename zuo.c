@@ -15,6 +15,7 @@
 # include <errno.h>
 # include <sys/types.h>
 # include <sys/wait.h>
+# include <sys/stat.h>
 #endif
 
 #if 0
@@ -294,7 +295,23 @@ static struct {
 
 static zuo_int32_t zuo_symbol_count = 0;
 
-static void zuo_fail(const char *str);
+/*======================================================================*/
+/* sanity checks                                                        */
+/*======================================================================*/
+
+void zuo_panic(const char *s) {
+  fprintf(stderr, "%s\n", s);
+  exit(1);
+}
+
+void zuo_check_sanity() {
+  if (sizeof(zuo_int32_t) != 4)
+    zuo_panic("wrong int32 size");
+  if (sizeof(zuo_int_t) != 8)
+    zuo_panic("wrong int size");
+  if ((void*)&(((zuo_string_t *)NULL)->len) != (void*)&(((zuo_forwarded_t *)NULL)->forward))
+    zuo_panic("string len field misplaced");
+}
 
 /*======================================================================*/
 /* memory manager                                                       */
@@ -517,7 +534,7 @@ static int zuo_registered_prim_count;
 
 static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int32_t arity_mask) {
   if (zuo_registered_prim_count == ZUO_MAX_PRIMITIVE_COUNT)
-    zuo_fail("primitive table is too small");
+    zuo_panic("primitive table is too small");
 
   zuo_registered_prims[zuo_registered_prim_count].proc = proc;
   zuo_registered_prims[zuo_registered_prim_count].data = data;
@@ -530,7 +547,7 @@ static zuo_int32_t zuo_primitive_to_id(zuo_primitive_t *obj) {
   for (i = 0; i < zuo_registered_prim_count; i++)
     if (obj->data == zuo_registered_prims[i].data)
       return i;
-  zuo_fail("could not find primitive");
+  zuo_panic("could not find primitive");
   return 0;
 }
 
@@ -622,8 +639,7 @@ static void zuo_fasl_ref(zuo_t **_obj, zuo_fasl_stream_t *_stream) {
     zuo_int32_t delta = ((char *)obj) - ((char *)stream->heap);
     zuo_t *shadow_obj = (zuo_t *)(((char *)stream->shadow_heap) + delta);
 
-    if ((delta < 0) || (delta > stream->heap_size))
-      zuo_fail("out-of-range reference");
+    ASSERT((delta >= 0) && (delta < stream->heap_size));
 
     zuo_ensure_image_room(stream);
 
@@ -743,7 +759,7 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
     zuo_fasl_ref(&((zuo_cont_t *)obj)->next, stream);
     break;
   case zuo_handle_tag:
-    zuo_fail("cannot dump heap with handles");
+    zuo_panic("cannot dump heap with handles");
     break;
   case zuo_forwarded_tag:
     ASSERT(0);
@@ -832,7 +848,7 @@ static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
       for (i = 0; i < len / sizeof(zuo_int32_t); i++)
         dump[i] = SWAP_ENDIAN(dump[i]);
     } else
-      zuo_fail("image does not start with zuo magic");
+      zuo_panic("image does not start with zuo magic");
   }
 
   map_len = ((zuo_fasl_header_t *)dump)->map_size;
@@ -1722,7 +1738,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
 
 static zuo_t *zuo_read_all_str(const char *s, zuo_int_t len, zuo_int_t start) {
   zuo_int_t o = start;
-  zuo_t *first = z.o_null, *last, *p;
+  zuo_t *first = z.o_null, *last = NULL, *p;
   zuo_int_t i;
 
   for (i = start; i < len; i++)
@@ -3251,6 +3267,86 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
 }
 
 /*======================================================================*/
+/* filesystem                                                           */
+/*======================================================================*/
+
+#if defined(__APPLE__) && defined(__MACH__)
+# define zuo_st_atim st_atimespec
+# define zuo_st_mtim st_mtimespec
+# define zuo_st_ctim st_ctimespec
+#else
+# define zuo_st_atim st_atim
+# define zuo_st_mtim st_mtim
+# define zuo_st_ctim st_ctim
+#endif
+
+static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
+  const char *who = "stat";
+  zuo_t *result = z.o_empty_hash;
+#ifdef WIN32
+  struct __stat64 stat_buf;
+#else
+  struct stat stat_buf;
+#endif
+  int stat_result;
+
+  check_path_string(who, path);
+
+#ifdef WIN32
+  struct __stat64 stat_buf;
+
+  do {
+    /* No stat/lstat distinction under Windows */
+    stat_result = _wstat64(wp, &stat_buf);
+  } while ((stat_result == -1) && (errno == EINTR));
+#else
+  do {
+    if (follow_links == z.o_false)
+      stat_result = lstat(ZUO_STRING_PTR(path), &stat_buf);
+    else
+      stat_result = stat(ZUO_STRING_PTR(path), &stat_buf);
+  } while ((stat_result == -1) && (errno == EINTR));
+#endif  
+
+  if (stat_result != 0) {
+    if (errno != ENOENT)
+      zuo_fail1w(who, "failed", path);
+    return z.o_false;
+  }
+
+  if (S_ISDIR(stat_buf.st_mode))
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("directory"));
+  else if (S_ISDIR(stat_buf.st_mode))
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("file"));
+  else if (S_ISLNK(stat_buf.st_mode))
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("link"));
+  else
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
+  result = zuo_hash_set(result, zuo_symbol("device"), zuo_integer(stat_buf.st_dev));
+  result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(stat_buf.st_ino));
+  result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(stat_buf.st_nlink));
+  result = zuo_hash_set(result, zuo_symbol("user-id"), zuo_integer(stat_buf.st_uid));
+  result = zuo_hash_set(result, zuo_symbol("group-id"), zuo_integer(stat_buf.st_gid));
+  result = zuo_hash_set(result, zuo_symbol("device-id-for-special-file"), zuo_integer(stat_buf.st_rdev));
+  result = zuo_hash_set(result, zuo_symbol("size"), zuo_integer(stat_buf.st_size));
+  result = zuo_hash_set(result, zuo_symbol("block-size"), zuo_integer(stat_buf.st_blksize));
+  result = zuo_hash_set(result, zuo_symbol("block-count"), zuo_integer(stat_buf.st_blocks));
+  result = zuo_hash_set(result, zuo_symbol("access-time-seconds"), zuo_integer(stat_buf.zuo_st_atim.tv_sec));
+  result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_atim.tv_nsec));
+  result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_sec));
+  result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_nsec));
+#ifdef WIN32  
+  result = zuo_hash_set(result, zuo_symbol("change-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_sec));
+  result = zuo_hash_set(result, zuo_symbol("change-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_nsec));
+#else
+  result = zuo_hash_set(result, zuo_symbol("creation-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_sec));
+  result = zuo_hash_set(result, zuo_symbol("creation-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_nsec));
+#endif
+
+  return result;
+}
+
+/*======================================================================*/
 /* processes                                                            */
 /*======================================================================*/
 
@@ -3478,7 +3574,7 @@ zuo_t *zuo_process(zuo_t *command_and_args, zuo_t *options)
       execv(argv[0], argv);
       {
         char *msg = "exec failed";
-        write(2, msg, strlen(msg));
+        (void)write(2, msg, strlen(msg));
       }
 
       _exit(1);
@@ -3810,6 +3906,8 @@ int main(int argc, char **argv) {
   int no_load_file = 0;
   char *argv0 = argv[0];
 
+  zuo_check_sanity();
+
   zuo_configure();
 
   argc--;
@@ -3828,16 +3926,17 @@ int main(int argc, char **argv) {
                        "     Use <dir> as the library-collection root, overriding `ZUO_LIB`;\n"
                        "     the default is \"%s\" relative to the executable\n"
                        "  -\n"
-                       "     Read module from stdin instead of first <argument>\n"
+                       "     Read module from \"zuofile.zuo\" instead of first <argument>\n"
                        "  --\n"
                        "     No argument following this switch is used as a switch\n"
                        "  -h, --help\n"
                        "     Show this information and exit, ignoring other options\n"
                        "\n"
                        "Unless `-` is provided, the first <argument> is used as a module\n"
-                       "path to load. Additional <argument>s are made available from the\n"
-                       "`current-command-lne-arguments` procedure. If an <option> switch is\n"
-                       "provided multiple times, the last one takes precedence.\n\n"),
+                       "path to load; otherwise, \"zuofile.zuo\" is loaded (if it exists).\n"
+                       "Additional <argument>s are made available from the `command-line-arguments`\n"
+                       "procedure. If an <option> switch is provided multiple times, the last\n"
+                       "instance takes precedence.\n\n"),
               argv0,
               ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
       exit(0);
@@ -3984,6 +4083,8 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
   ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
 
+  ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
+
   ZUO_TOP_ENV_SET_PRIMITIVE2("process", zuo_process);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
@@ -4001,7 +4102,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE0("find-exe", zuo_find_exe);
-  ZUO_TOP_ENV_SET_PRIMITIVE0("current-command-line-arguments", zuo_command_line_arguments);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("command-line-arguments", zuo_command_line_arguments);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("dump-heap-and-exit", zuo_dump_heap_and_exit);
 
@@ -4041,14 +4142,15 @@ int main(int argc, char **argv) {
 
   Z.o_cmdline_arguments = zuo_make_cmdline_arguments(argc, argv);
 
-  if (load_file != NULL)
-    (void)zuo_dynamic_require(zuo_string(load_file));
-  else {
-    zuo_int_t in_len;
-    char *input = zuo_drain(stdin, 0, -1, &in_len);
-    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("-"), z.o_false);
-    (void)zuo_eval_module(stdin_path, input, in_len);
+  if (load_file == NULL) {
+    load_file = "zuofile.zuo";
+    if (zuo_stat(zuo_string(load_file), z.o_true) == z.o_false) {
+      fprintf(stderr, "%s: no file specified, and no \"zuofile.zuo\" found", argv0);
+      zuo_fail("");
+    }
   }
+
+  (void)zuo_dynamic_require(zuo_string(load_file));
 
   return 0;
 }

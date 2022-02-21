@@ -16,50 +16,37 @@ defined, and even the base Zuo language is defined by layers of
 `#lang`s. One of the early layers implements macros.
 
 
-Building Zuo
-------------
+Building and Running Zuo
+------------------------
 
 Compile `zuo.c` with a C compiler. No additional are files needed,
 other than system and C-library headers. No compiler flags should be
 needed, although flags like `-o zuo` or `-O2` are a good idea.
 
-
-Running Zuo
------------
-
 The Zuo executable runs only modules. If you run Zuo with no
-command-line arguments, then it waits for a module on standard input.
-So, for example, you could enter
-
-```
-#lang zuo
-"Hello, world!"
-```
-
-and then type Ctl-D (most Unix shells), Ctl-Z (Windows), or whatever
-your shell uses for an end-of-file. But it's more expected that you
-put the above in a file `hello.zuo` and supply that file's path on the
-command line.
+command-line arguments, then it loads `zuofile.zuo`. Otherwise, the
+argument argument to Zuo is a file to run, and additional arguments
+are delivered via the `command-line-arguments` procedure.
 
 
 Library Modules and Startup Performance
 ---------------------------------------
 
 Except for the built-in `zuo/kernel` language module, Zuo finds
-languages in library collections. By default, Zuo looks for a
-directory `lib` relative to the executable as the root of the
-collection tree. You can supply an alternate collection-root path with
-the `-X` command-line flag.
+languages and modules through a collection of libraries. By default,
+Zuo looks for a directory `lib` relative to the executable as the root
+of the library-collection tree. You can supply an alternate collection
+path with the `-X` command-line flag.
 
 You can also create an instance of Zuo with a set of libraries
 embedded as a heap image. Embedding a heap image has two advantages:
 
  * No extra directory of library modules is necessary.
 
- * Zuo can start much faster.
+ * Zuo can start even more quickly.
 
 The `embed-heap.zuo` script generates a `.c` file that is a copy of
-`zuo.c` plus embedded modules. Byt default, the `zuo` module and its
+`zuo.c` plus embedded modules. By default, the `zuo` module and its
 dependencies are included, but you can specify others with `++lib`. In
 addition, the default collection-root path is disabled in the
 generated copy, unless you supply `--keep-collects` to
@@ -69,7 +56,7 @@ You can use heap images without embedding. The `dump-heap-and-exit`
 Zuo kernel permitive creates a heap image, and a `-B` or `--boot`
 command-line flag for Zuo uses the given boot image on startup.
 
-Boot images are machine-independent, whether in a stand-alone file or
+A boot image is machine-independent, whether in a stand-alone file or
 embedded in `.c` source.
 
 
