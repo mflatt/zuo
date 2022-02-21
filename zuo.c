@@ -22,14 +22,6 @@
 # define ASSERT(x) do { } while (0)
 #endif
 
-/* the "embed-lib.zuo" script looks for this line: */
-#define EMBEDDED_BOOT_HEAP 0
-
-#ifndef ZUO_LIB_PATH
-# define ZUO_LIB_PATH "lib"
-#endif
-static const char *zuo_lib_path = ZUO_LIB_PATH;
-
 #ifdef WIN32
 typedef long long zuo_int_t;
 typedef unsigned long long zuo_uint_t;
@@ -39,6 +31,21 @@ typedef long zuo_int_t;
 typedef unsigned long zuo_uint_t;
 typedef int zuo_raw_handle_t;
 #endif
+
+typedef int zuo_int32_t;
+typedef unsigned int zuo_uint32_t;
+
+/* the "embed-lib.zuo" script looks for this line: */
+#define EMBEDDED_BOOT_HEAP 0
+
+#ifndef ZUO_LIB_PATH
+# define ZUO_LIB_PATH "lib"
+#endif
+static const char *zuo_lib_path = ZUO_LIB_PATH;
+
+/* `zuo_int_t` should be a 64-bit integer type, so we don't have to
+    worry about Y2038 or large file sizes. `zuo_int32_t` should be a
+    32-bit integer type, obviously. */
 
 #define ZUO_RECUR_LIMIT 100
 
@@ -91,7 +98,7 @@ typedef enum {
 } zuo_tag_t;
 
 typedef struct zuo_t {
-  int tag;
+  zuo_int32_t tag;
   /* every subtype must have more to make it at least as
      large as `zuo_forwarded_t` */
 } zuo_t;
@@ -133,17 +140,19 @@ typedef struct {
 
 typedef struct {
   zuo_t obj;
-  zuo_int_t len;
+  zuo_int_t len; /* must be at the same place as forwarding */
   unsigned char s[1];
 } zuo_string_t;
 
-#define ZUO_STRING_ALLOC_SIZE(len) (((sizeof(zuo_string_t) + (len) + 1 + 3) >> 2) << 2)
+/* Since `len` overlaps with forwarding, we can tentatively get the "length" from any object */
 #define ZUO_STRING_LEN(obj) (((zuo_string_t *)(obj))->len)
+
+#define ZUO_STRING_ALLOC_SIZE(len) (((sizeof(zuo_string_t) + (len) + 1 + 3) >> 2) << 2)
 #define ZUO_STRING_PTR(obj) ((char *)&((zuo_string_t *)(obj))->s)
 
 typedef struct {
   zuo_t obj;
-  zuo_int_t id;
+  zuo_int32_t id;
   zuo_t *str;
 } zuo_symbol_t;
 
@@ -171,7 +180,7 @@ typedef struct {
   zuo_t obj;
   zuo_function_proc_t proc;
   void *data;
-  zuo_int_t arity_mask;
+  zuo_int32_t arity_mask;
   zuo_t *name;
 } zuo_primitive_t;
 
@@ -281,7 +290,7 @@ static struct {
 #define z zuo_roots.image
 #define Z zuo_roots.runtime
 
-static zuo_int_t zuo_symbol_count = 0;
+static zuo_int32_t zuo_symbol_count = 0;
 
 static void zuo_fail(const char *str);
 
@@ -334,14 +343,14 @@ static zuo_t *zuo_new(int tag, zuo_int_t size) {
   return obj;
 }
 
-static zuo_int_t object_size(zuo_t *obj) {
-  switch(obj->tag) {
+static zuo_int_t object_size(zuo_int32_t tag, zuo_int_t maybe_string_len) {
+  switch(tag) {
   case zuo_singleton_tag:
     return sizeof(zuo_forwarded_t);
   case zuo_integer_tag:
     return sizeof(zuo_integer_t);
   case zuo_string_tag:
-    return ZUO_STRING_ALLOC_SIZE(ZUO_STRING_LEN(obj));
+    return ZUO_STRING_ALLOC_SIZE(maybe_string_len);
   case zuo_pair_tag:
     return sizeof(zuo_pair_t);
   case zuo_symbol_tag:
@@ -370,7 +379,7 @@ void zuo_update(zuo_t **addr_to_update) {
   zuo_t *obj = *addr_to_update;
 
   if (obj->tag != zuo_forwarded_tag) {
-    zuo_int_t size = object_size(obj);
+    zuo_int_t size = object_size(obj->tag, ZUO_STRING_LEN(obj));
     zuo_t *new_obj = (zuo_t *)((char *)to_space + allocation_offset);
     allocation_offset += size;
 
@@ -436,7 +445,7 @@ static void zuo_trace_objects() {
   while (trace_offset < allocation_offset) {
     zuo_t *obj = (zuo_t *)((char *)to_space + trace_offset);
     zuo_trace(obj);
-    trace_offset += object_size(obj);
+    trace_offset += object_size(obj->tag, ZUO_STRING_LEN(obj));
   }
 }
 
@@ -504,7 +513,7 @@ static void zuo_replace_heap(void *space, zuo_int_t size, zuo_int_t offset) {
 static zuo_primitive_t zuo_registered_prims[ZUO_MAX_PRIMITIVE_COUNT];
 static int zuo_registered_prim_count;
 
-static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int_t arity_mask) {
+static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int32_t arity_mask) {
   if (zuo_registered_prim_count == ZUO_MAX_PRIMITIVE_COUNT)
     zuo_fail("primitive table is too small");
 
@@ -514,7 +523,7 @@ static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int
   zuo_registered_prim_count++;
 }
 
-static zuo_int_t zuo_primitive_to_id(zuo_primitive_t *obj) {
+static zuo_int32_t zuo_primitive_to_id(zuo_primitive_t *obj) {
   int i;
   for (i = 0; i < zuo_registered_prim_count; i++)
     if (obj->data == zuo_registered_prims[i].data)
@@ -523,7 +532,7 @@ static zuo_int_t zuo_primitive_to_id(zuo_primitive_t *obj) {
   return 0;
 }
 
-static void zuo_id_to_primitive(zuo_int_t i, zuo_primitive_t *obj) {
+static void zuo_id_to_primitive(zuo_int32_t i, zuo_primitive_t *obj) {
   obj->proc = zuo_registered_prims[i].proc;
   obj->data = zuo_registered_prims[i].data;
   obj->arity_mask = zuo_registered_prims[i].arity_mask;
@@ -533,9 +542,21 @@ static void zuo_id_to_primitive(zuo_int_t i, zuo_primitive_t *obj) {
 /* heap fasl                                                            */
 /*======================================================================*/
 
+typedef struct {
+  zuo_int32_t magic;
+  zuo_int32_t map_size;      /* in int32s */
+  zuo_int32_t image_size;    /* in int32s */
+  zuo_int32_t symbol_count;
+} zuo_fasl_header_t;
+
+static zuo_int32_t zuo_magic() {
+  /* gets magic specific to the current machine's endianness */
+  return *(zuo_int32_t *)"\0zuo";
+}
+
 typedef enum {
-  zuo_fasl_in,
-  zuo_fasl_out
+  zuo_fasl_out,
+  zuo_fasl_in
 } zuo_fasl_mode_t;
 
 typedef struct {
@@ -544,30 +565,30 @@ typedef struct {
 
 typedef struct {
   zuo_fasl_stream_t stream;
-  void *heap;
-  zuo_int_t heap_size;
-  zuo_int_t *delta_map;
-  zuo_int_t *image;
-  zuo_int_t offset;
-} zuo_fasl_stream_in_t;
+  void *heap, *shadow_heap;
+  zuo_int32_t heap_size;
+  
+  zuo_t **objs;
+  zuo_int32_t *map; /* offset in image */
+  zuo_int32_t map_size, map_offset;
+
+  zuo_int32_t *image;
+  zuo_int32_t image_size, image_offset;
+} zuo_fasl_stream_out_t;
 
 typedef struct {
   zuo_fasl_stream_t stream;
-  void *heap, *shadow_heap;
-  zuo_int_t heap_size;
-  
-  zuo_t **map;
-  zuo_int_t map_size, map_offset;
-  zuo_int_t map_done;
-
-  zuo_int_t *image;
-  zuo_int_t image_size, image_offset;
-} zuo_fasl_stream_out_t;
+  void *heap;
+  zuo_int32_t heap_size;
+  zuo_int32_t *map;
+  zuo_int32_t *image;
+  zuo_int32_t offset;
+} zuo_fasl_stream_in_t;
 
 static void zuo_ensure_image_room(zuo_fasl_stream_out_t *stream) {
   if (stream->image_size == stream->image_offset) {
-    zuo_int_t *new_image = malloc(stream->image_size * 2 * sizeof(zuo_int_t));
-    memcpy(new_image, stream->image, (stream->image_offset) * sizeof(zuo_int_t));
+    zuo_int32_t *new_image = malloc(stream->image_size * 2 * sizeof(zuo_int32_t));
+    memcpy(new_image, stream->image, (stream->image_offset) * sizeof(zuo_int32_t));
     free(stream->image);
     stream->image = new_image;
     stream->image_size *= 2;
@@ -576,9 +597,13 @@ static void zuo_ensure_image_room(zuo_fasl_stream_out_t *stream) {
 
 static void zuo_ensure_map_room(zuo_fasl_stream_out_t *stream) {
   if (stream->map_size == stream->map_offset) {
-    zuo_t **new_map = malloc(stream->map_size * 2 * sizeof(zuo_t*));
-    memcpy(new_map, stream->map, (stream->map_offset) * sizeof(zuo_t*));
+    zuo_t **new_objs = malloc(stream->map_size * 2 * sizeof(zuo_t*));
+    zuo_int32_t *new_map = malloc(stream->map_size * 2 * sizeof(zuo_int32_t));
+    memcpy(new_objs, stream->objs, (stream->map_offset) * sizeof(zuo_t*));
+    memcpy(new_map, stream->map, (stream->map_offset) * sizeof(zuo_int32_t));
+    free(stream->objs);
     free(stream->map);
+    stream->objs = new_objs;
     stream->map = new_map;
     stream->map_size *= 2;
   }
@@ -587,19 +612,19 @@ static void zuo_ensure_map_room(zuo_fasl_stream_out_t *stream) {
 static void zuo_fasl_ref(zuo_t **_obj, zuo_fasl_stream_t *_stream) {
   if (_stream->mode == zuo_fasl_in) {
     zuo_fasl_stream_in_t *stream = (zuo_fasl_stream_in_t *)_stream;
-    zuo_int_t delta = stream->delta_map[stream->image[stream->offset++]];
+    zuo_int32_t delta = stream->map[stream->image[stream->offset++]];
     *_obj = (zuo_t *)((char *)stream->heap + delta);
   } else {
     zuo_fasl_stream_out_t *stream = (zuo_fasl_stream_out_t *)_stream;
     zuo_t *obj = *_obj;
-    zuo_int_t delta = ((char *)obj) - ((char *)stream->heap);
+    zuo_int32_t delta = ((char *)obj) - ((char *)stream->heap);
     zuo_t *shadow_obj = (zuo_t *)(((char *)stream->shadow_heap) + delta);
 
     if ((delta < 0) || (delta > stream->heap_size))
       zuo_fail("out-of-range reference");
 
     zuo_ensure_image_room(stream);
-    
+
     if (shadow_obj->tag == zuo_forwarded_tag) {
       stream->image[stream->image_offset++] = ((zuo_fasl_forwarded_t *)shadow_obj)->index;
     } else {
@@ -609,12 +634,12 @@ static void zuo_fasl_ref(zuo_t **_obj, zuo_fasl_stream_t *_stream) {
       ((zuo_fasl_forwarded_t *)shadow_obj)->index = stream->map_offset;
 
       stream->image[stream->image_offset++] = stream->map_offset;
-      stream->map[stream->map_offset++] = *_obj;
+      stream->objs[stream->map_offset++] = *_obj;
     }
   }
 }
 
-static void zuo_fasl_int(zuo_int_t *_i, zuo_fasl_stream_t *_stream) {
+static void zuo_fasl_int32(zuo_int32_t *_i, zuo_fasl_stream_t *_stream) {
   if (_stream->mode == zuo_fasl_in) {
     zuo_fasl_stream_in_t *stream = (zuo_fasl_stream_in_t *)_stream;
     *_i = stream->image[stream->offset++];
@@ -625,16 +650,27 @@ static void zuo_fasl_int(zuo_int_t *_i, zuo_fasl_stream_t *_stream) {
   }
 }
 
+#define BUILD_INT(lo, hi) (((zuo_int_t)(hi) << 32) | ((zuo_int_t)(lo) & 0xFFFFFFFF))
+
+static void zuo_fasl_int(zuo_int_t *_i, zuo_fasl_stream_t *_stream) {
+  zuo_int32_t lo, hi;
+  lo = *_i & (zuo_int_t)0xFFFFFFFF;
+  hi = *_i >> 32;
+  zuo_fasl_int32(&lo, _stream);
+  zuo_fasl_int32(&hi, _stream);
+  *_i = BUILD_INT(lo, hi);
+}
+
 static void zuo_fasl_char(unsigned char *_c, zuo_fasl_stream_t *stream) {
-  zuo_int_t i = *_c;
-  zuo_fasl_int(&i, stream);
+  zuo_int32_t i = *_c;
+  zuo_fasl_int32(&i, stream);
   *_c = i;
 }
 
 static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   {
-    zuo_int_t tag = obj->tag;
-    zuo_fasl_int(&tag, stream);
+    zuo_int32_t tag = obj->tag;
+    zuo_fasl_int32(&tag, stream);
     obj->tag = tag;
   }
   
@@ -657,12 +693,13 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
     zuo_fasl_ref(&((zuo_pair_t *)obj)->cdr, stream);
     break;
   case zuo_symbol_tag:
-    zuo_fasl_int(&((zuo_symbol_t *)obj)->id, stream);
+    zuo_fasl_int32(&((zuo_symbol_t *)obj)->id, stream);
     zuo_fasl_ref(&((zuo_symbol_t *)obj)->str, stream);
     break;
   case zuo_trie_node_tag:
     {
       int i;
+      /* restore assumes that a string starts with its length */
       zuo_fasl_ref(&((zuo_trie_node_t *)obj)->key, stream);
       zuo_fasl_ref(&((zuo_trie_node_t *)obj)->val, stream);
       for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
@@ -677,12 +714,12 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
     }
   case zuo_primitive_tag:
     {
-      zuo_int_t primitive_id;
+      zuo_int32_t primitive_id;
       if (stream->mode == zuo_fasl_out) {
         primitive_id = zuo_primitive_to_id((zuo_primitive_t *)obj);
-        zuo_fasl_int(&primitive_id, stream);
+        zuo_fasl_int32(&primitive_id, stream);
       } else {
-        zuo_fasl_int(&primitive_id, stream);
+        zuo_fasl_int32(&primitive_id, stream);
         zuo_id_to_primitive(primitive_id, (zuo_primitive_t *)obj);
       }
 
@@ -719,22 +756,11 @@ static void zuo_fasl_roots(zuo_fasl_stream_t *stream) {
     zuo_fasl_ref(p+i, stream);
 }
 
-typedef struct {
-  zuo_int_t magic;
-  zuo_int_t heap_size;
-  zuo_int_t map_size;
-  zuo_int_t image_size;
-  zuo_int_t symbol_count;
-} zuo_fasl_header_t;
-
-static zuo_int_t zuo_magic() {
-  return *(zuo_int_t *)"\0zuo\0\0\0\0";
-}
-
 static char *zuo_fasl_dump(zuo_int_t *_len) {
   zuo_fasl_stream_out_t stream;
-  zuo_int_t total_size, i, header_size = sizeof(zuo_fasl_header_t) / sizeof(zuo_int_t);
-  zuo_int_t *dump;
+  zuo_int32_t total_size, header_size = sizeof(zuo_fasl_header_t) / sizeof(zuo_int32_t);
+  zuo_int32_t *dump;
+  zuo_int32_t map_done;
 
   /* make sure everything is in contiguous memory: */
   zuo_collect();
@@ -748,60 +774,97 @@ static char *zuo_fasl_dump(zuo_int_t *_len) {
 
   stream.map_size = 1024;
   stream.map_offset = 0;
-  stream.map = malloc(stream.map_size * sizeof(zuo_int_t));
-  stream.map_done = 0;
+  stream.map = malloc(stream.map_size * sizeof(zuo_int32_t));
+  stream.objs = malloc(stream.map_size * sizeof(zuo_t*));
 
   stream.image_size = 4096;
   stream.image_offset = 0;
-  stream.image = malloc(stream.image_size * sizeof(zuo_int_t));
+  stream.image = malloc(stream.image_size * sizeof(zuo_int32_t));
   
   zuo_fasl_roots(&stream.stream);
 
-  while (stream.map_done < stream.map_offset)
-    zuo_fasl(stream.map[stream.map_done++], &stream.stream);
+  /* analogous to the collector's trace_objects loop: */
+  for (map_done = 0; map_done < stream.map_offset; map_done++) {
+    zuo_t *obj = stream.objs[map_done];
 
+    /* register location of this object in the image */
+    zuo_int32_t delta = ((char *)obj) - ((char *)stream.heap);
+    zuo_t *shadow_obj = (zuo_t *)(((char *)stream.shadow_heap) + delta);
+    ASSERT(shadow_obj->tag == zuo_forwarded_tag);
+    stream.map[((zuo_fasl_forwarded_t *)shadow_obj)->index] = stream.image_offset;
+
+    zuo_fasl(obj, &stream.stream);
+  }
+  
   total_size = header_size + stream.map_offset + stream.image_offset;
-  dump = malloc(total_size * sizeof(zuo_int_t));
+  dump = malloc(total_size * sizeof(zuo_int32_t));
 
   ((zuo_fasl_header_t *)dump)->magic = zuo_magic();
-  ((zuo_fasl_header_t *)dump)->heap_size = stream.heap_size;
   ((zuo_fasl_header_t *)dump)->map_size = stream.map_offset;
   ((zuo_fasl_header_t *)dump)->image_size = stream.image_offset;
   ((zuo_fasl_header_t *)dump)->symbol_count = zuo_symbol_count;
-  
-  for (i = 0; i < stream.map_offset; i++)
-    dump[header_size + i] = ((char *)stream.map[i]) - ((char *)stream.heap);
-  memcpy(dump + header_size + stream.map_offset, stream.image, stream.image_offset * sizeof(zuo_int_t));
+  memcpy(dump + header_size, stream.map, stream.map_offset * sizeof(zuo_int32_t));
+  memcpy(dump + header_size + stream.map_offset, stream.image, stream.image_offset * sizeof(zuo_int32_t));
 
   free(stream.image);
+  free(stream.objs);
   free(stream.map);
   free(stream.shadow_heap);
 
-  *_len = total_size * sizeof(zuo_int_t);
+  *_len = total_size * sizeof(zuo_int32_t);
   return (char *)dump;
 }
 
+#define SWAP_ENDIAN(n) \
+  ((((n) & 0xFF) << 24) | (((n) & 0xFF00) << 8) | (((n) & 0xFF0000) >> 8) | (((n) >> 24) & 0xFF))
+
 static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
   zuo_fasl_stream_in_t stream;
-  zuo_int_t *dump = (zuo_int_t *)dump_in, i, map_len, alloc_factor = 2;
-  zuo_int_t header_size = sizeof(zuo_fasl_header_t) / sizeof(zuo_int_t);
+  zuo_int32_t *dump = (zuo_int32_t *)dump_in, i, map_len, alloc_factor = 2;
+  zuo_int32_t header_size = sizeof(zuo_fasl_header_t) / sizeof(zuo_int32_t);
+  zuo_int32_t magic = zuo_magic();
 
-  if (((zuo_fasl_header_t *)dump)->magic != zuo_magic())
-    zuo_fail("image does not start with zuo magic");
-  
+  if (((zuo_fasl_header_t *)dump)->magic != magic) {
+    if (((zuo_fasl_header_t *)dump)->magic == SWAP_ENDIAN(magic)) {
+      /* adapt little-endian to big-endian, or vice versa */
+      for (i = 0; i < len / sizeof(zuo_int32_t); i++)
+        dump[i] = SWAP_ENDIAN(dump[i]);
+    } else
+      zuo_fail("image does not start with zuo magic");
+  }
+
+  map_len = ((zuo_fasl_header_t *)dump)->map_size;
+
   stream.stream.mode = zuo_fasl_in;
 
-  stream.heap_size = ((zuo_fasl_header_t *)dump)->image_size * sizeof(zuo_int_t);
-  stream.heap = malloc(stream.heap_size * alloc_factor);
-  stream.delta_map = dump + header_size;
-  map_len = ((zuo_fasl_header_t *)dump)->map_size;
+  stream.map = dump + header_size;
   stream.image = dump + header_size + map_len;
+  stream.heap_size = 0;
   stream.offset = 0;
+  
+  /* compure heap size and replace image offsets with heap offsets */
+  for (i = 0; i < map_len; i++) {
+    zuo_int32_t delta = stream.map[i];
+    zuo_int32_t tag = stream.image[delta];
+    zuo_int_t sz;
 
+    ASSERT((tag >= 0) && (tag < zuo_forwarded_tag));
+    
+    if (tag == zuo_string_tag)
+      sz = object_size(tag, BUILD_INT(stream.image[delta+1], stream.image[delta+2]));
+    else
+      sz = object_size(tag, 0);
+
+    stream.map[i] = stream.heap_size;
+    stream.heap_size += sz;
+  }
+
+  stream.heap = malloc(stream.heap_size * alloc_factor);
+  
   zuo_fasl_roots(&stream.stream);
 
   for (i = 0; i < map_len; i++) {
-    zuo_t *obj = (zuo_t *)((char *)stream.heap + stream.delta_map[i]);
+    zuo_t *obj = (zuo_t *)((char *)stream.heap + stream.map[i]);
     zuo_fasl(obj, &stream.stream);
   }
 
@@ -892,7 +955,7 @@ static zuo_t *zuo_variable(zuo_t *name) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_primitive(zuo_function_proc_t proc, void *data, zuo_int_t arity_mask, zuo_t *name) {
+static zuo_t *zuo_primitive(zuo_function_proc_t proc, void *data, zuo_int32_t arity_mask, zuo_t *name) {
   zuo_primitive_t *obj = (zuo_primitive_t *)zuo_new(zuo_primitive_tag, sizeof(zuo_primitive_t));
   obj->proc = proc;
   obj->data = data;
@@ -1408,6 +1471,11 @@ static void check_hash(const char *who, zuo_t *obj) {
 static const char *symbol_chars = "~!@#$%^&*-_=+:<>?/.";
 static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth);
 
+static void zuo_read_fail(const unsigned char *s, zuo_int_t *_o, const char *msg) {
+  fprintf(stderr, "read: %s at position %d", msg, (int)*_o);
+  zuo_fail("");
+}
+
 static void skip_whitespace(unsigned const char *s, zuo_int_t *_o, int depth) {
   while (1) {
     while (isspace(s[*_o]))
@@ -1420,20 +1488,24 @@ static void skip_whitespace(unsigned const char *s, zuo_int_t *_o, int depth) {
       (*_o) += 2;
       discard = zuo_in(s, _o, depth+1);
       if (discard == z.o_eof)
-        zuo_fail("read: end of file after comment hash-semicolon");      
+        zuo_read_fail(s, _o, "end of file after comment hash-semicolon");      
     } else
       break;
   }
 }
 
-static int hex_value(int c) {
+static int hex_value(unsigned const char *s, zuo_int_t *_o, int offset) {
+  int c = s[*_o + offset];
+
   if ((c >= '0') && (c <= '9'))
     return c - '0';
   if ((c >= 'a') && (c <= 'f'))
     return c - 'a' + 10;
   if ((c >= 'A') && (c <= 'F'))
     return c - 'A' + 10;
-  zuo_fail("read: bad hex digit");
+
+  (*_o) += offset;
+  zuo_read_fail(s, _o, "bad hex digit");
   return -1;
 }
 
@@ -1447,11 +1519,6 @@ static int peek_input(const unsigned char *s, zuo_int_t *_o, const char *want) {
   if (isdigit(c) || isalpha(c) || strchr(symbol_chars, c))
     return 0;
   return 1;
-}
-
-static void zuo_read_fail(const unsigned char *s, zuo_int_t *_o, const char *msg) {
-  fprintf(stderr, "read: %s at position %d", msg, (int)*_o);
-  zuo_fail("");
 }
 
 static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
@@ -1626,7 +1693,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
           s2[len++] = '\r';
           (*_o) += 2;
         } else if (c2 == 'x') {
-          s2[len++] = (hex_value(s[(*_o)+2]) << 8) + hex_value(s[(*_o)+3]);
+          s2[len++] = (hex_value(s, _o, 2) << 8) + hex_value(s, _o, 3);
           (*_o) += 4;
         } else
           zuo_read_fail(s, _o, "bad character after backslash");
@@ -1639,8 +1706,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
         (*_o)++;
       }
     }
-    s2[len] = 0;
-    obj = zuo_string(s2);
+    obj = zuo_sized_string(s2, len);
     free(s2);
     return obj;
   } else {
@@ -1889,15 +1955,24 @@ static zuo_t *zuo_string_length(zuo_t *obj) {
   return zuo_integer(ZUO_STRING_LEN(obj));
 }
 
-static zuo_t *zuo_string_ref(zuo_t *obj, zuo_t *i) {
-  const char *who = "string-ref";
+static zuo_int_t check_string_ref_index(const char *who, zuo_t *obj, zuo_t *i, int width) {
   zuo_int_t idx;
   check_string(who, obj);
   check_integer(who, i);
   idx = ZUO_INT_I(i);
-  if ((idx < 0) || (idx >= ZUO_STRING_LEN(obj)))
+  if ((idx < 0) || ((idx + width) > ZUO_STRING_LEN(obj)))
     zuo_fail1w(who, "index out of bounds for string", i);
+  return idx;
+}
+
+static zuo_t *zuo_string_ref(zuo_t *obj, zuo_t *i) {
+  zuo_int_t idx = check_string_ref_index("string-ref", obj, i, 1);
   return zuo_integer(((zuo_string_t *)obj)->s[idx]);
+}
+
+static zuo_t *zuo_string_u32_ref(zuo_t *obj, zuo_t *i) {
+  zuo_int_t idx = check_string_ref_index("string-u32-ref", obj, i, 4);
+  return zuo_integer(*(zuo_uint32_t *)(((zuo_string_t *)obj)->s + idx));
 }
 
 static zuo_t *zuo_substring(zuo_t *obj, zuo_t *start_i, zuo_t *end_i) {
@@ -3874,6 +3949,7 @@ int main(int argc, char **argv) {
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("string-length", zuo_string_length);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string-ref", zuo_string_ref);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("string-u32-ref", zuo_string_u32_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE3("substring", zuo_substring);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string=?", zuo_string_eql);
   ZUO_TOP_ENV_SET_PRIMITIVE1("string->symbol", zuo_string_to_symbol);
@@ -3929,7 +4005,7 @@ int main(int argc, char **argv) {
 
 # if EMBEDDED_BOOT_HEAP
   if (!boot_heap)
-    zuo_fasl_restore(emedded_boot_heap, emedded_boot_heap_len);
+    zuo_fasl_restore((char *)emedded_boot_heap, emedded_boot_heap_len * sizeof(zuo_int32_t));
 # endif
 
   if (boot_heap) {

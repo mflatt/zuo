@@ -66,6 +66,17 @@
              (loop (+ i 1) (+ i 1)))]
       [else (loop start (+ i 1))])))
 
+(define (~hex v)
+  (if (= v 0)
+      "0"
+      (let loop ([v v] [accum '()])
+        (if (= v 0)
+            (apply ~a accum)
+            (loop (quotient v 16)
+                  (cons (let ([i (bitwise-and v 15)])
+                          (substring "0123456789abcdef" i (+ i 1)))
+                        accum))))))
+
 (for-each
  (lambda (line)
    (cond
@@ -73,22 +84,22 @@
       (unless (hash-ref cmd 'keep-collects? #f)
         (fd-write out (~a "#define ZUO_LIB_PATH NULL\n")))
       (fd-write out (~a "#define EMBEDDED_BOOT_HEAP 1\n"))
-      (fd-write out (~a "static int emedded_boot_heap_len = "
-                        (string-length heap)
+      (fd-write out (~a "static zuo_uint32_t emedded_boot_heap_len = "
+                        (quotient (string-length heap) 4)
                         ";\n"))
-      (fd-write out (~a "static char emedded_boot_heap[] = {\n"))
+      (fd-write out (~a "static zuo_uint32_t emedded_boot_heap[] = {\n"))
       (let ([accum->line (lambda (accum) (apply ~a (reverse (cons "\n" accum))))])
         (let loop ([i 0] [col 0] [accum '()])
           (cond
             [(= i (string-length heap))
              (unless (null? accum)
                (fd-write out (accum->line accum)))]
-            [(= col 20)
+            [(= col 8)
              (fd-write out (accum->line accum))
              (loop i 0 '())]
             [else
-             (loop (+ i 1) (+ col 1)
-                   (cons (~a " " (string-ref heap i) ",")
+             (loop (+ i 4) (+ col 1)
+                   (cons (~a " 0x" (~hex (string-u32-ref heap i)) ",")
                          accum))])))
       (fd-write out (~a " 0 };\n"))]
      [else
