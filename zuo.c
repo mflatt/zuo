@@ -1037,7 +1037,7 @@ static zuo_t *zuo_trie_lookup(zuo_t *trie, zuo_t *sym) {
   return trie_lookup(trie, ((zuo_symbol_t *)sym)->id);
 }
 
-/* trie mutation, used only for the symbol table */
+/* trie mutation, used only for the symbol table and inital env */
 static void trie_set(zuo_t *trie, zuo_int_t id, zuo_t *key, zuo_t *val) {
   while (id > 0) {
     zuo_t *next = ((zuo_trie_node_t *)trie)->next[id & ZUO_TRIE_BFACTOR_MASK];
@@ -1054,7 +1054,9 @@ static void trie_set(zuo_t *trie, zuo_int_t id, zuo_t *key, zuo_t *val) {
 }
 
 static void zuo_trie_set(zuo_t *trie, zuo_t *sym, zuo_t *val) {
+  ASSERT(trie_lookup(trie, ((zuo_symbol_t *)sym)->id) == z.o_undefined);
   trie_set(trie, ((zuo_symbol_t *)sym)->id, sym, val);
+  ((zuo_trie_node_t *)trie)->count++;
 }
 
 static zuo_trie_node_t *trie_clone(zuo_t *trie) {
@@ -4061,7 +4063,6 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("pair?", zuo_pair_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("null?", zuo_null_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("integer?", zuo_integer_p);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("procedure?", zuo_procedure_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("string?", zuo_string_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("symbol?", zuo_symbol_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("hash?", zuo_hash_p);

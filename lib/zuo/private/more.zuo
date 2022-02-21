@@ -1,0 +1,9 @@
+#lang zuo/private/defmacromod
+
+(require "defmacromod/and-or.zuo")
+
+(provide boolean?)
+
+(define boolean?
+  (lambda (v)
+    (or (eq? v #t) (eq? v #f))))

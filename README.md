@@ -1,4 +1,4 @@
-Zuo: a Tiny Racket for Scripting
+Zuo: A Tiny Racket for Scripting
 ================================
 
 [Work in progress]
@@ -25,7 +25,7 @@ needed, although flags like `-o zuo` or `-O2` are a good idea.
 
 The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads `zuofile.zuo`. Otherwise, the
-argument argument to Zuo is a file to run, and additional arguments
+first argument to Zuo is a file to run, and additional arguments
 are delivered via the `command-line-arguments` procedure.
 
 
@@ -43,7 +43,8 @@ embedded as a heap image. Embedding a heap image has two advantages:
 
  * No extra directory of library modules is necessary.
 
- * Zuo can start even more quickly.
+ * Zuo can start especially quickly, competitive with the fastest
+   command-line programs.
 
 The `embed-heap.zuo` script generates a `.c` file that is a copy of
 `zuo.c` plus embedded modules. By default, the `zuo` module and its
@@ -60,53 +61,8 @@ A boot image is machine-independent, whether in a stand-alone file or
 embedded in `.c` source.
 
 
-Kernel Language
----------------
+More Information
+----------------
 
-The `zuo/kernel` language implemented by `zuo.c` has these forms:
-
-```
- <expr> ::= <variable>
-         |  <literal>                  ; number, string, etc.
-         |  (<expr> <expr> ...)        ; function call
-         |  (lambda <formals> <string>? <expr>) ; optional name
-         |  (quote <expr>)
-         |  (if <expr> <expr> <expr>)
-         |  (let/cc <variable> <expr>)
-         |  (let ([<variable> <expr>]) <expr>)
-         |  (begin <expr> <expr> ...)
-```
-
-Of course, those last two could be encoded with `lambda` easily
-enough, but they're useful shortcuts to make explicit internally.
-
-Zuo data structures are immutable except for "variable" values. A
-variable is like a box, but it's set-once, and a variable has a name
-that is used to report an error when attempting to get a value of the
-variable before it has been set. Variables are used to implement
-`letrec`, for example.
-
-An error in Zuo always terminates the program. If you have a
-subroutine that needs to be able to fail, you can run a separate Zuo
-process. (The `find-exe` function reports the path to the current Zuo
-executable, and you can use that with `process`.)
-
-
-Macros
-------
-
-The Zuo library includes two variants of the macro expander:
-
- * The `#lang zuo` expander is non-hygienic by default. It offers only
-   a limited form of composition by having `quote-syntax` close over
-   the enclosing context. That doesn't support macro-generating macros
-   well, but it's good enough to be useful, and it's fast.
-
- * The `#lang zuo/hygienic` language implements the set-of-scopes
-   model (with no phase separation). It's more expressive, but also
-   runs slowly on the Zuo interpreter.
-
-The two expanders share an implementation that is parameterized over
-the implementation of syntax objects. You can mix and match modules in
-the two dialects, but you can't use macros from one language in the
-other language.
+Install the `zuo-doc` directory as a package in Racket to render the
+documentation there.

@@ -6,7 +6,8 @@
          "../list.zuo"
          "let.zuo"
          "define.zuo"
-         "quasiquote.zuo")
+         "quasiquote.zuo"
+         "../more.zuo")
 
 (provide (all-from-out "and-or.zuo"
                        "syntax-error.zuo"
@@ -14,4 +15,5 @@
                        "../list.zuo"
                        "let.zuo"
                        "define.zuo"
-                       "quasiquote.zuo"))
+                       "quasiquote.zuo"
+                       "../more.zuo"))
