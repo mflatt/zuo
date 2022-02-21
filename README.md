@@ -54,7 +54,7 @@ the `-X` command-line flag.
 You can also create an instance of Zuo with a set of libraries
 embedded as a heap image. Embedding a heap image has two advantages:
 
- * No extra directory of module sources is needed.
+ * No extra directory of library modules is necessary.
 
  * Zuo can start much faster.
 
@@ -68,6 +68,9 @@ generated copy, unless you supply `--keep-collects` to
 You can use heap images without embedding. The `dump-heap-and-exit`
 Zuo kernel permitive creates a heap image, and a `-B` or `--boot`
 command-line flag for Zuo uses the given boot image on startup.
+
+Boot images are machine-independent, whether in a stand-alone file or
+embedded in `.c` source.
 
 
 Kernel Language

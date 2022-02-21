@@ -1650,9 +1650,11 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
 static zuo_t *zuo_read_one_str(const char *s, zuo_int_t len) {
   zuo_int_t o = 0;
   zuo_t *obj = zuo_in((const unsigned char *)s, &o, 0);
+  if (obj == z.o_eof)
+    zuo_fail("read-one: no S-expression in input");
   skip_whitespace((const unsigned char *)s, &o, 0);
   if (o != len)
-    zuo_fail("read: extra input after S-expression");
+    zuo_fail("read-one: extra input after S-expression");
   return obj;
 }
 
@@ -3113,7 +3115,9 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
 
 static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
   zuo_t *file_path;
-  
+
+  check_module_path("dynamic-require", module_path);
+
   /* check for already-loaded module */
   {
     zuo_t *l;
@@ -3133,10 +3137,8 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
   /* not already loaded */
   if (module_path->tag == zuo_symbol_tag)
     file_path = zuo_library_path_to_file_path(module_path);
-  else if (module_path->tag == zuo_string_tag)
-    file_path = zuo_path_to_complete_path(module_path, z.o_false);
   else
-    zuo_fail1w("dynamic-require", "not a module path", module_path);
+    file_path = zuo_path_to_complete_path(module_path, z.o_false);
 
   if (zuo_logging) {
     int i;
