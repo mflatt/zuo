@@ -1,37 +1,12 @@
 #lang zuo/datum
 
-(require "../pair.zuo"
-         "and-or.zuo"
-         "syntax-error.zuo"
-         "../list.zuo"
-         "let.zuo"
-         "check-dups.zuo")
+(require "define-help.zuo")
 
-(provide (rename-out [define-var-or-proc define]))
+(provide (rename-out [define-var-or-proc define]
+                     [define-syntax-var-or-proc define-syntax]))
 
 (define-syntax define-var-or-proc
-  (lambda (stx)
-    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
-    (let ([head (cadr stx)])
-      (cond
-        [(identifier? head)
-         ;; regular define
-         (cons (quote-syntax define) (cdr stx))]
-        [(and (pair? head)
-              (identifier? (car head)))
-         ;; procedure shorthand
-         (let* ([name (car head)]
-                [args (cdr head)]
-                [arg-names (let loop ([args args])
-                             (cond
-                               [(identifier? args) ; rest arg
-                                (list args)]
-                               [(pair? args)
-                                (unless (identifier? (car args))
-                                  (syntax-error "define: bad argument" (car args)))
-                                (cons (car args) (loop (cdr args)))]
-                               [(null? args) '()]
-                               [else (bad-syntax stx)]))])
-           (check-duplicates arg-names)
-           (list (quote-syntax define) name (list* (quote-syntax lambda) args (cddr stx))))]
-        [else (bad-syntax stx)]))))
+  (make-define (quote-syntax define) (quote-syntax lambda)))
+
+(define-syntax define-syntax-var-or-proc
+  (make-define (quote-syntax define-syntax) (quote-syntax lambda)))

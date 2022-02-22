@@ -5,100 +5,124 @@
     (provide id ...)
     (define id 'id) ...))
 
-(define-fake
-  pair?
-  null?
-  integer?
-  string?
-  symbol?
-  hash?
-  list?
-  procedure?
-  void
+(define-syntax-rule (intro-define-fake)
+  (define-fake
+    lambda
+    let
+    let*
+    letrec
+    let/cc
+    if
+    and
+    or
+    when
+    unless
+    cond
+    quote
+    quasiquote
+    unquote
+    unquote-splicing
+    quote-syntax
+    
+    define
+    define-syntax
+    
+    pair?
+    null?
+    integer?
+    string?
+    symbol?
+    hash?
+    list?
+    procedure?
+    void
 
-  apply
-  procedure-arity-mask
+    apply
+    procedure-arity-mask
 
-  cons
-  car
-  cdr
-  list
-  append
-  reverse
-  length
+    cons
+    car
+    cdr
+    list
+    append
+    reverse
+    length
 
-  not
-  eq?
+    not
+    eq?
 
-  +
-  -
-  *
-  quotient
-  modulo
-  <
-  <=
-  =
-  >=
-  >
-  bitwise-and
-  bitwise-ior
-  bitwise-xor
-  bitwise-not
+    +
+    -
+    *
+    quotient
+    modulo
+    <
+    <=
+    =
+    >=
+    >
+    bitwise-and
+    bitwise-ior
+    bitwise-xor
+    bitwise-not
 
-  string-length
-  string-ref
-  string-u32-ref
-  substring
-  string=?
-  string->symbol
-  string->uninterned-symbol
-  symbol->string
+    string-length
+    string-ref
+    string-u32-ref
+    substring
+    string=?
+    string->symbol
+    string->uninterned-symbol
+    symbol->string
 
-  hash
-  hash-ref
-  hash-set
-  hash-remove
-  hash-keys
-  hash-count
-  hash-keys-subset?
+    hash
+    hash-ref
+    hash-set
+    hash-remove
+    hash-keys
+    hash-count
+    hash-keys-subset?
 
-  opaque
-  opaque-ref
+    opaque
+    opaque-ref
 
-  build-path
-  split-path
-  path->complete-path
+    build-path
+    split-path
+    path->complete-path
 
-  variable
-  variable-ref
-  variable-set!
+    variable
+    variable-ref
+    variable-set!
 
-  fd-open-input
-  fd-open-output
-  fd-close
-  fd-read
-  fd-write
-  eof
+    fd-open-input
+    fd-open-output
+    fd-close
+    fd-read
+    fd-write
+    eof
 
-  stat
+    stat
 
-  process
-  process-status
-  process-wait
+    process
+    process-status
+    process-wait
 
-  error
-  alert
-  ~v
-  ~a
-  ~s
+    error
+    alert
+    ~v
+    ~a
+    ~s
 
-  read-from-string-all
-  eval
-  dynamic-require
-  module-path-join
-  kernel-env
+    read-from-string-all
+    eval
+    dynamic-require
+    module-path-join
+    kernel-env
 
-  find-exe
-  command-line-arguments
+    find-exe
+    command-line-arguments
 
-  dump-heap-and-exit)
+    dump-heap-and-exit))
+
+(intro-define-fake)
+

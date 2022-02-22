@@ -34,9 +34,7 @@
                       #f)))
         (bad-syntax stx))))
 
-(define-syntax else
-  (lambda (stx)
-    (misplaced-syntax stx)))
+(define-syntax else misplaced-syntax)
 
 (define-syntax cond
   (lambda (stx free-id=?)
@@ -57,7 +55,7 @@
                              (free-id=? 'else (car cl1)))
                         #t
                         (car cl1))
-                (cons (quote-syntax begin) (cdr cl1))
+                (cons (quote-syntax let) (cons '() (cdr cl1)))
                 (if (null? cls)
                     '(void)
                     (cons (quote-syntax cond) cls))))
@@ -68,7 +66,7 @@
     (if (and (list? stx)
              (>= (length stx) 3))
         (list 'if (cadr stx)
-              (cons (quote-syntax begin) (cddr stx))
+              (cons (quote-syntax let) (cons '() (cddr stx)))
               '(void))
         (bad-syntax stx))))
 
@@ -78,5 +76,5 @@
              (>= (length stx) 3))
         (list 'if (cadr stx)
               '(void)
-              (cons (quote-syntax begin) (cddr stx)))
+              (cons (quote-syntax let) (cons '() (cddr stx))))
         (bad-syntax stx))))

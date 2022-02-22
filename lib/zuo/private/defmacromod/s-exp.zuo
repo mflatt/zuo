@@ -106,14 +106,16 @@
 (include "../mm-common/free-id-eq.zuo")
 
 ;; syntax-quote turns a symbol into a syntactic closure, and leaves everything
-;; else alone
-(define (syntax-quote v ctx)
+;; else alone; the closure captures the enclosing context where the symbol is
+;; currently bound, or the module context if it's not bound
+(define (syntax-quote v mod-ctx binds)
   (letrec ([syntax-quote
             (lambda (v)
               (cond
                 [(pair? v) (list 'cons (syntax-quote (car v)) (syntax-quote (cdr v)))]
                 [(null? v) '()]
-                [(symbol? v) (list 'quote (syntactic-closure v ctx))]
+                [(symbol? v)
+                 (list 'quote (syntactic-closure v (hash-ref (binds-sym-hash binds) v mod-ctx)))]
                 [else v]))])
     (syntax-quote v)))
 

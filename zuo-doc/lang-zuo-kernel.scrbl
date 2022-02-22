@@ -4,6 +4,10 @@
 
 @defmodulelang[zuo/kernel]
 
+TODO: Explain the low-level module protocol that is implemented by a
+@racketmodname[zuo/kernel] module body and reflected by the
+@racket[dynamic-require] primitive.
+
 The @racketmodname[zuo/kernel] language implemented by
 @filepath{zuo.c} has these forms:
 

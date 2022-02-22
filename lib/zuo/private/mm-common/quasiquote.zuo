@@ -6,10 +6,12 @@
          "../list.zuo"
          "let.zuo")
 
-(provide quasiquote)
+(provide quasiquote
+         unquote
+         unquote-splicing)
 
 (define-syntax quasiquote
-  (lambda (stx)
+  (lambda (stx free-id=?)
     (unless (and (list? stx) (= (length stx) 2))
       (bad-syntax stx))
     (let ([quot (quote-syntax quote)])
@@ -28,28 +30,31 @@
              (let ([a (car s)])
                (cond
                  [(and (identifier? a)
-                       (eq? (syntax-e a) 'unquote))
+                       (free-id=? (syntax-e a) 'unquote))
                   (unless (= (length s) 2)
                     (bad-syntax s))
                   (if (= depth 0)
                       (cadr s)
                       (loop-pair list (quote-syntax list) a (cadr s) (- depth 1)))]
                  [(and (identifier? a)
-                       (eq? (syntax-e a) 'unquote-splicing))
+                       (free-id=? (syntax-e a) 'unquote-splicing))
                   (syntax-error "misplaced splicing unquote" s)]
                  [(and (pair? a)
                        (identifier? (car a))
-                       (eq? (syntax-e (car a)) 'unquote-splicing))
+                       (free-id=? (syntax-e (car a)) 'unquote-splicing))
                   (unless (= (length a) 2)
                     (bad-syntax a))
                   (if (= depth 0)
                       (list (quote-syntax append) (cadr a) (loop (cdr s) depth))
                       (loop-pair cons (quote-syntax cons) a (cdr s) depth))]
                  [(and (identifier? a)
-                       (eq? (syntax-e a) 'quasiquote))
+                       (free-id=? (syntax-e a) 'quasiquote))
                   (unless (= (length s) 2)
                     (bad-syntax s))
                   (loop-pair list (quote-syntax list) a (cadr s) (- depth 1))]
                  [else
                   (loop-pair cons (quote-syntax cons) a (cdr s) depth)]))]
             [else (list quot s)]))))))
+
+(define-syntax unquote misplaced-syntax)
+(define-syntax unquote-splicing misplaced-syntax)

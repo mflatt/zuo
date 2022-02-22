@@ -1,0 +1,39 @@
+#lang zuo/datum
+
+(require "../pair.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "../list.zuo"
+         "let.zuo"
+         "check-dups.zuo")
+
+(provide make-define)
+
+(define make-define
+  (lambda (orig-define orig-lambda)
+    (lambda (stx)
+      (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
+      (let ([head (cadr stx)])
+        (cond
+          [(identifier? head)
+           ;; regular define
+           (cons orig-define (cdr stx))]
+          [(and (pair? head)
+                (identifier? (car head)))
+           ;; procedure shorthand
+           (let* ([name (car head)]
+                  [args (cdr head)]
+                  [arg-names (let loop ([args args])
+                               (cond
+                                 [(identifier? args) ; rest arg
+                                  (list args)]
+                                 [(pair? args)
+                                  (unless (identifier? (car args))
+                                    (syntax-error (~a (syntax-e orig-define) ": bad argument")
+                                                  (car args)))
+                                  (cons (car args) (loop (cdr args)))]
+                                 [(null? args) '()]
+                                 [else (bad-syntax stx)]))])
+             (check-duplicates arg-names)
+             (list orig-define name (list* orig-lambda args (cddr stx))))]
+          [else (bad-syntax stx)])))))

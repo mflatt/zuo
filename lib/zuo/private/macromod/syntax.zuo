@@ -181,7 +181,7 @@
       (make-binds binds-ht (hash)))))
 
 ;; Implements the `quote-syntax` form
-(define (syntax-quote v ctx)
+(define (syntax-quote v mod-ctx binds)
   (list 'quote v))
 
 ;; apply a macro; if it's imported, then we'll have to do some work to
