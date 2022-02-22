@@ -2852,9 +2852,59 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
   return zuo_build_path(Z.o_library_path, strobj);
 }
 
+zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int *_ups, int keep_suffix) {
+  zuo_int_t i = 0, len = ZUO_STRING_LEN(rel_mod_path);
+  unsigned char *s = (unsigned char *)ZUO_STRING_PTR(rel_mod_path);
+  int bad = 0, ups = 1, ups_until = 0, saw_non_dot = 0, suffix = 0;
+
+  while (i < len) {
+    if (!saw_non_dot && (s[i] == '.')) {
+      if (s[i+1] == '/')
+        i += 2;
+      else if (s[i+1] == '.') {
+        if (s[i+2] == '/')
+          i += 3;
+        else
+          bad = 1;
+        ups++;
+      } else
+        bad = 1;
+      ups_until = i;
+    } else if (zuo_is_symbol_module_char(s[i])) {
+      saw_non_dot = 1;
+      if (s[i] == '/')
+        bad = 1;
+      else if (s[i+1] == '/')
+        i += 2;
+      else
+        i++;
+    } else if ((s[i] == '.')
+               && (s[i+1] == 'z')
+               && (s[i+2] == 'u')
+               && (s[i+3] == 'o')
+               && (s[i+4] == 0)) {
+      suffix = 4;
+      i += 4;
+    } else
+      bad = 1;
+    if (bad)
+      zuo_fail1w(who, "not a relative module library path", rel_mod_path);
+  }
+
+  if (suffix == 0)
+    zuo_fail1w(who, "relative module library path lacks \".zou\"", rel_mod_path);
+
+  *_ups = ups;
+
+  return zuo_sized_string((char *)s + ups_until,
+                          len - ups_until - (keep_suffix ? 0 : suffix));
+}
+
 zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
   const char *who = "module-path-join";
-  int saw_slash = 0;
+  int saw_slash = 0, ups = 0, keep_suffix;
+  zuo_t *rel_str;
+
   check_module_path(who, rel_mod_path);
   if (!zuo_is_module_path(base_mod_path, &saw_slash))
     zuo_fail1w(who, "not a module path", base_mod_path);
@@ -2862,54 +2912,16 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
   if (rel_mod_path->tag == zuo_symbol_tag)
     return rel_mod_path;
 
+  /* When an absolute path is given, normalization is the caller's problem: */
   if (zuo_path_is_absolute(rel_mod_path))
     return rel_mod_path;
 
+  keep_suffix = (base_mod_path->tag == zuo_string_tag);
+
+  rel_str = zuo_parse_relative_module_path(who, rel_mod_path, &ups, keep_suffix);
+
   if (base_mod_path->tag == zuo_symbol_tag) {
-    /* This is the complicated case: string relative to symbolic */
-    zuo_int_t i = 0, len = ZUO_STRING_LEN(rel_mod_path);
-    unsigned char *s = (unsigned char *)ZUO_STRING_PTR(rel_mod_path);
-    int bad = 0, ups = 1, ups_until = 0, saw_non_dot = 0, suffix = 0;
-    zuo_t *mod_path;
-
-    while (i < len) {
-      if (!saw_non_dot && (s[i] == '.')) {
-        if (s[i+1] == '/')
-          i += 2;
-        else if (s[i+1] == '.') {
-          if (s[i+2] == '/')
-            i += 3;
-          else
-            bad = 1;
-          ups++;
-        } else
-          bad = 1;
-        ups_until = i;
-      } else if (zuo_is_symbol_module_char(s[i])) {
-        saw_non_dot = 1;
-        if (s[i] == '/')
-          bad = 1;
-        else if (s[i+1] == '/')
-          i += 2;
-        else
-          i++;
-      } else if ((s[i] == '.')
-                 && (s[i+1] == 'z')
-                 && (s[i+2] == 'u')
-                 && (s[i+3] == 'o')
-                 && (s[i+4] == 0)) {
-        suffix = 4;
-        i += 4;
-      } else
-        bad = 1;
-      if (bad)
-        zuo_fail1w(who, "not a relative module library path", rel_mod_path);
-    }
-
-    if (suffix == 0)
-      zuo_fail1w(who, "relative module library path lacks \".zou\"", rel_mod_path);
-
-    mod_path = ((zuo_symbol_t *)base_mod_path)->str;
+    zuo_t *mod_path = ((zuo_symbol_t *)base_mod_path)->str;
     if (!saw_slash)
       mod_path = zuo_tilde_a(zuo_cons(mod_path, zuo_cons(zuo_string("/main"), z.o_null)));
 
@@ -2921,15 +2933,19 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
       ups--;
     }
 
-    mod_path = zuo_tilde_a(zuo_cons(mod_path,
-                                    zuo_cons(zuo_sized_string((char *)s + ups_until,
-                                                              len - ups_until - suffix),
-                                             z.o_null)));
+    mod_path = zuo_tilde_a(zuo_cons(mod_path, zuo_cons(rel_str, z.o_null)));
 
     return zuo_string_to_symbol(mod_path);
   } else {
-    zuo_t *l = zuo_split_path(base_mod_path);
-    return zuo_path_to_complete_path(rel_mod_path, _zuo_car(l));
+    zuo_t *mod_path = base_mod_path;
+    while (ups > 0) {
+      zuo_t *l = zuo_split_path(mod_path);
+      mod_path = _zuo_car(l);
+      if (mod_path == z.o_false)
+        zuo_fail1w(who, "too many \"up\" elements", rel_mod_path);
+      ups--;
+    }
+    return zuo_path_to_complete_path(rel_str, mod_path);
   }
 }
 
