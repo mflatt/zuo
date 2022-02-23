@@ -413,6 +413,9 @@
                           [(eq? bind 'quote-syntax)
                            (unless (= 2 (length s)) (bad-syntax s))
                            (syntax-quote (cadr s) ctx (state-binds state))]
+                          [(eq? bind 'quote-module-path)
+                           (unless (= 1 (length s)) (bad-syntax s))
+                           (list 'quote mod-path)]
                           [(eq? bind 'if)
                            (unless (= 4 (length s)) (bad-syntax s))
                            (list 'if

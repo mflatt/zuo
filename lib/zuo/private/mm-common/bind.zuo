@@ -29,7 +29,7 @@
          kernel-provides
          '(lambda let letrec let/cc quote if begin
                   define define-syntax require provide
-                  quote-syntax
+                  quote-syntax quote-module-path
                   include)))
 
 ;; Add some functions/constants defined in the expander

@@ -1,12 +1,12 @@
 #if defined(_MSC_VER) || defined(__MINGW32__)
-# define WIN32
+# define ZUO_WINDOWS
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
 # include <windows.h>
 # include <direct.h>
 #else
@@ -36,7 +36,7 @@ typedef uint64_t zuo_uint_t;
 typedef int32_t zuo_int32_t;
 typedef uint32_t zuo_uint32_t;
 
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
 typedef HANDLE zuo_raw_handle_t;
 #else
 typedef int zuo_raw_handle_t;
@@ -282,8 +282,7 @@ static struct {
   
     /* startup info */
     zuo_t *o_library_path;
-    zuo_t *o_exe_path;
-    zuo_t *o_cmdline_arguments;
+    zuo_t *o_runtime_env;
   
     /* data to save across a GC that's possibly triggered by interp */
     zuo_t *o_stash;
@@ -2669,6 +2668,14 @@ zuo_t *zuo_eval(zuo_t *e) {
 /* paths                                                                */
 /*======================================================================*/
 
+#ifdef ZUO_WINDOWS
+# define ZUO_IS_PATH_SEP(c) (((c) == '/') || ((c) == '\\'))
+# define ZUO_PATH_SEP '\\'
+#else
+# define ZUO_IS_PATH_SEP(c) ((c) == '/')
+# define ZUO_PATH_SEP '/'
+#endif
+
 static int zuo_is_path_string(zuo_t *obj) {
   zuo_int_t i;
   
@@ -2714,7 +2721,7 @@ static void check_module_path(const char *who, zuo_t *obj) {
 }
 
 static int path_is_absolute(const char *p) {
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   return ((p[0] == '/')
           || (p[0] == '\\')
           || (isalpha(p[0])
@@ -2736,7 +2743,7 @@ static char *zuo_getcwd() {
   
   s = malloc(len);
   while (1) {
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
     dir = (char *)_wgetcwd((wchar_t *)s, len / sizeof(wchar_t));
 #else
     dir = getcwd(s, len);
@@ -2755,7 +2762,7 @@ static char *zuo_getcwd() {
   if (!dir)
     zuo_fail("error getting current directory");
 
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   dir = zuo_to_narrow(s);
 #endif
   
@@ -2783,8 +2790,9 @@ static zuo_t *zuo_build_path(zuo_t *pre, zuo_t *post) {
   if (zuo_path_is_absolute(post))
     zuo_fail1w("build-path", "second path is absolute", post);
 
+  /* add separator beteween `pre` and `post`? */
   len = ZUO_STRING_LEN(pre);
-  if (((zuo_string_t *)pre)->s[len-1] == '/')
+  if (ZUO_IS_PATH_SEP(((zuo_string_t *)pre)->s[len-1]))
     add_sep = 0;
   else {
     len += 1;
@@ -2798,7 +2806,7 @@ static zuo_t *zuo_build_path(zuo_t *pre, zuo_t *post) {
   len = ZUO_STRING_LEN(pre);
   memcpy(&path->s, ZUO_STRING_PTR(pre), len);
   if (add_sep)
-    path->s[len++] = '/';
+    path->s[len++] = ZUO_PATH_SEP;
   memcpy(&path->s[len], ZUO_STRING_PTR(post), ZUO_STRING_LEN(post));
 
   return (zuo_t *)path;
@@ -2812,7 +2820,7 @@ static zuo_t *zuo_split_path(zuo_t *p) {
 
   non_sep = 0;
   for (i = ZUO_STRING_LEN(p); i--; ) {
-    if (ZUO_STRING_PTR(p)[i] == '/') {
+    if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[i])) {
       if (non_sep) {
         return zuo_cons(zuo_sized_string(ZUO_STRING_PTR(p), i+1),
                         zuo_string(ZUO_STRING_PTR(p)+i+1));
@@ -2943,25 +2951,39 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
       mod_path = _zuo_car(l);
       if (mod_path == z.o_false)
         zuo_fail1w(who, "too many \"up\" elements", rel_mod_path);
-      ups--;
+      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), "."))
+        ups--;
     }
     return zuo_path_to_complete_path(rel_str, mod_path);
   }
 }
 
-static zuo_t *zuo_find_exe() {
-  return Z.o_exe_path;
+static zuo_t *zuo_runtime_env() {
+  return Z.o_runtime_env;
 }
 
-static zuo_t *zuo_make_cmdline_arguments(int argc, char **argv) {
-  zuo_t *l = z.o_null;
-  while (argc-- > 0)
-    l = zuo_cons(zuo_string(argv[argc]), l);
-  return l;
-}
+static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, int argc, char **argv) {
+  zuo_t *ht = z.o_empty_hash;
 
-static zuo_t *zuo_command_line_arguments() {
-  return Z.o_cmdline_arguments;
+  ht = zuo_hash_set(ht, zuo_symbol("exe"), exe_path);
+
+  {
+    zuo_t *l = z.o_null;
+    while (argc-- > 0)
+      l = zuo_cons(zuo_string(argv[argc]), l);
+    ht = zuo_hash_set(ht, zuo_symbol("arguments"), l);
+  }
+
+  {
+#ifdef ZUO_WINDOWS
+    zuo_t *type = zuo_symbol("windows");
+#else
+    zuo_t *type = zuo_symbol("unix");
+#endif
+    ht = zuo_hash_set(ht, zuo_symbol("system-type"), type);
+  }
+
+  return ht;
 }
 
 /*======================================================================*/
@@ -3042,7 +3064,7 @@ static void zuo_fill(const char *s, zuo_int_t len, FILE *f, zuo_int_t fd) {
 
 static void zuo_close(zuo_raw_handle_t handle)
 {
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   CloseHandle(handle);
 #else
   close(handle);
@@ -3305,7 +3327,7 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
 static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   const char *who = "stat";
   zuo_t *result = z.o_empty_hash;
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   struct __stat64 stat_buf;
 #else
   struct stat stat_buf;
@@ -3314,7 +3336,7 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
 
   check_path_string(who, path);
 
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   struct __stat64 stat_buf;
 
   do {
@@ -3357,7 +3379,7 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_atim.tv_nsec));
   result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_sec));
   result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_nsec));
-#ifdef WIN32  
+#ifdef ZUO_WINDOWS  
   result = zuo_hash_set(result, zuo_symbol("change-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_sec));
   result = zuo_hash_set(result, zuo_symbol("change-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_nsec));
 #else
@@ -3395,7 +3417,7 @@ static void check_options_consumed(const char *who, zuo_t *options) {
 
 static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
 {
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   {
     HANDLE rh, wh;
     if (!CreatePipe(_r, _w, NULL, 0))
@@ -3414,7 +3436,7 @@ static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
 #endif  
 }
 
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
 static char *zuo_cmdline_protect(const char *s)
 {
   char *naya;
@@ -3550,7 +3572,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
 
   check_options_consumed(who, options);
   
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   /*--------------------------------------*/
   /*              Windows                 */
   /*--------------------------------------*/
@@ -3663,7 +3685,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   free(argv);
 
   p_handle = zuo_handle(pid, zuo_handle_process_running_status);
-#ifndef WIN32
+#ifndef ZUO_WINDOWS
   trie_set(Z.o_pid_table, pid, p_handle, p_handle);
 #endif
 
@@ -3707,7 +3729,7 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
   if (l != z.o_null)
     zuo_fail1w("process-wait", "not a process handle or list of process handles", pids_i);
 
-#ifdef WIN32
+#ifdef ZUO_WINDOWS
   /* loop until on of the handles is marked as done */
   while (1) {
     HANDLE *a = malloc(sizeof(HANDLE) * zuo_length_int(pids_i));
@@ -3854,7 +3876,7 @@ static char *zuo_self_path_c(char *exec_file)
   }
 }
 
-#elif defined(WIN32)
+#elif defined(ZUO_WINDOWS)
 
 /* used outside this file: */
 static char *zuo_self_path_c(char *exec_file)
@@ -3896,7 +3918,7 @@ static char *zuo_self_path_c(char *exec_file)
     return strdup(exec_file);
   } else if (has_slash(exec_file)) {
     /* Relative path with a directory: */
-    return zip_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file), z.o_false));
+    return zuo_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file), z.o_false));
   } else {
     /* We have to find the executable by searching PATH: */
     char *path = strdup(getenv("PATH")), *p;
@@ -3919,10 +3941,10 @@ static char *zuo_self_path_c(char *exec_file)
       if (!*path)
 	break;
 
-      m = build_path(zuo_string(path), zuo_string(exec_file));
+      m = zuo_build_path(zuo_string(path), zuo_string(exec_file));
 
       if (access(ZUO_STRING_PTR(m), X_OK) == 0)
-        return zip_string_to_c(zuo_path_to_complete_path(m, z.o_false));
+        return zuo_string_to_c(zuo_path_to_complete_path(m, z.o_false));
 
       if (more)
 	path = p + 1;
@@ -3970,6 +3992,7 @@ int main(int argc, char **argv) {
   char *load_file = NULL, *library_path = NULL, *boot_heap = NULL;
   int no_load_file = 0;
   char *argv0 = argv[0];
+  zuo_t *exe_path;
 
   zuo_check_sanity();
 
@@ -4168,8 +4191,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE0("find-exe", zuo_find_exe);
-  ZUO_TOP_ENV_SET_PRIMITIVE0("command-line-arguments", zuo_command_line_arguments);
+  ZUO_TOP_ENV_SET_PRIMITIVE0("runtime-env", zuo_runtime_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("dump-heap-and-exit", zuo_dump_heap_and_exit);
 
@@ -4189,12 +4211,10 @@ int main(int argc, char **argv) {
         
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
-
+  Z.o_stash = z.o_false;
   Z.o_pid_table = zuo_trie_node();
 
-  Z.o_exe_path = zuo_self_path(argv0);
-
-  Z.o_stash = z.o_false;
+  exe_path = zuo_self_path(argv0);
 
   if (library_path) {
     Z.o_library_path = zuo_path_to_complete_path(zuo_string(library_path),
@@ -4202,12 +4222,12 @@ int main(int argc, char **argv) {
   } else if (zuo_lib_path != NULL) {
     Z.o_library_path = zuo_string(zuo_lib_path);
     if (!zuo_path_is_absolute(Z.o_library_path))
-      Z.o_library_path = zuo_build_path(_zuo_car(zuo_split_path(Z.o_exe_path)),
+      Z.o_library_path = zuo_build_path(_zuo_car(zuo_split_path(exe_path)),
                                         Z.o_library_path);
   } else
     Z.o_library_path = z.o_false;
 
-  Z.o_cmdline_arguments = zuo_make_cmdline_arguments(argc, argv);
+  Z.o_runtime_env = zuo_make_runtime_env(exe_path, argc, argv);
 
   if (load_file == NULL) {
     load_file = "zuofile.zuo";
@@ -4220,7 +4240,7 @@ int main(int argc, char **argv) {
   if (load_file[0] == 0) {
     zuo_int_t in_len;
     char *input = zuo_drain(stdin, 0, -1, &in_len);
-    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("-"), z.o_false);
+    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("stdin"), z.o_false);
     (void)zuo_eval_module(stdin_path, input, in_len);
   } else
     (void)zuo_dynamic_require(zuo_string(load_file));

@@ -168,6 +168,10 @@ There is no @realracket[quasisyntax], @realracket[unsyntax], or
 enough for most purposes. To generate a fresh symbol for the output of
 a macro expansion, use @racket[string->uninterned-symbol].}
 
+@defform[(quote-module-path)]{
+
+Returns the module path of the enclosing module.}
+
 
 @subsection{Definition Forms}
 
@@ -424,8 +428,7 @@ Still to be documented:
   module-path-join
   kernel-env
 
-  find-exe
-  command-line-arguments
+  runtime-env
 
   dump-heap-and-exit
 
