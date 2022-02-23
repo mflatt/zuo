@@ -35,7 +35,7 @@
     (fd-write in "#lang zuo/kernel\n")
     (fd-write in "(begin\n")
     (for-each (lambda (lib)
-                (fd-write in (~a "(dynamic-require '" lib ")\n")))
+                (fd-write in (~a "(module->hash '" lib ")\n")))
               libs)
     (fd-write in "(dump-heap-and-exit (fd-open-output 'stdout)))\n")
     (fd-close in)

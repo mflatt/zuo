@@ -1,7 +1,7 @@
 #lang zuo/kernel
 
-(let ([macromod (dynamic-require 'zuo/private/defmacromod)])
-  (let ([main (dynamic-require 'zuo/private/defmacromod/main)])
+(let ([macromod (module->hash 'zuo/private/defmacromod)])
+  (let ([main (module->hash 'zuo/private/defmacromod/main)])
     (hash
      'read-and-eval ((hash-ref macromod 'make-read-and-eval-with-initial-imports-from #f)
                      'zuo/private/defmacromod/main)

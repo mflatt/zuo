@@ -12,13 +12,7 @@
 (define kernel-provides
   (let* ([ht (kernel-env)])
     (foldl (lambda (sym provides)
-             (cond
-               [(or (eq? sym 'eval)
-                    (eq? sym 'dynamic-require))
-                ;; skip things related to the `zuo/kernel` evaluator
-                provides]
-               [else
-                (hash-set provides sym (make-core-initial-bind (hash-ref ht sym #f)))]))
+             (hash-set provides sym (make-core-initial-bind (hash-ref ht sym #f))))
            (hash)
            (hash-keys ht))))
 
@@ -27,7 +21,7 @@
   (foldl (lambda (sym provides)
            (hash-set provides sym (make-core-initial-bind (make-core-form sym))))
          kernel-provides
-         '(lambda let letrec let/cc quote if begin
+         '(lambda let letrec quote if begin
                   define define-syntax require provide
                   quote-syntax quote-module-path
                   include)))

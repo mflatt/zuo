@@ -2,7 +2,13 @@
 
 (require "defmacromod/and-or.zuo")
 
-(provide boolean?)
+(provide any?
+         void?
+         boolean?)
+
+;; mainly for contracts in the docs:
+(define any? (lambda (v) #t))
+(define void? (lambda (v) (eq? v (void))))
 
 (define boolean?
   (lambda (v)

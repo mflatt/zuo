@@ -97,12 +97,12 @@
                              s
                              (cons (convert (car s))
                                    (convert (cdr s)))))))
-             (if (eq? s 'eval) ; this is how we make looper's `eval` work at the next layer
-                 (lambda (e) (eval (convert e)))
+             (if (eq? s 'looper-eval) ; this is how we expose looper's eval to the next layer
+                 (lambda (e) (kernel-eval (convert e)))
                  s))))
       (hash 'read-and-eval
             (lambda (str start mod-path)
               (let ([es (read-from-string-all str start)])
                 (if (= 1 (length es))
-                    (eval (convert (car es)))
+                    (kernel-eval (convert (car es)))
                     (error "looper: only one expression allowed"))))))))

@@ -11,12 +11,12 @@
     let
     let*
     letrec
-    let/cc
     if
     and
     or
     when
     unless
+    begin
     cond
     quote
     quasiquote
@@ -35,6 +35,10 @@
     hash?
     list?
     procedure?
+    path-string?
+    module-path?
+    relative-path?
+    handle?
     void
 
     apply
@@ -50,6 +54,8 @@
 
     not
     eq?
+    any?
+    void?
 
     +
     -
@@ -114,14 +120,12 @@
     ~s
 
     read-from-string-all
-    eval
-    dynamic-require
+    module->hash
     module-path-join
     kernel-env
+    kernel-eval
 
-    find-exe
-    command-line-arguments
-
+    runtime-env
     dump-heap-and-exit))
 
 (intro-define-fake)

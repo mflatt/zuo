@@ -1,4 +1,5 @@
 #lang scribble/manual
+@(require (for-label zuo-doc/fake-zuo))
 
 @title{Zuo Overview}
 
@@ -22,7 +23,7 @@ The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads @filepath{zuofile.zuo} in the
 current directory. Otherwise, the first argument to Zuo is a file to
 run, and additional arguments are delivered to that program via the
-@racket[command-line-arguments] procedure.
+@racket[runtime-env] procedure.
 
 Zuo treats the path @filepath{-} as an alias for
 @filepath{zuofile.zuo}, which is convenient for using @exec{zuo} as a
@@ -44,7 +45,8 @@ embedded as a heap image. Embedding a heap image has two advantages:
 
 @itemlist[
 
- @item{No extra directory of library modules is necessary.}
+ @item{No extra directory of library modules is necessary, as long as
+       all relevant libraries are embedded.}
 
  @item{Zuo can start especially quickly, competitive with the fastest
        command-line programs.}
@@ -157,3 +159,53 @@ macros from one language within the other language. More generally,
 Zuo defines a @hash-lang[] protocol that lets you build arbitrary new
 languages (from the character/byte level), as long as they ultimately
 can be expressed in @racketmodname[zuo/kernel].
+
+
+@section[#:tag "module-protocol"]{Zuo Module Protocol}
+
+At Zuo's core, a module is represented as a @tech{hash table}. There
+are no constraints on the keys of the hash table, and different layers
+on top of the core module protocol can assign meanings to keys. For
+example, the @racketmodname[zuo] and @racketmodname[zuo/hygienic]
+layers use a common key for accessing @racket[provide]d bindings, but
+different keys for propagating binding information for macro
+expansions.
+
+The core module system assigns a meaning to one key,
+@racket['read-and-eval], which is supplied by a module that implements
+a @hash-lang[] language. The value of @racket['read-and-eval] is a
+procedure of three arguments:
+
+@itemlist[
+
+ @item{a string for the text of a module using the language,}
+
+ @item{a position within the string that starts a module body after
+       @hash-lang[] and the language name, and}
+
+ @item{a module path that will be mapped to the result of evaluating
+       the module (i.e., the path to the text's source).}
+
+]
+
+The procedure must return a hash table representing the evaluated
+module. A @racket['read-and-eval] procedure might use
+@racket[read-from-string-all] to read input, it might use
+@racket[kernel-eval] to evaluate read or generated terms, and it might
+use @racket[module->has] to access other modules in the process of
+parsing a new module---but a @racket['read-and-eval] procedure is
+under no obligation to use any of those.
+
+A call @racket[(module->hash _M)] primitive checks whether the module
+@racket[_M] is already loaded and returns its hash if so. The
+@racket[zuo/kernel] module is always preloaded, but other modules may
+be preloaded in a heap image that was create by
+@racket[dump-heap-and-exit]. If a module @racket[_M] is not already
+loaded, @racket[module->hash] reads the beginning of @racket[_M]'s
+source to parse the @hash-lang[] specification and get the path of the
+language module @racket[_L]; a recursive call @racket[(module->hash
+_L)] gets @racket[_L], and @racket[_L]'s @racket['read-and-eval]
+procedure is applied to the source of @racket[_M] to get @racket[_M]'s
+representation as a hash. That representation is both recorded for
+future use and returned from the original @racket[(module->hash _M)]
+call.

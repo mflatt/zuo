@@ -230,7 +230,7 @@
                                (cond
                                  [(eq? a 'hash)
                                   (if (null? (cdr es))
-                                      (eval (compile e env #f))
+                                      (looper-eval (compile e env #f))
                                       (error (~a "stitcher hash is not last: " (~s e))))]
                                  [(eq? a 'define)
                                   (let ([lhs (if (>= (length e) 3)
@@ -239,13 +239,13 @@
                                     (cond
                                       [(symbol? lhs)
                                        (if (= (length e) 3)
-                                           (let ([v (eval (compile (car (cdr (cdr e))) env lhs))])
+                                           (let ([v (looper-eval (compile (car (cdr (cdr e))) env lhs))])
                                              (stitch (cdr es) (hash-set env lhs v)))
                                            (bad-syntax e))]
                                       [(pair? lhs)
                                        (let ([id (car lhs)])
                                          (if (symbol? id)
-                                             (let ([v (eval (compile (cons 'lambda (cons (cdr lhs) (cdr (cdr e)))) env id))])
+                                             (let ([v (looper-eval (compile (cons 'lambda (cons (cdr lhs) (cdr (cdr e)))) env id))])
                                                (stitch (cdr es) (hash-set env id v)))
                                              (bad-syntax e)))]
                                       [else (bad-syntax e)]))]
@@ -254,7 +254,7 @@
                                       (let* ([name (car (cdr e))]
                                              [mod-path (cdr e+path)]
                                              [mod-path (module-path-join name mod-path)]
-                                             [mod (dynamic-require mod-path)])
+                                             [mod (module->hash mod-path)])
                                         (let ([inc-es (hash-ref mod 'datums #f)])
                                           (if inc-es
                                               (stitch (append (cons-path inc-es mod-path) (cdr es)) env)

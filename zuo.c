@@ -177,12 +177,12 @@ typedef struct {
   zuo_t *val;
 } zuo_variable_t;
 
-typedef zuo_t *(*zuo_function_proc_t)(void *proc, zuo_t *arguments);
+typedef zuo_t *(*zuo_dispatcher_proc_t)(void *proc, zuo_t *arguments);
 
 typedef struct {
   zuo_t obj;
-  zuo_function_proc_t proc;
-  void *data;
+  zuo_dispatcher_proc_t dispatcher;
+  void *proc;
   zuo_int32_t arity_mask;
   zuo_t *name;
 } zuo_primitive_t;
@@ -250,9 +250,12 @@ static struct {
     zuo_t *o_void;
     zuo_t *o_empty_hash;
   
-    /* sentinels for the interpreter */
+    /* sentinel for the interpreter */
     zuo_t *o_done_k;
+
+    /* intrinsic functions that manipulate interpreter state */
     zuo_t *o_apply;
+    zuo_t *o_call_cc;
 
     /* symbol table, root environment, and modules */
     zuo_t *o_intern_table;
@@ -263,7 +266,6 @@ static struct {
     zuo_t *o_quote_symbol;
     zuo_t *o_lambda_symbol;
     zuo_t *o_let_symbol;
-    zuo_t *o_letcc_symbol;
     zuo_t *o_begin_symbol;
     zuo_t *o_if_symbol;
   } image;
@@ -532,12 +534,12 @@ static void zuo_replace_heap(void *space, zuo_int_t size, zuo_int_t offset) {
 static zuo_primitive_t zuo_registered_prims[ZUO_MAX_PRIMITIVE_COUNT];
 static int zuo_registered_prim_count;
 
-static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int32_t arity_mask) {
+static void zuo_register_primitive(zuo_dispatcher_proc_t dispatcher, void *proc, zuo_int32_t arity_mask) {
   if (zuo_registered_prim_count == ZUO_MAX_PRIMITIVE_COUNT)
     zuo_panic("primitive table is too small");
 
+  zuo_registered_prims[zuo_registered_prim_count].dispatcher = dispatcher;
   zuo_registered_prims[zuo_registered_prim_count].proc = proc;
-  zuo_registered_prims[zuo_registered_prim_count].data = data;
   zuo_registered_prims[zuo_registered_prim_count].arity_mask = arity_mask;
   zuo_registered_prim_count++;
 }
@@ -545,15 +547,15 @@ static void zuo_register_primitive(zuo_function_proc_t proc, void *data, zuo_int
 static zuo_int32_t zuo_primitive_to_id(zuo_primitive_t *obj) {
   int i;
   for (i = 0; i < zuo_registered_prim_count; i++)
-    if (obj->data == zuo_registered_prims[i].data)
+    if (obj->proc == zuo_registered_prims[i].proc)
       return i;
   zuo_panic("could not find primitive");
   return 0;
 }
 
 static void zuo_id_to_primitive(zuo_int32_t i, zuo_primitive_t *obj) {
+  obj->dispatcher = zuo_registered_prims[i].dispatcher;
   obj->proc = zuo_registered_prims[i].proc;
-  obj->data = zuo_registered_prims[i].data;
   obj->arity_mask = zuo_registered_prims[i].arity_mask;
 }
 
@@ -973,14 +975,19 @@ static zuo_t *zuo_variable(zuo_t *name) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_primitive(zuo_function_proc_t proc, void *data, zuo_int32_t arity_mask, zuo_t *name) {
-  zuo_primitive_t *obj = (zuo_primitive_t *)zuo_new(zuo_primitive_tag, sizeof(zuo_primitive_t));
-  obj->proc = proc;
-  obj->data = data;
-  obj->arity_mask = arity_mask;
-  obj->name = name;
-  zuo_register_primitive(proc, data, arity_mask);
-  return (zuo_t *)obj;
+static zuo_t *zuo_primitive(zuo_dispatcher_proc_t dispatcher, void *proc, zuo_int32_t arity_mask, zuo_t *name) {
+  zuo_register_primitive(dispatcher, proc, arity_mask);
+  /* if `name` is undefined, we're just registering a primitive to be used for an image */
+  if (name == z.o_undefined)
+    return z.o_undefined;
+  else {
+    zuo_primitive_t *obj = (zuo_primitive_t *)zuo_new(zuo_primitive_tag, sizeof(zuo_primitive_t));
+    obj->dispatcher = dispatcher;
+    obj->proc = proc;
+    obj->arity_mask = arity_mask;
+    obj->name = name;
+    return (zuo_t *)obj;
+  }
 }
 
 static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env) {
@@ -1331,6 +1338,8 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
     out_string(out, ">");
   } else if (obj == z.o_apply) {
     out_string(out, "#<procedure:apply>");
+  } else if (obj == z.o_call_cc) {
+    out_string(out, "#<procedure:call/cc>");
   } else if (obj->tag == zuo_opaque_tag) {
     out_string(out, "#<");
     zuo_out(out, ((zuo_opaque_t *)obj)->tag, depth+1, zuo_display_mode);
@@ -1812,46 +1821,46 @@ static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
 /* primitive wrapper/dispatchers                                        */
 /*======================================================================*/
 
-static zuo_t *call_primitive0(void *proc, zuo_t *args) {
+static zuo_t *dispatch_primitive0(void *proc, zuo_t *args) {
   return ((zuo_t *(*)())proc)();
 }
 
 static zuo_t *zuo_primitive0(zuo_t *(*f)(), zuo_t *name) {
-  return zuo_primitive(call_primitive0, (void *)f, (1 << 0), name);
+  return zuo_primitive(dispatch_primitive0, (void *)f, (1 << 0), name);
 }
 
-static zuo_t *call_primitive1(void *proc, zuo_t *args) {
+static zuo_t *dispatch_primitive1(void *proc, zuo_t *args) {
   return ((zuo_t *(*)(zuo_t *))proc)(ZUO_CAR(args));
 }
 
 static zuo_t *zuo_primitive1(zuo_t *(*f)(zuo_t *), zuo_t *name) {
-  return zuo_primitive(call_primitive1, (void *)f, (1 << 1), name);
+  return zuo_primitive(dispatch_primitive1, (void *)f, (1 << 1), name);
 }
 
-static zuo_t *call_primitive2(void *proc, zuo_t *args) {
+static zuo_t *dispatch_primitive2(void *proc, zuo_t *args) {
   return ((zuo_t *(*)(zuo_t *, zuo_t *))proc)(ZUO_CAR(args), ZUO_CAR(ZUO_CDR(args)));
 }
 
 static zuo_t *zuo_primitive2(zuo_t *(*f)(zuo_t *, zuo_t *), zuo_t *name) {
-  return zuo_primitive(call_primitive2, (void *)f, (1 << 2), name);
+  return zuo_primitive(dispatch_primitive2, (void *)f, (1 << 2), name);
 }
 
-static zuo_t *call_primitive3(void *proc, zuo_t *args) {
+static zuo_t *dispatch_primitive3(void *proc, zuo_t *args) {
   return ((zuo_t *(*)(zuo_t *, zuo_t *, zuo_t *))proc)(ZUO_CAR(args),
                                                        ZUO_CAR(ZUO_CDR(args)),
                                                        ZUO_CAR(ZUO_CDR(ZUO_CDR(args))));
 }
 
 static zuo_t *zuo_primitive3(zuo_t *(*f)(zuo_t *, zuo_t *, zuo_t *), zuo_t *name) {
-  return zuo_primitive(call_primitive3, (void *)f, (1 << 3), name);
+  return zuo_primitive(dispatch_primitive3, (void *)f, (1 << 3), name);
 }
 
-static zuo_t *call_primitiveN(void *proc, zuo_t *args) {
+static zuo_t *dispatch_primitiveN(void *proc, zuo_t *args) {
   return ((zuo_t *(*)(zuo_t *))proc)(args);
 }
 
 static zuo_t *zuo_primitiveN(zuo_t *(*f)(zuo_t *), int min_args, zuo_t *name) {
-  return zuo_primitive(call_primitiveN, (void *)f, -1 << min_args, name);
+  return zuo_primitive(dispatch_primitiveN, (void *)f, -1 << min_args, name);
 }
 
 /*======================================================================*/
@@ -1882,7 +1891,8 @@ static zuo_t *zuo_procedure_p(zuo_t *obj) {
   return (((obj->tag == zuo_primitive_tag)
            || (obj->tag == zuo_closure_tag)
            || (obj->tag == zuo_cont_tag)
-           || (obj == z.o_apply))
+           || (obj == z.o_apply)
+           || (obj == z.o_call_cc))
           ? z.o_true
           : z.o_false);
 }
@@ -1964,6 +1974,8 @@ static zuo_t *zuo_procedure_arity_mask(zuo_t *obj) {
     return zuo_integer(1 << 1);
   else if (obj == z.o_apply)
     return zuo_integer(1 << 2);
+  else if (obj == z.o_call_cc)
+    return zuo_integer(1 << 1);
   else {
     zuo_fail1w("procedure-arity", "not a procedure", obj);
     return z.o_undefined;
@@ -2142,13 +2154,21 @@ static zuo_t *zuo_multiply(zuo_t *ns) {
 }
 
 static zuo_t *zuo_quotient(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "quotient");
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) / ZUO_UINT_I(m)));
+  const char *who = "quotient";
+  zuo_int_t m_i;
+  check_ints(n, m, who);
+  m_i = ZUO_UINT_I(m);
+  if (m_i == 0) zuo_fail1w(who, "divide by zero", m);
+  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) / m_i));
 }
 
 static zuo_t *zuo_modulo(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "modulo");
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) % ZUO_UINT_I(m)));
+  const char *who = "modulo";
+  zuo_int_t m_i;
+  check_ints(n, m, who);
+  m_i = ZUO_UINT_I(m);
+  if (m_i == 0) zuo_fail1w(who, "divide by zero", m);
+  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) % m_i));
 }
 
 static zuo_t *zuo_not(zuo_t *obj) {
@@ -2283,6 +2303,10 @@ static zuo_t *zuo_append(zuo_t *objs) {
   return first;
 }
 
+static zuo_t *zuo_variable_p(zuo_t *var) {
+  return (var->tag != zuo_variable_tag) ? z.o_true : z.o_false;
+}
+
 static zuo_t *zuo_variable_ref(zuo_t *var) {
   zuo_t *val;
   if (var->tag != zuo_variable_tag)
@@ -2409,16 +2433,6 @@ static void check_syntax(zuo_t *e) {
         adaad = _zuo_car(daad); /* `rhs` */
         es = zuo_cons(adaad, es);
         es = zuo_cons(_zuo_car(dd), es);
-      } else if (rator == z.o_letcc_symbol) {
-        zuo_t *d = _zuo_cdr(e), *dd;
-        if (d->tag != zuo_pair_tag)
-          bad_form(e);
-        if (_zuo_car(d)->tag != zuo_symbol_tag)
-          bad_form(e);
-        dd = _zuo_cdr(d);
-        if ((dd->tag != zuo_pair_tag) || (_zuo_cdr(dd) != z.o_null))
-          bad_form(e);
-        es = zuo_cons(_zuo_car(dd), es);
       } else if (rator == z.o_begin_symbol) {
         zuo_t *l = _zuo_cdr(e);
         if (l->tag != zuo_pair_tag)
@@ -2494,10 +2508,6 @@ static void interp_step() {
                               d, Z.o_interp_env,
                               Z.o_interp_in_proc,
                               Z.o_interp_k);
-    } else if (rator == z.o_letcc_symbol) {
-      zuo_t *d = _zuo_cdr(e);
-      Z.o_interp_env = env_extend(Z.o_interp_env, _zuo_car(d), Z.o_interp_k);
-      Z.o_interp_e = _zuo_car(_zuo_cdr(d));
     } else if (rator == z.o_begin_symbol) {
       zuo_t *d = _zuo_cdr(e);
       zuo_t *dd = _zuo_cdr(d);
@@ -2571,7 +2581,7 @@ static void continue_step() {
           } else if (rator->tag == zuo_primitive_tag) {
             zuo_primitive_t *f = (zuo_primitive_t *)rator;
             if (f->arity_mask & (1 << ((count > 10) ? 10 : count))) {
-              Z.o_interp_v = f->proc(f->data, args);
+              Z.o_interp_v = f->dispatcher(f->proc, args);
             } else
               zuo_fail1("wrong argument count", zuo_cons(rator, args));
             break;
@@ -2589,6 +2599,12 @@ static void continue_step() {
             args = _zuo_car(_zuo_cdr(args));
             if (!zuo_list_p(args))
               zuo_fail1("not a list", args);
+            /* no break => loop to apply again */
+          } else if (rator == z.o_call_cc) {
+            if (count != 1)
+              zuo_fail1("wrong argument count", zuo_cons(z.o_call_cc, args));
+            rator = _zuo_car(args);
+            args = zuo_cons(Z.o_interp_k, z.o_null);
             /* no break => loop to apply again */
           } else
             zuo_fail1("not a function for call", rator);
@@ -2637,7 +2653,7 @@ static void continue_step() {
   }
 }
 
-zuo_t *zuo_eval(zuo_t *e) {
+zuo_t *zuo_kernel_eval(zuo_t *e) {
   check_syntax(e);
 
   Z.o_stash = zuo_cons(zuo_dump(), Z.o_stash);
@@ -2692,22 +2708,36 @@ static int zuo_is_path_string(zuo_t *obj) {
   return 1;
 }
 
+static zuo_t *zuo_path_string_p(zuo_t *obj) {
+  return zuo_is_path_string(obj) ? z.o_true : z.o_false;
+}
+
 static int zuo_is_module_path(zuo_t *obj, int *_saw_slash) {
   if (obj->tag == zuo_symbol_tag) {
     zuo_string_t *str = (zuo_string_t *)((zuo_symbol_t *)obj)->str;
     if (str->len == 0)
       str = NULL;
     else {
-      zuo_int_t i;
+      zuo_int_t i, saw_slash = 0;
       for (i = 0; i < str->len; i++) {
-        if (str->s[i] == '/') *_saw_slash = 1;
+        if (str->s[i] == '/') {
+          if ((i == 0) || (i == str->len-1) || (saw_slash == i))
+            return 0;
+          saw_slash = i+1;
+        }
         if (!zuo_is_symbol_module_char(str->s[i]))
           return 0;
       }
+      *_saw_slash = (saw_slash > 0);
     }
     return 1;
   } else
     return zuo_is_path_string(obj);
+}
+
+static zuo_t *zuo_module_path_p(zuo_t *obj) {
+  int saw_slash;
+  return zuo_is_module_path(obj, &saw_slash) ? z.o_true : z.o_false;
 }
 
 static void check_path_string(const char *who, zuo_t *obj) {
@@ -2816,17 +2846,20 @@ static zuo_t *zuo_build_path(zuo_t *pre, zuo_t *post) {
 
 static zuo_t *zuo_split_path(zuo_t *p) {
   zuo_int_t i;
-  int non_sep;
+  int non_sep, tail_seps;
   
   check_path_string("split-path", p);
 
-  non_sep = 0;
+  non_sep = tail_seps = 0;
   for (i = ZUO_STRING_LEN(p); i--; ) {
     if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[i])) {
       if (non_sep) {
-        return zuo_cons(zuo_sized_string(ZUO_STRING_PTR(p), i+1),
-                        zuo_string(ZUO_STRING_PTR(p)+i+1));
-      }
+        i++;
+        return zuo_cons(zuo_sized_string(ZUO_STRING_PTR(p), i),
+                        zuo_sized_string(ZUO_STRING_PTR(p)+i,
+                                         ZUO_STRING_LEN(p)-i-tail_seps));
+      } else
+        tail_seps++;
     } else
       non_sep = 1;
   }
@@ -2942,8 +2975,12 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
     }
 
     mod_path = zuo_tilde_a(zuo_cons(mod_path, zuo_cons(rel_str, z.o_null)));
+    mod_path = zuo_string_to_symbol(mod_path);
 
-    return zuo_string_to_symbol(mod_path);
+    if (!zuo_is_module_path(mod_path, &saw_slash))
+      zuo_fail1w(who, "relative path is not valid in a symbolic module path", rel_mod_path);
+
+    return mod_path;
   } else {
     zuo_t *mod_path = base_mod_path;
     while (ups > 0) {
@@ -2962,7 +2999,7 @@ static zuo_t *zuo_runtime_env() {
   return Z.o_runtime_env;
 }
 
-static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, int argc, char **argv) {
+static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int argc, char **argv) {
   zuo_t *ht = z.o_empty_hash;
 
   ht = zuo_hash_set(ht, zuo_symbol("exe"), exe_path);
@@ -2975,6 +3012,7 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, int argc, char **argv) {
   }
 
   ht = zuo_hash_set(ht, zuo_symbol("directory"), Z.o_current_directory);
+  ht = zuo_hash_set(ht, zuo_symbol("script"), zuo_string(load_file));
 
   {
 #ifdef ZUO_WINDOWS
@@ -3088,7 +3126,7 @@ static zuo_t *zuo_fd_open_input(zuo_t *path) {
 }
 
 static zuo_t *zuo_fd_open_output(zuo_t *path) {
-  const char *who = "fd-open-outputd-fd";
+  const char *who = "fd-open-outputd";
   zuo_raw_handle_t fd = 1;
 
   if (zuo_is_path_string(path)) {
@@ -3195,17 +3233,32 @@ static zuo_t *zuo_dump_heap_and_exit(zuo_t *fd_obj) {
     Z.o_interp_k = z.o_done_k; /* in case of a failure that might try to show a stack trace */
   }
 
+  /* forget about any modules that are being loaded but not yet done: */
+  {
+    zuo_t *l, *new_l = z.o_null, *pr;
+    for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
+      pr = _zuo_car(l);
+      if (_zuo_cdr(pr)->tag == zuo_trie_node_tag)
+        new_l = zuo_cons(pr, new_l);
+    }
+    z.o_modules = new_l;
+  }
+
   dump = zuo_fasl_dump(&len);
   zuo_fill(dump, len, NULL, fd);
 
   exit(0);
 }
 
+static zuo_t *zuo_handle_p(zuo_t *var) {
+  return (var->tag != zuo_handle_tag) ? z.o_true : z.o_false;
+}
+
 /*======================================================================*/
 /* modules                                                              */
 /*======================================================================*/
 
-static zuo_t *zuo_dynamic_require(zuo_t *module_path);
+static zuo_t *zuo_module_to_hash(zuo_t *module_path);
 
 static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, zuo_int_t input_len) {
   char *input = input_to_read_and_free;
@@ -3222,19 +3275,19 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
       zuo_fail("zuo/kernel: no S-expression in input");
     if (_zuo_cdr(es) != z.o_null)
       zuo_fail("zuo/kernel: more than one S-expression in input");
-    v = zuo_eval(_zuo_car(es));
+    v = zuo_kernel_eval(_zuo_car(es));
   } else {
-    zuo_t *env = zuo_dynamic_require(zuo_symbol(lang));
+    zuo_t *env = zuo_module_to_hash(zuo_symbol(lang));
     zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
     if (proc->tag != zuo_closure_tag)
       zuo_fail1("not a language module path", zuo_symbol(lang));
     module_path = _zuo_car(Z.o_stash);
-    v = zuo_eval(zuo_cons(proc, zuo_cons(zuo_sized_string(input, input_len),
-                                         zuo_cons(zuo_integer(post),
-                                                  zuo_cons(zuo_cons(z.o_quote_symbol,
-                                                                    zuo_cons(module_path,
-                                                                             z.o_null)),
-                                                           z.o_null)))));
+    v = zuo_kernel_eval(zuo_cons(proc, zuo_cons(zuo_sized_string(input, input_len),
+                                                zuo_cons(zuo_integer(post),
+                                                         zuo_cons(zuo_cons(z.o_quote_symbol,
+                                                                           zuo_cons(module_path,
+                                                                                    z.o_null)),
+                                                                  z.o_null)))));
   }
   free(lang);
 
@@ -3246,44 +3299,42 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
   if (v->tag != zuo_trie_node_tag)
     zuo_fail1("module did not produce a hash table", module_path);
 
-  z.o_modules = zuo_cons(zuo_cons(module_path, v), z.o_modules);
-
-  if (zuo_logging) {
-    zuo_logging--;
-    fprintf(stderr, "]");
-    if (zuo_logging == 1)
-      fprintf(stderr, "]\n");
-    fflush(stderr);
-  }
-
   return v;
 }
 
-static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
-  zuo_t *file_path;
+static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
+  zuo_t *file_path, *l, *pr, *mod;
 
-  check_module_path("dynamic-require", module_path);
+  check_module_path("module->hash", module_path);
 
   if (module_path->tag == zuo_string_tag)
     module_path = zuo_path_to_complete_path(module_path);
 
   /* check for already-loaded module */
-  {
-    zuo_t *l;
-    
-    for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
-      zuo_t *a = _zuo_car(l);
-      if (module_path->tag == zuo_symbol_tag) {
-        if (_zuo_car(a) == module_path)
-          return _zuo_cdr(a);
-      } else if (_zuo_car(a)->tag == zuo_string_tag) {
-        if (zuo_string_eql(_zuo_car(a), module_path) == z.o_true)
-          return _zuo_cdr(a);
-      } 
+  pr = z.o_undefined;
+  for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
+    pr = _zuo_car(l);
+    if (module_path->tag == zuo_symbol_tag) {
+      if (_zuo_car(pr) == module_path)
+        break;
+    } else if (_zuo_car(pr)->tag == zuo_string_tag) {
+      if (zuo_string_eql(_zuo_car(pr), module_path) == z.o_true)
+        break;
     }
   }
 
+  if (l != z.o_null) {
+    mod = _zuo_cdr(pr);
+    if (mod->tag != zuo_trie_node_tag)
+      zuo_fail1("cycle in module loading", module_path);
+    return mod;
+  }
+
   /* not already loaded */
+
+  pr = zuo_cons(module_path, z.o_undefined);
+  z.o_modules = zuo_cons(pr, z.o_modules);
+
   if (module_path->tag == zuo_symbol_tag)
     file_path = zuo_library_path_to_file_path(module_path);
   else
@@ -3311,8 +3362,25 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
     input = zuo_drain(in, 0, -1, &in_len);
     fclose(in);
 
-    return zuo_eval_module(module_path, input, in_len);
+    Z.o_stash = zuo_cons(pr, Z.o_stash);
+      
+    mod = zuo_eval_module(module_path, input, in_len);
+
+    pr = _zuo_car(Z.o_stash);
+    Z.o_stash = _zuo_cdr(Z.o_stash);
+
+    _zuo_cdr(pr) = mod;
   }
+
+  if (zuo_logging) {
+    zuo_logging--;
+    fprintf(stderr, "]");
+    if (zuo_logging == 1)
+      fprintf(stderr, "]\n");
+    fflush(stderr);
+  }
+
+  return mod;
 }
 
 /*======================================================================*/
@@ -3363,14 +3431,13 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
     return z.o_false;
   }
 
-  if (S_ISREG(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("file"));
-  else if (S_ISDIR(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("directory"));
+  if (S_ISDIR(stat_buf.st_mode))
+    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("directory"));
   else if (S_ISLNK(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_symbol("link"));
+    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("link"));
   else
-    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
+    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("file"));
+  result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
   result = zuo_hash_set(result, zuo_symbol("device"), zuo_integer(stat_buf.st_dev));
   result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(stat_buf.st_ino));
   result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(stat_buf.st_nlink));
@@ -3974,10 +4041,15 @@ static zuo_t *zuo_self_path(char *exec_file) {
 /* main                                                                 */
 /*======================================================================*/
 
-#define TRIE_SET_TOP_ENV(name, make_prim)       \
-  do {                                          \
-    zuo_t *sym = zuo_symbol(name);              \
-    zuo_trie_set(z.o_top_env, sym, make_prim);  \
+#define TRIE_SET_TOP_ENV(name, make_prim)        \
+  do {                                           \
+    if (boot_heap == NULL) {                     \
+      zuo_t *sym = zuo_symbol(name);             \
+      zuo_trie_set(z.o_top_env, sym, make_prim); \
+    } else {                                     \
+      zuo_t *sym = z.o_undefined;                \
+      (void)make_prim;                           \
+    }                                            \
   } while (0)
 
 #define ZUO_TOP_ENV_SET_PRIMITIVE0(name, proc) \
@@ -3991,7 +4063,7 @@ static zuo_t *zuo_self_path(char *exec_file) {
 #define ZUO_TOP_ENV_SET_PRIMITIVEN(name, proc, min_n) \
   TRIE_SET_TOP_ENV(name, zuo_primitiveN(proc, min_n, sym))
 #define ZUO_TOP_ENV_SET_VALUE(name, val)  \
-  TRIE_SET_TOP_ENV(name, val)
+  zuo_trie_set(z.o_top_env, zuo_symbol(name), val)
 
 int main(int argc, char **argv) {
   char *load_file = NULL, *library_path = NULL, *boot_heap = NULL;
@@ -4078,32 +4150,18 @@ int main(int argc, char **argv) {
     argv++;
   }
 
-  /* init image --- might get replaced by image load, but
-     we need to register primitives, anyway */
-  
+  /* these initial constants and tables might get replaced by loading
+     an image, but we need them to register primitives: */
   z.o_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_done_k = zuo_cont(zuo_done_cont, z.o_false, z.o_false, z.o_false, z.o_false);
-  z.o_empty_hash = zuo_trie_node();
+  z.o_call_cc = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+  z.o_done_k = zuo_cont(zuo_done_cont, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined);
   z.o_intern_table = zuo_trie_node();
-
-  z.o_quote_symbol = zuo_symbol("quote");
-  z.o_lambda_symbol = zuo_symbol("lambda");
-  z.o_let_symbol = zuo_symbol("let");
-  z.o_letcc_symbol = zuo_symbol("let/cc");
-  z.o_begin_symbol = zuo_symbol("begin");
-  z.o_if_symbol = zuo_symbol("if");
-
   z.o_top_env = zuo_trie_node();
-  z.o_modules = z.o_null;
 
   Z.o_interp_k = z.o_done_k; /* in case of a failure that triggers a stack trace */
-  
+
   ZUO_TOP_ENV_SET_PRIMITIVE1("pair?", zuo_pair_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("null?", zuo_null_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("integer?", zuo_integer_p);
@@ -4112,9 +4170,11 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("hash?", zuo_hash_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("list?", zuo_list_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("procedure?", zuo_procedure_p);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("path-string?", zuo_path_string_p);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("variable?", zuo_variable_p);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("handle?", zuo_handle_p);
   ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void, 0);
 
-  ZUO_TOP_ENV_SET_VALUE("apply", z.o_apply);
   ZUO_TOP_ENV_SET_PRIMITIVE1("procedure-arity-mask", zuo_procedure_arity_mask);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
@@ -4166,6 +4226,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("build-path", zuo_build_path);
   ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
   ZUO_TOP_ENV_SET_PRIMITIVE1("relative-path?", zuo_relative_path_p);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_variable);
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
@@ -4176,7 +4237,6 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-close", zuo_fd_close);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-read", zuo_fd_read);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
-  ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
 
@@ -4191,9 +4251,9 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVEN("~s", zuo_tilde_s, 0);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("read-from-string-all", zuo_read_all);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("eval", zuo_eval);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("dynamic-require", zuo_dynamic_require);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("kernel-eval", zuo_kernel_eval);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("module->hash", zuo_module_to_hash);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("module-path?", zuo_module_path_p);
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE0("runtime-env", zuo_runtime_env);
@@ -4203,16 +4263,40 @@ int main(int argc, char **argv) {
 # if EMBEDDED_BOOT_HEAP
   if (!boot_heap)
     zuo_fasl_restore((char *)emedded_boot_heap, emedded_boot_heap_len * sizeof(zuo_int32_t));
+  else {
 # endif
 
-  if (boot_heap) {
-    FILE *f = fopen(boot_heap, "r");
-    zuo_int_t len;
-    char *dump = zuo_drain(f, 0, -1, &len);
-    fclose(f);
-    zuo_fasl_restore(dump, len);
-    free(dump);
+    if (boot_heap) {
+      FILE *f = fopen(boot_heap, "r");
+      zuo_int_t len;
+      char *dump = zuo_drain(f, 0, -1, &len);
+      fclose(f);
+      zuo_fasl_restore(dump, len);
+      free(dump);
+    } else {
+      /* Create remaining costants and tables */
+      z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_empty_hash = zuo_trie_node();
+    
+      z.o_quote_symbol = zuo_symbol("quote");
+      z.o_lambda_symbol = zuo_symbol("lambda");
+      z.o_let_symbol = zuo_symbol("let");
+      z.o_begin_symbol = zuo_symbol("begin");
+      z.o_if_symbol = zuo_symbol("if");
+    
+      z.o_modules = z.o_null;
+
+      ZUO_TOP_ENV_SET_VALUE("apply", z.o_apply);
+      ZUO_TOP_ENV_SET_VALUE("call/cc", z.o_call_cc);
+      ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
+    }
+
+# if EMBEDDED_BOOT_HEAP
   }
+# endif
         
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
@@ -4233,8 +4317,6 @@ int main(int argc, char **argv) {
   } else
     Z.o_library_path = z.o_false;
 
-  Z.o_runtime_env = zuo_make_runtime_env(exe_path, argc, argv);
-
   if (load_file == NULL) {
     load_file = "zuofile.zuo";
     if (zuo_stat(zuo_string(load_file), z.o_true) == z.o_false) {
@@ -4243,13 +4325,15 @@ int main(int argc, char **argv) {
     }
   }
 
+  Z.o_runtime_env = zuo_make_runtime_env(exe_path, load_file, argc, argv);
+
   if (load_file[0] == 0) {
     zuo_int_t in_len;
     char *input = zuo_drain(stdin, 0, -1, &in_len);
     zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("stdin"));
     (void)zuo_eval_module(stdin_path, input, in_len);
   } else
-    (void)zuo_dynamic_require(zuo_string(load_file));
+    (void)zuo_module_to_hash(zuo_string(load_file));
 
   return 0;
 }

@@ -34,7 +34,7 @@
               (defined-macro? id-bind))
       (syntax-error "duplicate definition" id))
     (let* ([e (parse (cadr (cdr s)) state)]
-           [proc (eval (name-lambda e id))])
+           [proc (kernel-eval (name-lambda e id))])
       (add-binding state id (as-specific (make-defined-macro proc))))))
 
 (define (expand-require s state mod-path)
@@ -94,7 +94,7 @@
                     [filter (cadr req-path+filter+check)]
                     [check (cadr (cdr req-path+filter+check))]
                     [in-mod-path (module-path-join req-path mod-path)]
-                    [mod (dynamic-require in-mod-path)]
+                    [mod (module->hash in-mod-path)]
                     [provides (hash-ref mod 'macromod-provides #f)]
                     [m-binds (hash-ref mod merge-bindings-export-key #f)]
                     [state (merge-binds state m-binds)]
@@ -142,7 +142,7 @@
   (let* ([include-ctx (car s)]
          [in-mod-path (unwrap-mod-path (cadr s))]
          [in-mod-path (module-path-join in-mod-path mod-path)]
-         [mod (dynamic-require in-mod-path)]
+         [mod (module->hash in-mod-path)]
          [datums (hash-ref mod 'datums #f)])
     (unless datums (error "not an includable module" in-mod-path))
     (map (lambda (e) (datum->syntax include-ctx e)) datums)))
@@ -372,16 +372,6 @@
                                             (cons id seen)))))]))])
       (bind-all cls '() state '()))))
 
-(define (parse-let/cc s state mod-path ctx parse)
-  (unless (and (>= (length s) 3) (identifier? (cadr s))) (bad-syntax s))
-  (let* ([id (cadr s)]
-         [new-id (gensym (syntax-e id))]
-         [new-scope (make-scope "letcc")]
-         [state (new-defn-context state)]
-         [state (add-binding state (add-scope id new-scope) (make-local new-id))])
-    (list 'let/cc new-id
-          (parse-body s (add-scope (cddr s) new-scope) state mod-path ctx parse))))
-
 (define (make-parse ctx mod-path)
   (letrec ([parse
             (lambda (s state)
@@ -405,8 +395,6 @@
                            (parse-let s state mod-path ctx parse)]
                           [(eq? bind 'letrec)
                            (parse-letrec s state mod-path ctx parse)]
-                          [(eq? bind 'let/cc)
-                           (parse-let/cc s state mod-path ctx parse)]
                           [(eq? bind 'quote)
                            (unless (= 2 (length s)) (bad-syntax s))
                            (list 'quote (syntax->datum (cadr s)))]

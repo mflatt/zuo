@@ -19,7 +19,7 @@
                            (unless (eq? v (void))
                              (alert (~v v))))]
            [add-print (lambda (s) (list print-result s))])
-      (eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
+      (kernel-eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
       (hash 'macromod-provides outs
             merge-bindings-export-key (make-export-merge-binds ctx (state-binds state))))))
 
@@ -33,7 +33,7 @@
  ;; for making a new `#lang` with some initial imports:
  'make-read-and-eval-with-initial-imports-from
  (lambda (mod-path)
-   (let* ([mod (dynamic-require mod-path)]
+   (let* ([mod (module->hash mod-path)]
           [provides (hash-ref mod 'macromod-provides #f)]
           [m-binds (hash-ref mod merge-bindings-export-key #f)])
      (unless provides 

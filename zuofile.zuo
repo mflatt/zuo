@@ -8,7 +8,7 @@
         ""
         "This message is from \"zuofile.zuo\"."
         "")
-  (if (null? (command-line-arguments))
+  (if (null? (hash-ref (runtime-env) 'arguments '()))
       (list
        "Probably, you're seeing this message because you ran Zuo with no arguments,"
        "in which case \"zuofile.zuo\" in the current directory is loaded by default."
@@ -29,5 +29,5 @@
        "Here are the arguments you provided:"
        (map (lambda (arg)
               (~a "  " (~v arg)))
-            (command-line-arguments))))
+            (hash-ref (runtime-env) 'arguments '()))))
   (list "")))
