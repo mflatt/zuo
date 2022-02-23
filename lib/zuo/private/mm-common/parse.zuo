@@ -144,6 +144,8 @@
                     [in-mod-path (module-path-join req-path mod-path)]
                     [mod (dynamic-require in-mod-path)]
                     [provides (hash-ref mod 'macromod-provides #f)]
+                    [m-binds (hash-ref mod merge-bindings-export-key #f)]
+                    [state (merge-binds state m-binds)]
                     [state (init-nominal state (unwrap-mod-path req-path))])
                (unless provides (syntax-error "not a compatible module" r))
                (check provides)

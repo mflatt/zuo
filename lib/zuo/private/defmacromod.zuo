@@ -3,6 +3,7 @@
 ;; Instantiates the expander for non-hygenic-by-default macros
 
 (define macro-protocol 'defmacro)
+(define merge-bindings-export-key 'defmacro-bindings)
 (define language-mod-path 'zuo/private/defmacromod)
 
 (include "mm-common/lib.zuo")

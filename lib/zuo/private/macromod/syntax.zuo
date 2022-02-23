@@ -61,7 +61,7 @@
 ;; Unlike the "pico" expander, this one has some support for modules.
 ;; To avoid a global mutable table (which the kernel does not allow!),
 ;; we pull in binding information from another module whenever we
-;; apply an imported macro. That merge is somewhat expensive, so as a
+;; require a module. That merge is somewhat expensive, so as a
 ;; shortcut, a `binds` pairs the binding table with a "merged" table
 ;; to record when a merge has already been performed from each module.
 (define make-binds cons)
@@ -136,8 +136,9 @@
   binds)
 
 ;; The merge step described above at `make-binds`
-(define (merge-binds binds key m-binds)
-  (let* ([merged (binds-merged binds)])
+(define (merge-binds* binds key+m-binds)
+  (let* ([merged (binds-merged binds)]
+         [key (car key+m-binds)])
     (cond
       [(hash-ref merged key #f)
        ;; already merged
@@ -145,7 +146,7 @@
       [else
        (let* ([merged (hash-set merged key #t)]
               [ht (binds-hash binds)]
-              [m-ht (binds-hash m-binds)]
+              [m-ht (binds-hash (cdr key+m-binds))]
               [new-ht (foldl (lambda (sym ht)
                                (let* ([sym-ht (hash-ref ht sym (hash))]
                                       [m-sym-ht (hash-ref m-ht sym #f)]
@@ -161,6 +162,10 @@
                              ht
                              (hash-keys m-ht))])
          (make-binds new-ht merged))])))
+
+;; Convert an expansion context plus bindings to mergable key+binds
+(define (make-export-merge-binds ctx binds)
+  (cons (car (hash-keys (identifier-scopes ctx))) binds))
 
 ;; A fresh module context has a fresh scope
 (define (make-module-context mod-path)
@@ -184,11 +189,9 @@
 (define (syntax-quote v mod-ctx binds)
   (list 'quote v))
 
-;; apply a macro; if it's imported, then we'll have to do some work to
-;; merge binding information for the providing context
 (define (apply-macro m s ctx binds k)
   (let* ([apply-macro
-          (lambda (proc ctx binds)
+          (lambda (proc ctx)
             (let* ([new-scope (make-scope "macro")]
                    [s (add-scope s new-scope)]
                    [s (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
@@ -198,18 +201,13 @@
                    [s (flip-scope s new-scope)])
               (k s binds)))])
     (cond
-      [(defined-macro? m) (apply-macro (defined-macro-proc m) ctx binds)]
+      [(defined-macro? m) (apply-macro (defined-macro-proc m) ctx)]
       [else
        (let* ([implementation (macro-implementation m)]
               [proc (car implementation)]
-              [key (cadr implementation)]
-              [ctx (cadr (cdr implementation))]
-              [m-binds (cadr (cddr implementation))])
-         (apply-macro proc ctx (merge-binds binds key m-binds)))])))
+              [ctx (cdr implementation)])
+         (apply-macro proc ctx))])))
 
-;; convert a local macro to one that can be used as imported elsewhere
-(define (make-exported-macro proc ctx binds)
-  (let ([mod-scope (ormap (lambda (s)
-                            (and (not (eq? s 'core)) s))
-                          (hash-keys (identifier-scopes ctx)))])
-    (make-macro (list proc mod-scope ctx binds))))
+;; Convert a local macro to one that can be used as imported elsewhere
+(define (make-exported-macro proc ctx)
+  (make-macro (cons proc ctx)))

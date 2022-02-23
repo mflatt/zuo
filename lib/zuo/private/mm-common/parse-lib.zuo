@@ -38,6 +38,11 @@
         (initial-import-bind bind)
         bind)))
 
+(define (merge-binds state m-binds)
+  (if m-binds
+      (state-set-binds state (merge-binds* (state-binds state) m-binds))
+      state))
+
 (define (new-defn-context state)
   (state-set-binds state (new-defn-context* (state-binds state))))
 

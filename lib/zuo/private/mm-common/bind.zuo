@@ -56,7 +56,7 @@
                  [(defined? bind)
                   (make-local-variable (variable-var bind))]
                  [(defined-macro? bind)
-                  (make-exported-macro (defined-macro-proc bind) ctx binds)]
+                  (make-exported-macro (defined-macro-proc bind) ctx)]
                  [else bind])])
     (if label
         (make-specific (cons bind label))

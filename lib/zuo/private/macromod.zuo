@@ -3,6 +3,7 @@
 ;; Instantiates the expander for hygienic, set-of-scopes macros
 
 (define macro-protocol 'scope-sets)
+(define merge-bindings-export-key 'scope-sets-bindings)
 (define language-mod-path 'zuo/private/macromod)
 
 (include "mm-common/lib.zuo")

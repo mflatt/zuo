@@ -87,14 +87,25 @@
 (define (new-defn-context* binds)
   (binds-set-ctx binds (string->uninterned-symbol "def")))
 
-;; When we use an imported macro, we need to pull in binding information
+;; When we require a module, we need to pull in binding information
 ;; from the macro's module; the separate module contexts keep different binding
 ;; information from getting mixed up
-(define (merge-binds binds ctx m-binds)
+(define (merge-binds* binds ctx+m-binds)
   (let* ([ctx-hash (binds-ctx-hash binds)]
-         [m-ctx-hash (binds-ctx-hash m-binds)]
-         [new-ctx-hash (hash-set ctx-hash ctx (hash-ref m-ctx-hash ctx (hash)))])
-    (binds-set-ctx-hash binds new-ctx-hash)))
+         [ctx (car ctx+m-binds)])
+    (if (hash-ref ctx-hash ctx #f)
+        ;; must be merged already
+        binds
+        (let* ([m-ctx-hash (binds-ctx-hash (cdr ctx+m-binds))]
+               [new-ctx-hash (foldl (lambda (ctx ctx-hash)
+                                      (hash-set ctx-hash ctx (hash-ref m-ctx-hash ctx #f)))
+                                    ctx-hash
+                                    (hash-keys m-ctx-hash))])
+          (binds-set-ctx-hash binds new-ctx-hash)))))
+
+;; Convert an expansion context plus bindings to mergable ctx+binds
+(define (make-export-merge-binds ctx binds)
+  (cons ctx binds))
 
 (define (bound-identifier=? a b)
   (or (and (syntactic-closure? a)
@@ -119,24 +130,16 @@
                 [else v]))])
     (syntax-quote v)))
 
-;; apply a macro; if it's imported, then we'll have to do some work to
-;; merge binding information for the providing context
 (define (apply-macro m s ctx binds k)
-  (let* ([apply-macro
-          (lambda (proc binds)
-            (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-                   (proc s (lambda (a b) (free-id=? binds a b)))
-                   (proc s))
-               binds))])
-    (cond
-      [(defined-macro? m) (apply-macro (defined-macro-proc m) binds)]
-      [else
-       (let* ([implementation (macro-implementation m)]
-              [proc (car implementation)]
-              [ctx (cadr implementation)]
-              [m-binds (cadr (cdr implementation))])
-         (apply-macro proc (merge-binds binds ctx m-binds)))])))
+  (let ([proc (if (defined-macro? m)
+                  (defined-macro-proc m)
+                  (macro-implementation m))])
+    (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
+           (proc s (lambda (a b) (free-id=? binds a b)))
+           (proc s))
+       binds)))
 
-;; convert a local macro to one that can be used as imported elsewhere
-(define (make-exported-macro proc ctx binds)
-  (make-macro (list proc ctx binds)))
+;; Convert a local macro to one that can be used as imported elsewhere
+(define (make-exported-macro proc ctx)
+  (make-macro proc))
+
