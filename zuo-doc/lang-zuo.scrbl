@@ -395,7 +395,7 @@ Still to be documented:
 
   build-path
   split-path
-  path->complete-path
+  relative-path?
 
   variable
   variable-ref

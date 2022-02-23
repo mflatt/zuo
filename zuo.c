@@ -282,6 +282,7 @@ static struct {
   
     /* startup info */
     zuo_t *o_library_path;
+    zuo_t *o_current_directory;
     zuo_t *o_runtime_env;
   
     /* data to save across a GC that's possibly triggered by interp */
@@ -2720,7 +2721,7 @@ static void check_module_path(const char *who, zuo_t *obj) {
     zuo_fail1w(who, "not a module path", obj);
 }
 
-static int path_is_absolute(const char *p) {
+static int zuo_path_is_absolute(const char *p) {
 #ifdef ZUO_WINDOWS
   return ((p[0] == '/')
           || (p[0] == '\\')
@@ -2731,8 +2732,9 @@ static int path_is_absolute(const char *p) {
 #endif
 }
 
-static int zuo_path_is_absolute(zuo_t *obj) {
-  return path_is_absolute(ZUO_STRING_PTR(obj));
+static zuo_t *zuo_relative_path_p(zuo_t *obj) {
+  check_path_string("relative-path?", obj);
+  return zuo_path_is_absolute(ZUO_STRING_PTR(obj)) ? z.o_false : z.o_true;
 }
 
 static char *zuo_getcwd() {
@@ -2787,8 +2789,8 @@ static zuo_t *zuo_build_path(zuo_t *pre, zuo_t *post) {
   check_path_string("build-path", pre);
   check_path_string("build-path", post);
   
-  if (zuo_path_is_absolute(post))
-    zuo_fail1w("build-path", "second path is absolute", post);
+  if (zuo_path_is_absolute(ZUO_STRING_PTR(post)))
+    zuo_fail1w("build-path", "second path is not relative", post);
 
   /* add separator beteween `pre` and `post`? */
   len = ZUO_STRING_LEN(pre);
@@ -2832,13 +2834,11 @@ static zuo_t *zuo_split_path(zuo_t *p) {
   return zuo_cons(z.o_false, p);
 }
 
-static zuo_t *zuo_path_to_complete_path(zuo_t *path, zuo_t *rel_to) {
-  check_path_string("path->complete-path", path);
-
-  if (zuo_path_is_absolute(path))
+static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
+  if (zuo_path_is_absolute(ZUO_STRING_PTR(path)))
     return path;
   else
-    return zuo_build_path((rel_to == z.o_false) ? zuo_current_directory() : rel_to, path);
+    return zuo_build_path(Z.o_current_directory, path);
 }
 
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
@@ -2921,7 +2921,7 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
     return rel_mod_path;
 
   /* When an absolute path is given, normalization is the caller's problem: */
-  if (zuo_path_is_absolute(rel_mod_path))
+  if (zuo_path_is_absolute(ZUO_STRING_PTR(rel_mod_path)))
     return rel_mod_path;
 
   keep_suffix = (base_mod_path->tag == zuo_string_tag);
@@ -2954,7 +2954,7 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
       if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), "."))
         ups--;
     }
-    return zuo_path_to_complete_path(rel_str, mod_path);
+    return zuo_build_path(mod_path, rel_str);
   }
 }
 
@@ -2973,6 +2973,8 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, int argc, char **argv) {
       l = zuo_cons(zuo_string(argv[argc]), l);
     ht = zuo_hash_set(ht, zuo_symbol("arguments"), l);
   }
+
+  ht = zuo_hash_set(ht, zuo_symbol("directory"), Z.o_current_directory);
 
   {
 #ifdef ZUO_WINDOWS
@@ -3262,6 +3264,9 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
 
   check_module_path("dynamic-require", module_path);
 
+  if (module_path->tag == zuo_string_tag)
+    module_path = zuo_path_to_complete_path(module_path);
+
   /* check for already-loaded module */
   {
     zuo_t *l;
@@ -3282,7 +3287,7 @@ static zuo_t *zuo_dynamic_require(zuo_t *module_path) {
   if (module_path->tag == zuo_symbol_tag)
     file_path = zuo_library_path_to_file_path(module_path);
   else
-    file_path = zuo_path_to_complete_path(module_path, z.o_false);
+    file_path = module_path;
 
   if (zuo_logging) {
     int i;
@@ -3913,12 +3918,12 @@ static int has_slash(char *s) {
 
 static char *zuo_self_path_c(char *exec_file)
 {
-  if (path_is_absolute(exec_file)) {
+  if (zuo_path_is_absolute(exec_file)) {
     /* Absolute path */
     return strdup(exec_file);
   } else if (has_slash(exec_file)) {
     /* Relative path with a directory: */
-    return zuo_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file), z.o_false));
+    return zuo_string_to_c(zuo_path_to_complete_path(zuo_string(exec_file)));
   } else {
     /* We have to find the executable by searching PATH: */
     char *path = strdup(getenv("PATH")), *p;
@@ -3944,7 +3949,7 @@ static char *zuo_self_path_c(char *exec_file)
       m = zuo_build_path(zuo_string(path), zuo_string(exec_file));
 
       if (access(ZUO_STRING_PTR(m), X_OK) == 0)
-        return zuo_string_to_c(zuo_path_to_complete_path(m, z.o_false));
+        return zuo_string_to_c(zuo_path_to_complete_path(m));
 
       if (more)
 	path = p + 1;
@@ -4160,7 +4165,7 @@ int main(int argc, char **argv) {
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("build-path", zuo_build_path);
   ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("path->complete-path", zuo_path_to_complete_path);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("relative-path?", zuo_relative_path_p);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_variable);
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
@@ -4214,14 +4219,15 @@ int main(int argc, char **argv) {
   Z.o_stash = z.o_false;
   Z.o_pid_table = zuo_trie_node();
 
+  Z.o_current_directory = zuo_current_directory();
+
   exe_path = zuo_self_path(argv0);
 
   if (library_path) {
-    Z.o_library_path = zuo_path_to_complete_path(zuo_string(library_path),
-                                                 z.o_false);
+    Z.o_library_path = zuo_path_to_complete_path(zuo_string(library_path));
   } else if (zuo_lib_path != NULL) {
     Z.o_library_path = zuo_string(zuo_lib_path);
-    if (!zuo_path_is_absolute(Z.o_library_path))
+    if (zuo_relative_path_p(Z.o_library_path) == z.o_false)
       Z.o_library_path = zuo_build_path(_zuo_car(zuo_split_path(exe_path)),
                                         Z.o_library_path);
   } else
@@ -4240,7 +4246,7 @@ int main(int argc, char **argv) {
   if (load_file[0] == 0) {
     zuo_int_t in_len;
     char *input = zuo_drain(stdin, 0, -1, &in_len);
-    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("stdin"), z.o_false);
+    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("stdin"));
     (void)zuo_eval_module(stdin_path, input, in_len);
   } else
     (void)zuo_dynamic_require(zuo_string(load_file));
