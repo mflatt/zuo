@@ -37,54 +37,6 @@
            [proc (eval (name-lambda e id))])
       (add-binding state id (as-specific (make-defined-macro proc))))))
 
-(define (expand-provide s state provides mod-path)
-  (unless (list? s) (bad-syntax s))
-  (foldl (lambda (p provides)
-           (let* ([add-provide (lambda (provides id as-sym)
-                                 (let* ([old-id (hash-ref provides as-sym #f)])
-                                   (when (and old-id
-                                              (not (free-id=? (state-binds state) old-id id)))
-                                     (syntax-error "already provided as different binding" as-sym))
-                                   (hash-set provides as-sym id)))]
-                  [bad-provide-form (lambda () (syntax-error "bad provide clause" p))])
-             (cond
-               [(identifier? p) (add-provide provides p (syntax-e p))]
-               [(pair? p)
-                (unless (list? p) (bad-provide-form))
-                (let ([form (car p)])
-                  (cond
-                    [(id-sym-eq? form 'rename-out)
-                     (foldl (lambda (rn provides)
-                              (unless (and (list? rn) (= 2 (length rn))
-                                           (identifier? (car rn)) (identifier? (cadr rn)))
-                                (bad-provide-form))
-                              (add-provide provides (car rn) (syntax-e (cadr rn))))
-                            provides
-                            (cdr p))]
-                    [(id-sym-eq? form 'all-from-out)
-                     (foldl (lambda (req-path provides)
-                              (let* ([prov-ctx (car s)]
-                                     [sym+binds (lookup-nominal state (unwrap-mod-path req-path))])
-                                (unless sym+binds (syntax-error "module not required" req-path))
-                                (foldl (lambda (sym+bind provides)
-                                         (let* ([sym (car sym+bind)]
-                                                [id (datum->syntax prov-ctx sym)]
-                                                [bind (resolve* (state-binds state) id #f)])
-                                           (cond
-                                             [(not (specific=? bind (cdr sym+bind)))
-                                              ;; shadowed by definition or other import
-                                              provides]
-                                             [else
-                                              (add-provide provides id sym)])))
-                                       provides
-                                       sym+binds)))
-                            provides
-                            (cdr p))]
-                    [else (bad-provide-form)]))]
-               [else (bad-provide-form)])))
-         provides
-         (cdr s)))
-
 (define (expand-require s state mod-path)
   (let* ([check-renames
           ;; syntax check on renaming clauses `ns`
@@ -230,8 +182,8 @@
                                   (expand-seq (cdr es) accum new-state provides))]
                                [(eq? bind 'provide)
                                 (if provides
-                                    (let ([new-provides (expand-provide s state provides mod-path)])
-                                      (expand-seq (cdr es) accum state new-provides))
+                                    ;; save provides to handle at the end:
+                                    (expand-seq (cdr es) accum state (cons s provides))
                                     (syntax-error "nested provides not allowed" s))]
                                [(eq? bind 'require)
                                 (let ([new-state (expand-require s state mod-path)])
@@ -245,6 +197,65 @@
                      [else (expand-seq (cdr es) (cons s accum) state provides)]))]))])
     (expand-seq es '() state provides)))
 
+;; parse a provide form after the module body has been expanded
+(define (resolve-provide s state ctx mod-path outs)
+  (unless (list? s) (bad-syntax s))
+  (foldl (lambda (p outs)
+           (let* ([add-provide (lambda (outs id as-sym)
+                                 (let* ([binds (resolve* (state-binds state) id #f)]
+                                        [bind binds]
+                                        [old-bind (hash-ref outs as-sym #f)])
+                                   (unless bind
+                                     (syntax-error "provided identifier not bound" id))
+                                   (when (and old-bind
+                                              (not (specific=? bind old-bind)))
+                                     (syntax-error "already provided as different binding" as-sym))
+                                   (hash-set outs as-sym (export-bind bind ctx binds))))]
+                  [bad-provide-form (lambda () (syntax-error "bad provide clause" p))])
+             (cond
+               [(identifier? p) (add-provide outs p (syntax-e p))]
+               [(pair? p)
+                (unless (list? p) (bad-provide-form))
+                (let ([form (car p)])
+                  (cond
+                    [(id-sym-eq? form 'rename-out)
+                     (foldl (lambda (rn outs)
+                              (unless (and (list? rn) (= 2 (length rn))
+                                           (identifier? (car rn)) (identifier? (cadr rn)))
+                                (bad-provide-form))
+                              (add-provide outs (car rn) (syntax-e (cadr rn))))
+                            outs
+                            (cdr p))]
+                    [(id-sym-eq? form 'all-from-out)
+                     (foldl (lambda (req-path outs)
+                              (let* ([prov-ctx (car s)]
+                                     [sym+binds (lookup-nominal state (unwrap-mod-path req-path))])
+                                (unless sym+binds (syntax-error "module not required" req-path))
+                                (foldl (lambda (sym+bind outs)
+                                         (let* ([sym (car sym+bind)]
+                                                [id (datum->syntax prov-ctx sym)]
+                                                [bind (resolve* (state-binds state) id #f)])
+                                           (cond
+                                             [(not (specific=? bind (cdr sym+bind)))
+                                              ;; shadowed by definition or other import
+                                              outs]
+                                             [else
+                                              (add-provide outs id sym)])))
+                                       outs
+                                       sym+binds)))
+                            outs
+                            (cdr p))]
+                    [else (bad-provide-form)]))]
+               [else (bad-provide-form)])))
+         outs
+         (cdr s)))
+
+(define (resolve-provides provides state ctx mod-path)
+  (foldl (lambda (s outs)
+           (resolve-provide s state ctx mod-path outs))
+         (hash)
+         (reverse provides)))
+           
 (define (parse-body orig-s es state mod-path ctx parse)
   ;; It could be natural and correct to create a new scope for this
   ;; body's definition context. That turns out to be unnecessary, though,
