@@ -54,6 +54,7 @@
 
     not
     eq?
+    equal?
     any?
     void?
 
@@ -83,6 +84,7 @@
 
     hash
     hash-ref
+    ref
     hash-set
     hash-remove
     hash-keys

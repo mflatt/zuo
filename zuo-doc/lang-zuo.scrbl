@@ -233,6 +233,10 @@ Just like @realracket*[boolean? not] from @racket[racket].}
 Analogous to @realracket[eq?] from @racket[racket], but even small Zuo
 numbers are not necessarily @racket[eq?] when they are @racket[=].}
 
+@defproc[(equal? [v1 any?] [v2 any?]) boolean?]{
+
+Analogous to @realracket[equal?] from @racket[racket].}
+
 
 @section{Numbers}
 
@@ -401,15 +405,15 @@ support to convert the textual form back into a hash table value.
 @defproc[(hash? [v any?]) boolean?]
 @defproc[(hash [key symbol?] [val any?] ... ...) hash?]
 @defproc[(hash-ref [hash hash?]
-                   [key any?]
+                   [key symbol?]
                    [failure-value any?])
          any?]
 @defproc[(hash-set [hash (and/c hash? immutable?)]
-                   [key any?]
+                   [key symbol?]
                    [v any?])
          hash?]
 @defproc[(hash-remove [hash (and/c hash? immutable?)]
-                      [key any?])
+                      [key symbol?])
          hash?]
 @defproc[(hash-keys [hash hash?])
          @elem{list of @racket[symbol?]}]
@@ -424,6 +428,11 @@ Besides being constrained to symbol keys, there is one additional
 difference: the third argument to @racket[hash-ref] must be supplied,
 and it is always used as a value to return if a key is missing, as
 opposed to a failure thunk.}
+
+@defproc[(ref [hash hash?] [key symbol?]) any?]{
+
+Like @racket[hash-ref], but errors is @racket[key] is not mapped in
+@racket[hash].}
 
 
 @section{Procedures}

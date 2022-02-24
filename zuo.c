@@ -1247,17 +1247,24 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
   else if (obj == z.o_void)
     out_string(out, "#<void>");
   else if (obj->tag == zuo_integer_tag) {
-    zuo_int_t i = ZUO_INT_I(obj), n, w;
+    zuo_int_t i = ZUO_INT_I(obj), di, n, w, add_back = 0;
     if (i < 0) {
       out_char(out, '-');
-      i = -i;
-    } else if (i == 0)
-      out_char(out, '0');
-    for (n = 1, w = 1; i >= n; n *= 10, w++);
-    while (n > 1) {
-      n /= 10;
+      i = (zuo_int_t)(0-(zuo_uint_t)i);
+      if (i < 0) {
+        /* min int */
+        i = -(i+1);
+        add_back = 1;
+      }
+    }
+    di = i / 10;
+    for (n = 1, w = 1; di >= n; n *= 10, w++);
+    while (n >= 1) {
       out_char(out, '0' + (i / n));
       i = i - ((i / n) * n);
+      n /= 10;
+      i += add_back;
+      add_back = 0;
     }
   } else if (obj->tag == zuo_string_tag) {
     zuo_string_t *str = (zuo_string_t *)obj;
@@ -1640,8 +1647,11 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
       zuo_read_fail(s, _o, "bad hash mark");
       return z.o_undefined;
     }
-  } else if (isdigit(c)) {
-    zuo_uint_t n = c - '0';
+  } else if (isdigit(c) || ((c == '-') && isdigit(s[(*_o)+1]))) {
+    zuo_uint_t n;
+    int neg = (c == '-');
+    if (neg) (*_o)++;
+    n = s[*_o] - '0';
     (*_o)++;
     while (isdigit(s[*_o])) {
       zuo_uint_t new_n = (10 * n) + (s[*_o] - '0');
@@ -1650,14 +1660,16 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
       n = new_n;
       (*_o)++;
     }
-    if ((zuo_int_t)n < 0)
-      zuo_read_fail(s, _o, "integer overflow");
-    return zuo_integer((zuo_int_t)n);
-  } else if ((c == '-') && isdigit(s[(*_o)+1])) {
-    zuo_t *n;
-    (*_o)++;
-    n = zuo_in(s, _o, depth);
-    return zuo_integer(-ZUO_INT_I(n));
+    if (neg) {
+      n = 0 - n;
+      if ((zuo_int_t)n > 0)
+        zuo_read_fail(s, _o, "integer overflow");
+      return zuo_integer((zuo_int_t)n);
+    } else {
+      if ((zuo_int_t)n < 0)
+        zuo_read_fail(s, _o, "integer overflow");
+      return zuo_integer((zuo_int_t)n);
+    }
   } else if (c == '\'') {
     zuo_t *v;
     (*_o)++;
@@ -2160,7 +2172,7 @@ static zuo_t *zuo_subtract(zuo_t *ns) {
 }
 
 static zuo_t *zuo_multiply(zuo_t *ns) {
-  zuo_uint_t i = 0;
+  zuo_uint_t i = 1;
   while (ns != z.o_null) {
     zuo_t *n = _zuo_car(ns);
     check_integer("*", n);
@@ -2176,7 +2188,11 @@ static zuo_t *zuo_quotient(zuo_t *n, zuo_t *m) {
   check_ints(n, m, who);
   m_i = ZUO_UINT_I(m);
   if (m_i == 0) zuo_fail1w(who, "divide by zero", m);
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) / m_i));
+  if (m_i == -1) {
+    /* avoid potential overflow a the minimum integer */
+    return zuo_integer((zuo_int_t)(0 - ZUO_UINT_I(n)));
+  }
+  return zuo_integer(ZUO_INT_I(n) / m_i);
 }
 
 static zuo_t *zuo_modulo(zuo_t *n, zuo_t *m) {
@@ -2185,7 +2201,7 @@ static zuo_t *zuo_modulo(zuo_t *n, zuo_t *m) {
   check_ints(n, m, who);
   m_i = ZUO_UINT_I(m);
   if (m_i == 0) zuo_fail1w(who, "divide by zero", m);
-  return zuo_integer((zuo_int_t)(ZUO_UINT_I(n) % m_i));
+  return zuo_integer(ZUO_INT_I(n) % m_i);
 }
 
 static zuo_t *zuo_not(zuo_t *obj) {
@@ -2194,27 +2210,27 @@ static zuo_t *zuo_not(zuo_t *obj) {
 
 static zuo_t *zuo_eql(zuo_t *n, zuo_t *m) {
   check_ints(n, m, "=");
-  return (ZUO_UINT_I(n) == ZUO_UINT_I(m)) ? z.o_true : z.o_false;
+  return (ZUO_INT_I(n) == ZUO_INT_I(m)) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_lt(zuo_t *n, zuo_t *m) {
   check_ints(n, m, "<");
-  return (ZUO_UINT_I(n) < ZUO_UINT_I(m)) ? z.o_true : z.o_false;
+  return (ZUO_INT_I(n) < ZUO_INT_I(m)) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_le(zuo_t *n, zuo_t *m) {
   check_ints(n, m, "<=");
-  return (ZUO_UINT_I(n) <= ZUO_UINT_I(m)) ? z.o_true : z.o_false;
+  return (ZUO_INT_I(n) <= ZUO_INT_I(m)) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_ge(zuo_t *n, zuo_t *m) {
   check_ints(n, m, ">=");
-  return (ZUO_UINT_I(n) >= ZUO_UINT_I(m)) ? z.o_true : z.o_false;
+  return (ZUO_INT_I(n) >= ZUO_INT_I(m)) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_gt(zuo_t *n, zuo_t *m) {
   check_ints(n, m, ">");
-  return (ZUO_UINT_I(n) > ZUO_UINT_I(m)) ? z.o_true : z.o_false;
+  return (ZUO_INT_I(n) > ZUO_INT_I(m)) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_bitwise_and(zuo_t *n, zuo_t *m) {

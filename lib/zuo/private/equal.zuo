@@ -1,22 +1,10 @@
-#lang zuo/private/defmacromod
+#lang zuo
 
 (require "defmacromod/and-or.zuo"
          "defmacromod/define.zuo"
-         "list.zuo")
+         "list.rkt")
 
-(provide any?
-         void?
-         boolean?
-
-         equal?
-
-         ref)
-
-;; mainly for contracts in the docs:
-(define (any? v) #t)
-(define (void? v) (eq? v (void)))
-
-(define (boolean? v) (or (eq? v #t) (eq? v #f)))
+(provide equal?)
 
 (define (equal? a b)
   (or (eq? a b)
@@ -38,10 +26,4 @@
                                 (hash-keys a)))]
         [else #f])))
 
-(define ref
-  (let ([not-there (string->uninterned-symbol "no")])
-    (lambda (ht k)
-      (let ([v (hash-ref ht k not-there)])
-        (if (eq? v not-there)
-            (error "ref: key not present" k)
-            v)))))
+    
