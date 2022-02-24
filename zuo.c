@@ -283,8 +283,9 @@ static struct {
     zuo_t *o_interp_k;
     zuo_t *o_interp_in_proc; /* used for a stack trace on error */
   
-    /* process status table (for Unix) */
+    /* process status table and fd table (both for Unix) */
     zuo_t *o_pid_table;
+    zuo_t *o_fd_table;
   
     /* startup info */
     zuo_t *o_library_path;
@@ -3254,6 +3255,14 @@ static zuo_raw_handle_t zuo_get_std_handle(int which) {
 #endif
 }
 
+static zuo_t *zuo_fd_handle(zuo_raw_handle_t handle, zuo_handle_status_t status)  {
+  zuo_t *h = zuo_handle(handle, status);
+#ifndef ZUO_WINDOWS
+  trie_set(Z.o_fd_table, handle, h, h);
+#endif
+  return h;
+}
+
 static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
                        zuo_int_t amount, zuo_int_t *_len) {
   char *s;
@@ -3355,6 +3364,7 @@ static void zuo_close(zuo_raw_handle_t handle)
   CloseHandle(handle);
 #else
   close(handle);
+  trie_set(Z.o_fd_table, handle, z.o_undefined, z.o_undefined);
 #endif
 }
 
@@ -3386,7 +3396,7 @@ static zuo_t *zuo_fd_open_input(zuo_t *path) {
     fd = zuo_get_std_handle(0);
   }
 
-  return zuo_handle(fd, zuo_handle_open_fd_in_status);
+  return zuo_fd_handle(fd, zuo_handle_open_fd_in_status);
 }
 
 static zuo_t *zuo_fd_open_output(zuo_t *path) {
@@ -3419,7 +3429,7 @@ static zuo_t *zuo_fd_open_output(zuo_t *path) {
     fd = zuo_get_std_handle(2);
   }
 
-  return zuo_handle(fd, zuo_handle_open_fd_out_status);
+  return zuo_fd_handle(fd, zuo_handle_open_fd_out_status);
 }
 
 static zuo_t *zuo_fd_close(zuo_t *fd_h) {
@@ -4259,6 +4269,8 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   /*                Unix                  */
   /*--------------------------------------*/
   {
+    zuo_t *open_fds = zuo_trie_keys(Z.o_fd_table, z.o_null);
+
     pid = fork();
     
     if (pid > 0) {
@@ -4283,6 +4295,11 @@ zuo_t *zuo_process(zuo_t *command_and_args)
         dup2(err_w, 2);
         if (redirect_err)
           close(err);
+      }
+
+      while (open_fds != z.o_null) {
+        close(ZUO_HANDLE_RAW(_zuo_car(open_fds)));
+        open_fds = _zuo_cdr(open_fds);
       }
 
       if ((dir == z.o_undefined)
@@ -4334,11 +4351,11 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   result = z.o_empty_hash;
   result = zuo_hash_set(result, zuo_symbol("process"), p_handle);
   if (redirect_in)
-    result = zuo_hash_set(result, zuo_symbol("stdin"), zuo_handle(in, zuo_handle_open_fd_out_status));
+    result = zuo_hash_set(result, zuo_symbol("stdin"), zuo_fd_handle(in, zuo_handle_open_fd_out_status));
   if (redirect_out)
-    result = zuo_hash_set(result, zuo_symbol("stdout"), zuo_handle(out, zuo_handle_open_fd_in_status));
+    result = zuo_hash_set(result, zuo_symbol("stdout"), zuo_fd_handle(out, zuo_handle_open_fd_in_status));
   if (redirect_err)
-    result = zuo_hash_set(result, zuo_symbol("stderr"), zuo_handle(err, zuo_handle_open_fd_in_status));
+    result = zuo_hash_set(result, zuo_symbol("stderr"), zuo_fd_handle(err, zuo_handle_open_fd_in_status));
 
   return result;
 }
@@ -4872,7 +4889,14 @@ int main(int argc, char **argv) {
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
   Z.o_stash = z.o_false;
+
+#ifdef ZUO_WINDOWS
+  Z.o_pid_table = z.o_undefined;
+  Z.o_fd_table = z.o_undefined;
+#else
   Z.o_pid_table = zuo_trie_node();
+  Z.o_fd_table = zuo_trie_node();
+#endif
 
   Z.o_current_directory = zuo_current_directory();
 
