@@ -770,7 +770,7 @@ one additional key derived from @racket['mode]:
 
 @itemlist[
 
- @item{@racket['type]: @racket['file], @racket['directory], or
+ @item{@racket['type]: @racket['file], @racket['dir], or
          @racket['link] (only when @racket[follow-links?] is
          @racket[#f])}
 

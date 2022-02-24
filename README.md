@@ -24,9 +24,10 @@ other than system and C-library headers. No compiler flags should be
 needed, although flags like `-o zuo` or `-O2` are a good idea.
 
 The Zuo executable runs only modules. If you run Zuo with no
-command-line arguments, then it loads `zuofile.zuo`. Otherwise, the
-first argument to Zuo is a file to run, and additional arguments
-are delivered via the `command-line-arguments` procedure.
+command-line arguments, then it loads `main.zuo`. Otherwise, the first
+argument to Zuo is a file to run or a directory containing a
+`main.zuo` to run, and additional arguments are delivered to the Zuo
+program via the `runtime-env` procedure.
 
 
 Library Modules and Startup Performance

@@ -3588,7 +3588,7 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   }
 
   if (S_ISDIR(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("directory"));
+    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("dir"));
   else if (S_ISLNK(stat_buf.st_mode))
     result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("link"));
   else
@@ -4435,9 +4435,8 @@ static zuo_t *zuo_self_path(char *exec_file) {
 
 int main(int argc, char **argv) {
   char *load_file = NULL, *library_path = NULL, *boot_heap = NULL;
-  int no_load_file = 0;
   char *argv0 = argv[0];
-  zuo_t *exe_path;
+  zuo_t *exe_path, *load_path;
 
   zuo_check_sanity();
 
@@ -4449,30 +4448,28 @@ int main(int argc, char **argv) {
   while (argc > 0) {
     if (!strcmp(argv[0], "-h") || !strcmp(argv[0], "--help")) {
       fprintf(stdout, ("\n"
-                       "usage: %s [<option> ...] <argument> ...\n"
+                       "usage: %s [<option> ...] [<file-or-dir> <argument> ...]\n"
                        "\n"
-                       "supported <option>s:\n"
+                       "If <file-or-dir> is a file, it is used as a module path to load.\n"
+                       "If <file-or-dir> is a directory, \"main.zuo\" is loded.\n"
+                       "If <file-or-dir> is \"\", a module is read from stdin.\n"
+                       "The <argument>s are made available via the `system-env` procedure.\n"
+                       "\n"
+                       "Supported <option>s:\n"
                        "\n"
                        "  -B <file>, --boot <file>\n"
                        "     Load dump from <file> as the initial image\n"
                        "  -X <dir>, --collects <dir>\n"
                        "     Use <dir> as the library-collection root, overriding `ZUO_LIB`;\n"
                        "     the default is \"%s\" relative to the executable\n"
-                       "  -\n"
-                       "     Read module from \"zuofile.zuo\" instead of first <argument>\n"
-                       "  --in\n"
-                       "     Read module from stdin instead of first <argument>\n"
                        "  --\n"
                        "     No argument following this switch is used as a switch\n"
                        "  -h, --help\n"
                        "     Show this information and exit, ignoring other options\n"
                        "\n"
-                       "Unless `-` is provided, the first <argument> is used as a module path to\n"
-                       "load; otherwise, \"zuofile.zuo\" is loaded (if it exists). Use \"\" to read\n"
-                       "from stdin."
-                       "Additional <argument>s are made available from the `command-line-arguments`\n"
-                       "procedure. If an <option> switch is provided multiple times, the last\n"
-                       "instance takes precedence.\n\n"),
+                       "If an <option> switch is provided multiple times, the last\n"
+                       "instance takes precedence.\n"
+                       "\n"),
               argv0,
               ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
       exit(0);
@@ -4501,10 +4498,6 @@ int main(int argc, char **argv) {
       argc--;
       argv++;
       break;
-    } else if (!strcmp(argv[0], "-")) {
-      no_load_file = 1;
-      argc--;
-      argv++;
     } else if (argv[0][0] == '-') {
       fprintf(stderr, "%s: unrecognized flag: %s", argv0, argv[0]);
       zuo_fail("");
@@ -4512,7 +4505,7 @@ int main(int argc, char **argv) {
       break;
   }
 
-  if (!no_load_file && (argc > 0)) {
+  if (argc > 0) {
     load_file = argv[0];
     argc--;
     argv++;
@@ -4694,22 +4687,30 @@ int main(int argc, char **argv) {
     Z.o_library_path = z.o_false;
 
   if (load_file == NULL) {
-    load_file = "zuofile.zuo";
-    if (zuo_stat(zuo_string(load_file), z.o_true) == z.o_false) {
-      fprintf(stderr, "%s: no file specified, and no \"zuofile.zuo\" found", argv0);
+    load_file = "main.zuo";
+    load_path = zuo_string(load_file);
+    if (zuo_stat(load_path, z.o_true) == z.o_false) {
+      fprintf(stderr, "%s: no file specified, and no \"main.zuo\" found", argv0);
       zuo_fail("");
     }
-  }
+  } else if (load_file[0] != 0) {
+    zuo_t *st;
+    load_path = zuo_string(load_file);
+    st = zuo_stat(load_path, z.o_true);
+    if ((st != z.o_false)
+        && (zuo_hash_ref(st, zuo_symbol("type"), z.o_false) == zuo_symbol("dir")))
+      load_path = zuo_build_path(load_path, zuo_string("main.zuo"));
+  } else
+    load_path = zuo_path_to_complete_path(zuo_string("stdin"));
 
   Z.o_runtime_env = zuo_make_runtime_env(exe_path, load_file, argc, argv);
 
   if (load_file[0] == 0) {
     zuo_int_t in_len;
     char *input = zuo_drain(stdin, 0, -1, &in_len);
-    zuo_t *stdin_path = zuo_path_to_complete_path(zuo_string("stdin"));
-    (void)zuo_eval_module(stdin_path, input, in_len);
+    (void)zuo_eval_module(load_path, input, in_len);
   } else
-    (void)zuo_module_to_hash(zuo_string(load_file));
+    (void)zuo_module_to_hash(load_path);
 
   return 0;
 }

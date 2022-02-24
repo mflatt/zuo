@@ -20,16 +20,18 @@ C-library headers. No compiler flags should be needed, although flags
 like @exec{-o zuo} or @exec{-O2} are a good idea.
 
 The Zuo executable runs only modules. If you run Zuo with no
-command-line arguments, then it loads @filepath{zuofile.zuo} in the
+command-line arguments, then it loads @filepath{main.zuo} in the
 current directory. Otherwise, the first argument to Zuo is a file to
-run, and additional arguments are delivered to that program via the
+run or a directory containing a @filepath{main.zuo} to run, and
+additional arguments are delivered to that program via the
 @racket[runtime-env] procedure.
 
-Zuo treats the path @filepath{-} as an alias for
-@filepath{zuofile.zuo}, which is convenient for using @exec{zuo} as a
-replacement for @exec{make} while still passing arguments. When Zuo
-receives the empty string (which would be invalid as a file path) as a
-first argument, it reads a module from standard input.
+Note that starting Zuo with the argument @filepath{.} equivalent to
+the argument @filepath{./main.zuo}, which is a convenient shorthand
+for using @exec{zuo} as a replacement for @exec{make} while still
+passing arguments. When Zuo receives the empty string (which would be
+invalid as a file path) as a first argument, it reads a module from
+standard input.
 
 
 @section{Library Modules and Startup Performance}

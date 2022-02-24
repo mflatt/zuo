@@ -8,12 +8,12 @@
   (list ""
         "Welcome to Zuo!"
         ""
-        "This message is from \"zuofile.zuo\"."
+        "This message is from \"main.zuo\"."
         "")
   (if (null? args)
       (list
        "Probably, you're seeing this message because you ran Zuo with no arguments,"
-       "in which case \"zuofile.zuo\" in the current directory is loaded by default."
+       "in which case \"main.zuo\" in the current directory is loaded by default."
        ""
        "If you want to run your own program, supply the program's path as an argument."
        "A program file will start with `#lang`, and most likely it starts `#lang zuo`."
@@ -24,8 +24,8 @@
        "place of a file path. You'll still need to start the program with something"
        "like `#lang zuo`.")
       (list*
-       "I see command-line arguments, so you either called Zuo with \"zuofile.zuo\""
-       "explicitly, or you used `-` as the file name, in which case \"zuofile.zuo\" is"
+       "I see command-line arguments, so you either called Zuo with \"main.zuo\""
+       "explicitly, or you used `-` as the file name, in which case \"main.zuo\" is"
        "used."
        ""
        "Here are the arguments you provided:"
