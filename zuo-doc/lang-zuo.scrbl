@@ -733,6 +733,11 @@ keys are as follows, and supplying an unrecognized key in
 @item{@racket['stderr] mapped to an output stream: supplies (a copy
       of) the output stream as the new process's standard error}
 
+@item{@racket['env] mapped to a list of pairs of strings: environment
+      variables for the new process, where the @racket[car] or each
+      pair is an environment variable name and the @racket[cdr] is its
+      value}
+
 ]}
 
 @defproc[(process-wait [process handle?]) void?]{
@@ -811,9 +816,13 @@ Zuo process. The hash table includes the following keys:
 
 @itemlist[
 
-@item{@racket['arguments]: comment-line arguments provided when the
+@item{@racket['args]: comment-line arguments provided when the
       process was started, not counting Zuo configuration arguments or
       the name of a script to run}
+
+@item{@racket[dir]: the current directory}
+
+@item{@racket[env]: a list of pairs of strings for environment variables}
 
 @item{@racket['script]: the script provided to Zuo to run, which might
       be @racket[""] to indicate a script read from standard input}

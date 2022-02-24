@@ -108,6 +108,7 @@
     eof
 
     stat
+    ls rm mv mkdir rmdir ln readlink
     current-time
 
     process

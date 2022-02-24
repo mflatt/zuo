@@ -2696,6 +2696,146 @@ zuo_t *zuo_kernel_eval(zuo_t *e) {
 }
 
 /*======================================================================*/
+/* environment variables                                                */
+/*======================================================================*/
+
+#if defined(__APPLE__) && defined(__MACH__)
+# include <crt_externs.h>
+#elif !defined(ZUO_WINDOWS)
+extern char **environ;
+#endif
+
+static zuo_t *zuo_get_envvars()
+{
+  zuo_t *first = z.o_null, *last = NULL, *pr;
+
+#ifdef ZUO_WINDOWS
+  {
+    char *p;
+    wchar_t *e;
+    zuo_int_t i, start, j;
+
+    e = GetEnvironmentStringsW();
+    if (!e)
+      zuo_fail("failed to get environment variables");
+
+    i = 0;
+    while (e[i]) {
+      start = i;
+      while (e[i]) { i++; }
+      p = zuo_from_wide_no_free(e + start);
+      for (j = 0; p[j] && p[j] != '='; j++) {
+      }
+      p[j] = 0;
+      if (p[0] != 0) {
+        pr = zuo_cons(zuo_cons(zuo_string(p), zuo_string(p+j+1)),
+                      z.o_null);
+        if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
+        last = pr;
+      }
+      free(p);
+    }
+
+    FreeEnvironmentStringsW(e);
+  }
+#else
+  {
+    zuo_int_t i, j;
+    char **ea, *p;
+
+# if defined(__APPLE__) && defined(__MACH__)
+    ea = *_NSGetEnviron();
+# else
+    ea = environ;
+# endif
+
+    for (i = 0; ea[i]; i++) {
+      p = ea[i];
+      for (j = 0; p[j] && p[j] != '='; j++) {
+      }
+      pr = zuo_cons(zuo_cons(zuo_sized_string(p, j), zuo_string(p+j+1)),
+                    z.o_null);
+      if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
+      last = pr;
+    }
+  }
+#endif
+  return first;
+}
+
+static void *zuo_envvars_block(const char *who, zuo_t *envvars)
+{
+#ifdef ZUO_WINDOWS
+  zuo_int_t i;
+  quo_int_t r_size = 256, r_len = 0, namelen, vallen, slen;
+  wchar_t *r = malloc(r_size * sizeof(wchar_t)), *name, *val;
+
+  for (l = ennvars; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *a = _zuo_car(l);
+    name = zuo_to_wide_no_free(who, ZUO_STRING_PTR(_zuo_car(a)));
+    val = zuo_to_wide_no_free(who, ZUO_STRING_PTR(_zuo_cdr(a)));
+    namelen = wcslen(name);
+    vallen = wcslen(val);
+    slen = namelen + vallen + 2;
+
+    if (r_len + slen >= r_size) {
+      zuo_int_t new_size = 2 * (r_size + r_len);
+      wchar_t *new_r = malloc(new_size * sizeof(wchar_t));
+      memcpy(new_r, r, r_size * sizeof(wchar_t));
+      free(r);
+      r = new_r;
+      r_size = new_size;
+    }
+
+    memcpy(r + r_len, name, namelen * sizeof(wchar_t));
+    r_len += namelen;
+    r[r_len++] = '=';
+    memcpy(r + r_len, val, vallen * sizeof(wchar_t));
+    r_len += vallen + 1;
+    r[r_len++] = 0;
+
+    free(name);
+    free(val);
+  }
+  r[r_len] = 0;
+
+  return r;
+#else
+  char **r, *s;
+  intptr_t len = 0, slen, c, count = 0;
+  zuo_t *l;
+
+  for (l = envvars; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *a = _zuo_car(l);
+    len += ZUO_STRING_LEN(_zuo_car(a));
+    len += ZUO_STRING_LEN(_zuo_cdr(a));
+    len += 2;
+    count++;
+  }
+
+  r = (char **)malloc((count+1) * sizeof(char*) + len);
+  s = (char *)(r + (count+1));
+  c = 0;
+  for (l = envvars; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *a = _zuo_car(l);
+    r[c++] = s;
+    slen = ZUO_STRING_LEN(_zuo_car(a));
+    memcpy(s, ZUO_STRING_PTR(_zuo_car(a)), slen);
+    s[slen] = '=';
+    s = s + (slen + 1);
+    slen = ZUO_STRING_LEN(_zuo_cdr(a));
+    memcpy(s, ZUO_STRING_PTR(_zuo_cdr(a)), slen);
+    s[slen] = 0;
+    s = s + (slen + 1);
+  }
+  r[c] = NULL;
+
+  return r;
+#endif
+}
+
+  
+/*======================================================================*/
 /* paths                                                                */
 /*======================================================================*/
 
@@ -3022,11 +3162,13 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int a
     zuo_t *l = z.o_null;
     while (argc-- > 0)
       l = zuo_cons(zuo_string(argv[argc]), l);
-    ht = zuo_hash_set(ht, zuo_symbol("arguments"), l);
+    ht = zuo_hash_set(ht, zuo_symbol("args"), l);
   }
 
-  ht = zuo_hash_set(ht, zuo_symbol("directory"), Z.o_current_directory);
+  ht = zuo_hash_set(ht, zuo_symbol("dir"), Z.o_current_directory);
   ht = zuo_hash_set(ht, zuo_symbol("script"), zuo_string(load_file));
+
+  ht = zuo_hash_set(ht, zuo_symbol("env"), zuo_get_envvars());
 
   {
 #ifdef ZUO_WINDOWS
@@ -3481,7 +3623,7 @@ static zuo_t *zuo_rm(zuo_t *file_path) {
   check_path_string(who, file_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(file_path));
+    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(file_path));
     if (_wunlink(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3501,8 +3643,8 @@ static zuo_t *zuo_mv(zuo_t *from_path, zuo_t *to_path) {
   check_path_string(who, to_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *from_wp = zuo_to_wide_no_free(ZUO_STRING_PTR(from_path));
-    wchar_t *to_wp = zuo_to_wide_no_free(ZUO_STRING_PTR(to_path));
+    wchar_t *from_wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(from_path));
+    wchar_t *to_wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(to_path));
     if (wrename(from_wp to_wp) == 0) {
       free(from_wp);
       free(to_wp);
@@ -3522,7 +3664,7 @@ static zuo_t *zuo_mkdir(zuo_t *dir_path) {
   check_path_string(who, dir_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(dir_path));
+    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(dir_path));
     if (_wmkdir(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3541,7 +3683,7 @@ static zuo_t *zuo_rmdir(zuo_t *dir_path) {
   check_path_string(who, dir_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(dir_path));
+    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(dir_path));
     if (_wrmdir(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3645,7 +3787,7 @@ zuo_t *zuo_current_time() {
   /* measurement interval is 100 nanoseconds = 1/10 microseconds, and
      adjust by number of seconds between Windows (1601) and Unix (1970) epochs */
   return zuo_cons(zuo_integer(total / 10000000 - 11644473600L),
-                  zuo_integer((total % 10000000) * 100);
+                  zuo_integer((total % 10000000) * 100));
 #else
   struct timespec t;
   if (clock_gettime(CLOCK_REALTIME, &t) != 0)
@@ -3772,6 +3914,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   zuo_raw_handle_t pid, in, in_r, out, out_w, err, err_w;
   int argc = 1, i, ok;
   char **argv;
+  void *env;
 
   check_path_string(who, command);
   for (l = args; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
@@ -3835,6 +3978,31 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
   }
 
+  opt = zuo_consume_option(&options, "env");
+  if (opt != z.o_undefined) {
+    zuo_t *l;
+    for (l = opt; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
+      zuo_t *a = _zuo_car(l), *name, *val;
+      zuo_int_t i;
+    
+      if (a->tag != zuo_pair_tag) break;
+      name = _zuo_car(a);
+      if (name->tag != zuo_string_tag) break;
+      for (i = ZUO_STRING_LEN(name); i--; ) {
+        int c = ZUO_STRING_PTR(name)[i];
+        if ((c == '=') || (c == 0)) break;
+      }
+      if (i >= 0) break;
+      
+      val = _zuo_cdr(a);
+      if (val->tag != zuo_string_tag) break;
+    }
+    if (l != z.o_null)
+      zuo_fail1w(who, "not a valid environment variables list", opt);
+    env = zuo_envvars_block(who, opt);
+  } else
+    env = NULL;
+
   check_options_consumed(who, options);
   
 #ifdef ZUO_WINDOWS
@@ -3842,7 +4010,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   /*              Windows                 */
   /*--------------------------------------*/
   {
-    wchar_t *command_w = zuo_to_wide_no_free(argv[0]), *cmline_w;
+    wchar_t *command_w = zuo_to_wide_no_free(who, argv[0]), *cmline_w;
     char *cmdline;
     int len = 9;
     STARTUPINFOW startup;
@@ -3867,7 +4035,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     }
     cmdline[len-1] = 0;
 
-    cmdline_w = zuo_to_wide(cmdline);
+    cmdline_w = zuo_to_wide(who, cmdline);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(*startup);
@@ -3882,7 +4050,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     
     ok = CreateProcessW(command_w, cmdline_w, 
                         NULL, NULL, 1 /*inherit*/,
-                        cr_flag, NULL, NULL,
+                        cr_flag, env, NULL,
                         &startup, &info);
 
     free(command_w);
@@ -3917,7 +4085,11 @@ zuo_t *zuo_process(zuo_t *command_and_args)
           close(err);
       }
 
-      execv(argv[0], argv);
+      if (env == NULL)
+        execv(argv[0], argv);
+      else
+        execve(argv[0], argv, env);
+
       {
         char *msg = "exec failed";
         int r = write(2, msg, strlen(msg));
@@ -3937,6 +4109,9 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       fprintf(stderr, "  %s\n", argv[i]);
     zuo_fail("exec failed");
   }
+
+  if (env != NULL)
+    free(env);
 
   if (redirect_in)
     zuo_close(in_r);

@@ -7,7 +7,7 @@
     (error (~a (current-program) ": flag " (car args) " needs an argument"))))
 
 (define cmd
-  (let loop ([args (hash-ref (runtime-env) 'arguments #f)] [cmd (hash)])
+  (let loop ([args (hash-ref (runtime-env) 'args #f)] [cmd (hash)])
     (cond
       [(null? args) cmd]
       [(string=? (car args) "-o")

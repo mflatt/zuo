@@ -85,7 +85,7 @@ in @racketmodname[zuo/kernel] (and the values originate there):
 
   fd-open-input fd-open-output fd-close fd-read fd-write eof
 
-  stat runtime-env
+  stat ls rm mv mkdir rmdir ln readlink runtime-env current-time
 
   process process-status process-wait
 
