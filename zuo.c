@@ -9,6 +9,7 @@
 #ifdef ZUO_WINDOWS
 # include <windows.h>
 # include <direct.h>
+# include <io.h>
 # include <sys/stat.h>
 #else
 # include <fcntl.h>
@@ -3985,8 +3986,6 @@ static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
     HANDLE rh, wh;
     if (!CreatePipe(_r, _w, NULL, 0))
       zuo_fail("pipe creation failed");
-    *_r = rh;
-    *_w = wh;
   }
 #else
   {
@@ -4225,6 +4224,8 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     free(cmdline_w);
     if (wd_w != NULL)
       free(wd_w);
+
+    pid = info.hProcess;
   }
 #else
   /*--------------------------------------*/
