@@ -8,7 +8,8 @@
 (provide char)
 
 (define-syntax (char stx)
-  (if (and (= 2 (length stx))
+  (if (and (list? stx)
+           (= 2 (length stx))
            (string? (cadr stx))
            (= 1 (string-length (cadr stx))))
       (string-ref (cadr stx) 0)

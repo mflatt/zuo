@@ -1,0 +1,45 @@
+#lang zuo
+
+(require "harness.zuo")
+
+(alert "strings")
+
+(check (string? "apple"))
+(check (string? ""))
+(check (not (string? 'apple)))
+(check (not (string? 10)))
+
+(check (string-length "") 0)
+(check (string-length "apple") 5)
+(check-fail (string-length 'apple) not-string)
+
+(check (string-ref "0123" 0) 48)
+(check (string-ref "0123" 2) 50)
+(check-fail (string-ref "0123" 4) "out of bounds")
+(check-fail (string-ref "0123" -1) "out of bounds")
+
+(check (substring "0123" 0 0) "")
+(check (substring "0123" 0 1) "0")
+(check (substring "0123" 0 4) "0123")
+(check (substring "0123" 4 4) "")
+(check-fail (substring "0123" -1 0) "out of bounds")
+(check-fail (substring "0123" 5 6) "out of bounds")
+(check-fail (substring "0123" -1 5) "out of bounds")
+(check-fail (substring "0123" 1 5) "out of bounds")
+(check-fail (substring "0123" 1 0) "index less than starting")
+
+(check (string-u32-ref "\x00\x00\x00\x00" 0) 0)
+(check (string-u32-ref "\x00\x04\x04\x00" 0) (+ (* 256 4) (* 256 256 4)))
+(check (string-u32-ref "\x03\x00\x00\x03" 0) (+ 3 (* 256 256 256 3)))
+(check (string-u32-ref "\xff\x00\x00\xff" 0) (+ 255 (* 256 256 256 255)))
+
+(check (string-u32-ref "__\x00\x00\x00\x00!" 2) 0)
+(check (string-u32-ref "__\x00\x04\x04\x00!" 2) (+ (* 256 4) (* 256 256 4)))
+(check (string-u32-ref "__\x03\x00\x00\x03!" 2) (+ 3 (* 256 256 256 3)))
+(check (string-u32-ref "__\xff\x00\x00\xff!" 2) (+ 255 (* 256 256 256 255)))
+
+(check (char "0") 48)
+(check (char "\xff") 255)
+(check-fail (char) bad-stx)
+(check-fail (char "0" "more") bad-stx)
+(check-fail (char . "0") bad-stx)

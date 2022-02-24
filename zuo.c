@@ -951,26 +951,41 @@ static zuo_t *zuo_make_symbol(const char *in_str) {
   return zuo_make_symbol_from_string(zuo_string(in_str));
 }
 
-static zuo_t *zuo_symbol(const char *in_str) {
+/* If `str_obj` is undefined, it's allocated as needed.
+   If `str_obj` us false, the result can be false. */
+static zuo_t *zuo_symbol_from_string(const char *in_str, zuo_t *str_obj) {
   const unsigned char *str = (const unsigned char *)in_str;
   zuo_int_t i;
   zuo_trie_node_t *node = (zuo_trie_node_t *)z.o_intern_table;
 
   for (i = 0; str[i]; i++) {
     int c = str[i], lo = c & ZUO_TRIE_BFACTOR_MASK, hi = c >> ZUO_TRIE_BFACTOR_BITS;
-    if (node->next[lo] == z.o_undefined)
+    if (node->next[lo] == z.o_undefined) {
+      if (str_obj == z.o_false)
+        return z.o_false;
       node->next[lo] = zuo_trie_node();
+    }
     node = (zuo_trie_node_t *)node->next[lo];
     if (node->next[hi] == z.o_undefined)
       node->next[hi] = zuo_trie_node();
     node = (zuo_trie_node_t *)node->next[hi];
   }
 
-  if (node->val == z.o_undefined)
-    node->val = zuo_make_symbol(in_str);
+  if (node->val == z.o_undefined) {
+    if (str_obj == z.o_false)
+      return z.o_false;
+    else if (str_obj == z.o_undefined)
+      node->val = zuo_make_symbol(in_str);
+    else
+      node->val = zuo_make_symbol_from_string(str_obj);
+  }
   /* the symbol table doesn't use the `key` field */
   
   return node->val;
+}
+
+static zuo_t *zuo_symbol(const char *in_str) {
+  return zuo_symbol_from_string(in_str, z.o_undefined);
 }
 
 static zuo_t *zuo_variable(zuo_t *name) {
@@ -1306,7 +1321,14 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
   } else if (obj->tag == zuo_symbol_tag) {
     if (mode == zuo_print_mode)
       out_char(out, '\'');
-    zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
+    if ((mode == zuo_display_mode)
+        || (obj == zuo_symbol_from_string(ZUO_STRING_PTR(((zuo_symbol_t *)obj)->str), z.o_false)))
+      zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
+    else {
+      out_string(out, "#<symbol:");
+      zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
+      out_string(out, ">");
+    }
   } else if (depth >= ZUO_RECUR_LIMIT) {
     out_string(out, "...");
   } else if (obj->tag == zuo_pair_tag) {
@@ -1752,7 +1774,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
           s2[len++] = '\r';
           (*_o) += 2;
         } else if (c2 == 'x') {
-          s2[len++] = (hex_value(s, _o, 2) << 8) + hex_value(s, _o, 3);
+          s2[len++] = (hex_value(s, _o, 2) << 4) + hex_value(s, _o, 3);
           (*_o) += 4;
         } else
           zuo_read_fail(s, _o, "bad character after backslash");
@@ -1784,7 +1806,7 @@ static zuo_t *zuo_read_all_str(const char *s, zuo_int_t len, zuo_int_t start) {
 
   for (i = start; i < len; i++)
     if (s[i] == 0)
-      zuo_fail("read-all-string-in: nul character in input");
+      zuo_fail("read-from-string-all: nul character in input");
 
   while (1) {
     zuo_t *obj = zuo_in((const unsigned char *)s, &o, 0);
@@ -2033,7 +2055,9 @@ static zuo_t *zuo_string_ref(zuo_t *obj, zuo_t *i) {
 
 static zuo_t *zuo_string_u32_ref(zuo_t *obj, zuo_t *i) {
   zuo_int_t idx = check_string_ref_index("string-u32-ref", obj, i, 4);
-  return zuo_integer(*(zuo_uint32_t *)(((zuo_string_t *)obj)->s + idx));
+  zuo_uint32_t v;
+  memcpy(&v, (((zuo_string_t *)obj)->s + idx), sizeof(zuo_uint32_t));
+  return zuo_integer(v);
 }
 
 static zuo_t *zuo_substring(zuo_t *obj, zuo_t *start_i, zuo_t *end_i) {
@@ -2046,9 +2070,9 @@ static zuo_t *zuo_substring(zuo_t *obj, zuo_t *start_i, zuo_t *end_i) {
   e_idx = ZUO_INT_I(end_i);
   len = ZUO_STRING_LEN(obj);
   if ((s_idx < 0) || (s_idx > len))
-    zuo_fail1w(who, "starting index out of bound for string", start_i);
+    zuo_fail1w(who, "starting index out of bounds for string", start_i);
   if ((e_idx < 0) || (e_idx > len))
-    zuo_fail1w(who, "ending index out of bound for string", end_i);
+    zuo_fail1w(who, "ending index out of bounds for string", end_i);
   if (e_idx < s_idx)
     zuo_fail1w(who, "ending index less than starting index", end_i);
   return zuo_sized_string((const char *)&((zuo_string_t *)obj)->s[s_idx], e_idx - s_idx);
@@ -2056,7 +2080,7 @@ static zuo_t *zuo_substring(zuo_t *obj, zuo_t *start_i, zuo_t *end_i) {
 
 static zuo_t *zuo_string_to_symbol(zuo_t *obj) {
   check_string("string->symbol", obj);
-  return zuo_symbol(ZUO_STRING_PTR(obj));
+  return zuo_symbol_from_string(ZUO_STRING_PTR(obj), obj);
 }
 
 static zuo_t *zuo_string_to_uninterned_symbol(zuo_t *obj) {
@@ -2632,6 +2656,7 @@ static void continue_step() {
             args = _zuo_car(_zuo_cdr(args));
             if (!zuo_list_p(args))
               zuo_fail1("not a list", args);
+            count = zuo_length_int(args);
             /* no break => loop to apply again */
           } else if (rator == z.o_call_cc) {
             if (count != 1)
@@ -3064,6 +3089,12 @@ static zuo_t *zuo_split_path(zuo_t *p) {
         tail_seps++;
     } else
       non_sep = 1;
+  }
+
+  if (tail_seps > 0) {
+    if (tail_seps == ZUO_STRING_LEN(p))
+      tail_seps--;
+    p = zuo_sized_string(ZUO_STRING_PTR(p), ZUO_STRING_LEN(p)-tail_seps);
   }
 
   return zuo_cons(z.o_false, p);

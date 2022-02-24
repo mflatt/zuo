@@ -2,6 +2,12 @@
 
 (require "harness.zuo")
 
+(alert "predicate")
+
+(check (integer? 10))
+(check (not (integer? 'a)))
+(check (not (integer? '(1 . 2))))
+
 (alert "arithmetic")
 
 (check (+ 1 2) 3)

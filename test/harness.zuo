@@ -2,9 +2,12 @@
 
 (provide check
          check-fail
+         check-output
 
+         bad-stx
          arity
-         not-integer)
+         not-integer
+         not-string)
 
 (define (check* e a b)
   (unless (equal? a b)
@@ -52,6 +55,46 @@
         (list (quote-syntax quote) (cadr stx))
         (cadr (cdr stx))))
 
+(define (check-output* e stdout stderr)
+  (define p (process (hash-ref (runtime-env) 'exe #f)
+                     ""
+                     (hash 'stdin 'pipe 'stdout 'pipe 'stderr 'pipe)))
+  (fd-write (ref p 'stdin) (~a "#lang zuo " (~s e)))
+  (fd-close (ref p 'stdin))
+  (define out (fd-read (ref p 'stdout) eof))
+  (define err (fd-read (ref p 'stderr) eof))
+  (fd-close (ref p 'stdout))
+  (fd-close (ref p 'stderr))
+  (process-wait (ref p 'process))
+  (unless (= 0 (process-status (ref p 'process)))
+    (error (~a "check-fail: process failed: " (~s e)
+               "\n  stdout: " (~s out)
+               "\n  stderr: " (~s err))))
+  (unless (and (equal? out stdout)
+               (equal? err stderr))
+    (error (~a "check-fail: process failed: " (~s e)
+               "\n  stdout: " (~s out)
+               "\n  expect: " (~s stdout)
+               "\n  stderr: " (~s err)
+               "\n  expect: " (~s stderr)))))
+
+(define-syntax (check-output stx)
+  (unless (list? stx) (bad-syntax stx))
+  (cond
+    [(= 3 (length stx))
+     (list (quote-syntax check-output*)
+           (list (quote-syntax quote) (cadr stx))
+           (list-ref stx 2)
+           "")]
+    [(= 4 (length stx))
+     (list (quote-syntax check-output*)
+           (list (quote-syntax quote) (cadr stx))
+           (list-ref stx 2)
+           (list-ref stx 3))]
+    [else (bad-syntax stx)]))
+
 ;; Some common error messages
+(define bad-stx "bad syntax")
 (define arity "wrong argument count")
 (define not-integer "not an integer")
+(define not-string "not a string")

@@ -3,5 +3,10 @@
 (require "equal.zuo")
 (require "integer.zuo")
 (require "pair.zuo")
+(require "string.zuo")
+(require "symbol.zuo")
+(require "hash.zuo")
+(require "procedure.zuo")
+(require "path.zuo")
 
 (alert "... tests passed!")

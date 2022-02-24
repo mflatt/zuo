@@ -43,5 +43,5 @@
     (lambda (ht k)
       (let ([v (hash-ref ht k not-there)])
         (if (eq? v not-there)
-            (error "ref: key not present" k)
+            (error "ref: key is not present" k)
             v)))))

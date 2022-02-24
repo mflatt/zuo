@@ -1,0 +1,41 @@
+#lang zuo
+
+(require "harness.zuo")
+
+(alert "procedures")
+
+(check (procedure? procedure?))
+(check (procedure? (lambda (x) x)))
+(check (procedure? (lambda args args)))
+(check (procedure? apply))
+(check (procedure? call/cc))
+(check (procedure? (call/cc (lambda (k) k))))
+(check (not (procedure? 1)))
+
+(check (apply + '()) 0)
+(check (apply + '(1)) 1)
+(check (apply + '(1 2)) 3)
+(check (apply + '(1 2 3 4)) 10)
+(check (apply apply (list + '(1 2))) 3)
+(check-fail (apply +) "wrong argument count")
+(check-fail (apply '(+ 1 2)) "wrong argument count")
+(check-fail (apply apply (cons + '(1 2))) "wrong argument count")
+
+(check (procedure-arity-mask cons) 4)
+(check (procedure-arity-mask apply) 4)
+(check (procedure-arity-mask call/cc) 2)
+(check (procedure-arity-mask +) -1)
+(check (procedure-arity-mask -) -2)
+(check (procedure-arity-mask process) -2)
+(check (procedure-arity-mask (lambda (x y z . q) q)) -8)
+(check-fail (procedure-arity-mask 0) "not a procedure")
+
+(check (call/cc (lambda (k) (+ 1 (k 'ok)))) 'ok)
+(check (let ([f (call/cc (lambda (k) k))])
+         (if (procedure? f)
+             (f 10)
+             f))
+       10)
+
+
+
