@@ -128,7 +128,7 @@
     kernel-eval
 
     runtime-env
-    dump-heap-and-exit))
+    dump-image-and-exit))
 
 (intro-define-fake)
 

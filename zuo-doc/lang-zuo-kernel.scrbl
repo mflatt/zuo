@@ -91,6 +91,6 @@ in @racketmodname[zuo/kernel] (and the values originate there):
 
   read-from-string-all ~v ~a ~s alert error 
 
-  kernel-env kernel-eval module->hash dump-heap-and-exit
+  kernel-env kernel-eval module->hash dump-image-and-exit
 
 ]

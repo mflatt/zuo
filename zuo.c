@@ -2723,7 +2723,7 @@ static zuo_t *zuo_get_envvars()
     while (e[i]) {
       start = i;
       while (e[i]) { i++; }
-      p = zuo_from_wide_no_free(e + start);
+      p = zuo_from_wide(e + start);
       for (j = 0; p[j] && p[j] != '='; j++) {
       }
       p[j] = 0;
@@ -2772,8 +2772,8 @@ static void *zuo_envvars_block(const char *who, zuo_t *envvars)
 
   for (l = ennvars; l != z.o_null; l = _zuo_cdr(l)) {
     zuo_t *a = _zuo_car(l);
-    name = zuo_to_wide_no_free(who, ZUO_STRING_PTR(_zuo_car(a)));
-    val = zuo_to_wide_no_free(who, ZUO_STRING_PTR(_zuo_cdr(a)));
+    name = zuo_to_wide(who, ZUO_STRING_PTR(_zuo_car(a)));
+    val = zuo_to_wide(who, ZUO_STRING_PTR(_zuo_cdr(a)));
     namelen = wcslen(name);
     vallen = wcslen(val);
     slen = namelen + vallen + 2;
@@ -3623,7 +3623,7 @@ static zuo_t *zuo_rm(zuo_t *file_path) {
   check_path_string(who, file_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(file_path));
+    wchar_t *wp = zuo_to_wide(who, ZUO_STRING_PTR(file_path));
     if (_wunlink(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3643,8 +3643,8 @@ static zuo_t *zuo_mv(zuo_t *from_path, zuo_t *to_path) {
   check_path_string(who, to_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *from_wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(from_path));
-    wchar_t *to_wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(to_path));
+    wchar_t *from_wp = zuo_to_wide(who, ZUO_STRING_PTR(from_path));
+    wchar_t *to_wp = zuo_to_wide(who, ZUO_STRING_PTR(to_path));
     if (wrename(from_wp to_wp) == 0) {
       free(from_wp);
       free(to_wp);
@@ -3664,7 +3664,7 @@ static zuo_t *zuo_mkdir(zuo_t *dir_path) {
   check_path_string(who, dir_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(dir_path));
+    wchar_t *wp = zuo_to_wide(who, ZUO_STRING_PTR(dir_path));
     if (_wmkdir(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3683,7 +3683,7 @@ static zuo_t *zuo_rmdir(zuo_t *dir_path) {
   check_path_string(who, dir_path);
 #ifdef RKTIO_SYSTEM_WINDOWS
   {
-    wchar_t *wp = zuo_to_wide_no_free(who, ZUO_STRING_PTR(dir_path));
+    wchar_t *wp = zuo_to_wide(who, ZUO_STRING_PTR(dir_path));
     if (_wrmdir(wp) == 0) {
       free(wp);
       return z.o_void;
@@ -3909,7 +3909,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   zuo_t *command = _zuo_car(command_and_args);
   zuo_t *args = _zuo_cdr(command_and_args);
   zuo_t *options = z.o_empty_hash, *opt;
-  zuo_t *l, *p_handle, *result;
+  zuo_t *dir, *l, *p_handle, *result;
   int redirect_in, redirect_out, redirect_err;
   zuo_raw_handle_t pid, in, in_r, out, out_w, err, err_w;
   int argc = 1, i, ok;
@@ -3978,6 +3978,10 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
   }
 
+  dir = zuo_consume_option(&options, "dir");
+  if (dir != z.o_undefined)
+    check_path_string(who, dir);
+
   opt = zuo_consume_option(&options, "env");
   if (opt != z.o_undefined) {
     zuo_t *l;
@@ -4010,12 +4014,17 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   /*              Windows                 */
   /*--------------------------------------*/
   {
-    wchar_t *command_w = zuo_to_wide_no_free(who, argv[0]), *cmline_w;
+    zuo_t *command = argv[0];
+    wchar_t *command_w, *cmline_w;
     char *cmdline;
     int len = 9;
     STARTUPINFOW startup;
     PROCESS_INFORMATION info;
     DWORD cr_flag;
+
+    if ((dir != z.o_undefined) && !zuo_path_is_absolute(command))
+      command = zuo_build_path(dir, command);
+    command_w = zuo_to_wide(who, ZUO_STRING_PTR(command));
     
     for (i = 0; i < argc; i++) {
       char *s = argv[i];
@@ -4036,6 +4045,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     cmdline[len-1] = 0;
 
     cmdline_w = zuo_to_wide(who, cmdline);
+    free(cmdline);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(*startup);
@@ -4046,15 +4056,20 @@ zuo_t *zuo_process(zuo_t *command_and_args)
 
     cr_flag = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
 
-    // wd_w = zuo_to_wide(wd);
+    if (dir != z.o_undefined)
+      wd_w = zuo_to_wide(who, ZUO_STRING_PTR(dir));
+    else
+      wd_w = NULL;
     
     ok = CreateProcessW(command_w, cmdline_w, 
                         NULL, NULL, 1 /*inherit*/,
-                        cr_flag, env, NULL,
+                        cr_flag, env, wd_w,
                         &startup, &info);
 
     free(command_w);
     free(cmdline_w);
+    if (wd_w != NULL)
+      free(wd_w);
   }
 #else
   /*--------------------------------------*/
@@ -4069,6 +4084,8 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       ok = 1;
     } else if (pid == 0) {
       /* This is the new child process */
+      char *msg;
+
       if (in_r != 0) {
         dup2(in_r, 0);
         if (redirect_in)
@@ -4085,16 +4102,18 @@ zuo_t *zuo_process(zuo_t *command_and_args)
           close(err);
       }
 
-      if (env == NULL)
-        execv(argv[0], argv);
-      else
-        execve(argv[0], argv, env);
-
-      {
-        char *msg = "exec failed";
-        int r = write(2, msg, strlen(msg));
-        if (r != 0) abort();
-      }
+      if ((dir == z.o_undefined)
+          || (chdir(ZUO_STRING_PTR(dir)) == 0)) {
+        if (env == NULL)
+          execv(argv[0], argv);
+        else
+          execve(argv[0], argv, env);
+        msg = "exec failed";
+      } else
+        msg = "chdir failed";
+        
+      if (write(2, msg, strlen(msg)) != 0)
+        abort();
 
       _exit(1);
     } else {

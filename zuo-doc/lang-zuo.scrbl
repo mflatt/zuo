@@ -710,6 +710,15 @@ keys are as follows, and supplying an unrecognized key in
 
 @itemlist[
 
+@item{@racket['dir] mapped to a path string: the working directory of
+      the new porcess; if @racket[executable] is a relative path, it
+      is relative to this directory}
+
+@item{@racket['env] mapped to a list of pairs of strings: environment
+      variables for the new process, where the @racket[car] or each
+      pair is an environment variable name and the @racket[cdr] is its
+      value}
+
 @item{@racket['stdin] mapped to @racket['pipe]: creates a new output
       stream connected to the new process's standard input; the result
       hash table contains @racket['stdin] mapped to the new stream handle}
@@ -732,11 +741,6 @@ keys are as follows, and supplying an unrecognized key in
 
 @item{@racket['stderr] mapped to an output stream: supplies (a copy
       of) the output stream as the new process's standard error}
-
-@item{@racket['env] mapped to a list of pairs of strings: environment
-      variables for the new process, where the @racket[car] or each
-      pair is an environment variable name and the @racket[cdr] is its
-      value}
 
 ]}
 
