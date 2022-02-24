@@ -17,6 +17,7 @@
 # include <sys/wait.h>
 # include <sys/stat.h>
 # include <time.h>
+# include <dirent.h>
 #endif
 
 #if 0
@@ -1464,11 +1465,22 @@ static void zuo_fail(const char *str) {
   exit(1);
 }
 
-static void zuo_fail1w(const char *who, const char *str, zuo_t *obj) {
+static void zuo_show_err1w(const char *who, const char *str, zuo_t *obj) {
   if (who != NULL)
     fprintf(stderr, "%s: ", who);
   fprintf(stderr, "%s: ", str);
   zuo_fprint(stderr, obj);
+}
+
+static void zuo_fail1w(const char *who, const char *str, zuo_t *obj) {
+  zuo_show_err1w(who, str, obj);
+  zuo_fail("");
+}
+
+static void zuo_fail1w_errno(const char *who, const char *str, zuo_t *obj) {
+  const char *msg = strerror(errno);
+  zuo_show_err1w(who, str, obj);
+  fprintf(stderr, " (%s)", msg);
   zuo_fail("");
 }
 
@@ -3464,6 +3476,165 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   return result;
 }
 
+static zuo_t *zuo_rm(zuo_t *file_path) {
+  const char *who = "rm";
+  check_path_string(who, file_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  {
+    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(file_path));
+    if (_wunlink(wp) == 0) {
+      free(wp);
+      return z.o_void;
+    }
+  }
+#else
+  if (unlink(ZUO_STRING_PTR(file_path)) == 0)
+    return z.o_void;
+#endif
+  zuo_fail1w_errno(who, "failed", file_path);
+  return z.o_undefined;
+}
+
+static zuo_t *zuo_mv(zuo_t *from_path, zuo_t *to_path) {
+  const char *who = "mv";
+  check_path_string(who, from_path);
+  check_path_string(who, to_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  {
+    wchar_t *from_wp = zuo_to_wide_no_free(ZUO_STRING_PTR(from_path));
+    wchar_t *to_wp = zuo_to_wide_no_free(ZUO_STRING_PTR(to_path));
+    if (wrename(from_wp to_wp) == 0) {
+      free(from_wp);
+      free(to_wp);
+      return z.o_void;
+    }
+  }
+#else
+  if (rename(ZUO_STRING_PTR(from_path), ZUO_STRING_PTR(to_path)) == 0)
+    return z.o_void;
+#endif
+  zuo_fail1w_errno(who, "failed", zuo_cons(from_path, zuo_cons(to_path, z.o_null)));
+  return z.o_undefined;
+}
+
+static zuo_t *zuo_mkdir(zuo_t *dir_path) {
+  const char *who = "mkdir";
+  check_path_string(who, dir_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  {
+    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(dir_path));
+    if (_wmkdir(wp) == 0) {
+      free(wp);
+      return z.o_void;
+    }
+  }
+#else
+  if (mkdir(ZUO_STRING_PTR(dir_path), 0777) == 0)
+    return z.o_void;
+#endif
+  zuo_fail1w_errno(who, "failed", dir_path);
+  return z.o_undefined;
+}
+
+static zuo_t *zuo_rmdir(zuo_t *dir_path) {
+  const char *who = "rmdir";
+  check_path_string(who, dir_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  {
+    wchar_t *wp = zuo_to_wide_no_free(ZUO_STRING_PTR(dir_path));
+    if (_wrmdir(wp) == 0) {
+      free(wp);
+      return z.o_void;
+    }
+  }
+#else
+  if (rmdir(ZUO_STRING_PTR(dir_path)) == 0)
+    return z.o_void;
+#endif
+  zuo_fail1w_errno(who, "failed", dir_path);
+  return z.o_undefined;
+}
+
+static zuo_t *zuo_ls(zuo_t *dir_path) {
+  const char *who = "ls";
+  check_path_string(who, dir_path);
+#ifdef ZUO_WINDOWS
+#else
+  DIR *dir;
+  struct dirent *e;
+  zuo_t *first = z.o_null, *last = NULL, *pr;
+  
+  dir = opendir(ZUO_STRING_PTR(dir_path));
+  if (!dir)
+    zuo_fail1w_errno(who, "failed", dir_path);
+  
+  while ((e = readdir(dir))) {
+    if ((e->d_name[0] == '.')
+        && ((e->d_name[1] == 0)
+            || ((e->d_name[1] == '.')
+                && (e->d_name[2] == 0)))) {
+      /* skip */
+    } else {
+      pr = zuo_cons(zuo_string(e->d_name), z.o_null);
+      if (last == NULL)
+        first = pr;
+      else
+        ZUO_CDR(last) = pr;
+      last = pr;
+    }
+  }
+
+  closedir(dir);
+
+  return first;
+#endif
+}
+
+static zuo_t *zuo_readlink(zuo_t *link_path) {
+  const char *who = "readlink";
+  check_path_string(who, link_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  zuo_fail("readlink: not supported on Windows");  
+#else
+  {
+    int len, buf_len = 256;
+    char *buffer = malloc(buf_len);
+    zuo_t *str;
+    
+    while (1) {
+      len = readlink(ZUO_STRING_PTR(link_path), buffer, buf_len);
+      if (len == -1) {
+        zuo_fail1w_errno(who, "failed", link_path);
+      } else if (len == buf_len) {
+        /* maybe too small */
+        free(buffer);
+        buf_len *= 2;
+        buffer = malloc(buf_len);
+      } else
+        break;
+    }
+    str = zuo_sized_string(buffer, len);
+    free(buffer);
+    return str;
+  }
+#endif
+  return z.o_undefined;
+}
+
+static zuo_t *zuo_ln(zuo_t *target_path, zuo_t *link_path) {
+  const char *who = "ln";
+  check_path_string(who, target_path);
+  check_path_string(who, link_path);
+#ifdef RKTIO_SYSTEM_WINDOWS
+  zuo_fail("ln: not supported on Windows");
+#else
+  if (symlink(ZUO_STRING_PTR(target_path), ZUO_STRING_PTR(link_path)) == 0)
+    return z.o_void;
+#endif
+  zuo_fail1w_errno(who, "failed", zuo_cons(target_path, zuo_cons(link_path, z.o_null)));
+  return z.o_undefined;
+}
+
 zuo_t *zuo_current_time() {
 #ifdef ZUO_WINDOWS
   FILETIME ft;
@@ -4261,6 +4432,13 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("rm", zuo_rm);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("mv", zuo_mv);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("mkdir", zuo_mkdir);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("rmdir", zuo_rmdir);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("ls", zuo_ls);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("ln", zuo_ln);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("readlink", zuo_readlink);
   ZUO_TOP_ENV_SET_PRIMITIVE0("current-time", zuo_current_time);
   
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, 1);

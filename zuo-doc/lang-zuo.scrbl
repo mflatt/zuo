@@ -10,9 +10,11 @@
 The @racketmodname[zuo] language is Zuo's default language. It's meant
 to be familiar to Racket programmers, and the description here leans
 heavily on comparisons and the Racket documentation, for now. Zuo
-forms and functions use traditional Racket names, even when a
+forms and functions tend use traditional Racket names, even when a
 different choice might be made in a fresh design, and even when the
-Zuo construct is not exactly the same.
+Zuo construct is not exactly the same. Filesystem operations, however,
+tend to use the names of Unix programs, which are much shorter than
+Racket's long names.
 
 @section{Syntax and Evaluation Model}
 
@@ -692,38 +694,6 @@ associated with @racket[handle], erroring for any other kind of
 A constant representing an end-of-file.}
 
 
-@defproc[(stat [name path-string?] [follow-links? any?]) (or/c hash? #f)]{
-
-Returns information about the file, directory, or link referenced by
-@racket[name]. If @racket[follow-links?] is @racket[#f], then when
-@racket[name] refers to a link, information is reported about the
-link; otherwise, information is reported about the target of a link.
-
-If no such file, directory, or link exists, the result is @racket[#f].
-Otherwise, the hash table has the same keys and values as
-@realracket[file-or-directory-stat] from @racketmodname[racket], plus
-one additional key derived from @racket['mode]:
-
-@itemlist[
-
- @item{@racket['type]: @racket['file], @racket['directory], or
-         @racket['link] (only when @racket[follow-links?] is
-         @racket[#f])}
-
-]}
-
-@defproc[(directory-list [dir path-string?]) list?]{
-
-Returns a list of path strings for files in @racket[dir].
-}
-
-
-@defproc[(current-time) pair?]{
-
-Reports the current wall-clock time as a pair: seconds since January
-1, 1970 and additional nanoseconds.}
-
-
 @defproc*[([(process [executable path-string?] [arg string?] ...) hash?]
            [(process [executable path-string?] [arg string?] ... [options hash?]) hash?])]{
 
@@ -779,8 +749,60 @@ exited (@racket[0] normally means succes), erroring for any other kind
 of handle.}
 
 
-@section{Run Time Configuration}
+@section{Filesystem}
 
+@defproc[(stat [name path-string?] [follow-links? any?]) (or/c hash? #f)]{
+
+Returns information about the file, directory, or link referenced by
+@racket[name]. If @racket[follow-links?] is @racket[#f], then when
+@racket[name] refers to a link, information is reported about the
+link; otherwise, information is reported about the target of a link.
+
+If no such file, directory, or link exists, the result is @racket[#f].
+Otherwise, the hash table has the same keys and values as
+@realracket[file-or-directory-stat] from @racketmodname[racket], plus
+one additional key derived from @racket['mode]:
+
+@itemlist[
+
+ @item{@racket['type]: @racket['file], @racket['directory], or
+         @racket['link] (only when @racket[follow-links?] is
+         @racket[#f])}
+
+]}
+
+@defproc[(ls [dir path-string?]) list?]{
+
+Returns a list of path strings for files in @racket[dir].}
+
+@defproc[(rm [name path-string?]) void?]{
+
+Deletes the file or link @racket[name].}
+
+@defproc[(mv [name path-string?] [new-name path-string?]) void?]{
+
+Renames the file, directory, or link @racket[name] to @racket[new-name].}
+
+@defproc[(mkdir [dir path-string?]) void?]{
+
+Creates a directory @racket[dir].}
+
+@defproc[(rmdir [dir path-string?]) void?]{
+
+Deletes a directory @racket[dir].}
+
+@defproc[(ln [target path-string?] [name path-string?]) void?]{
+
+Creates a link @racket[name] with the content @racket[target]. This
+function is not supported on Windows.}
+
+@defproc[(readlink [name path-string?]) void?]{
+
+Gets the content of a link @racket[name]. This function is not
+supported on Windows.}
+
+
+@section{Run Time Configuration}
 
 @defproc[(runtime-env) hash?]{
 
@@ -801,6 +823,11 @@ Zuo process. The hash table includes the following keys:
 @item{@racket['system-type]: @racket['unix] or @racket['windows]}
 
 ]}
+
+@defproc[(current-time) pair?]{
+
+Reports the current wall-clock time as a pair: seconds since January
+1, 1970 and additional nanoseconds.}
 
 @defproc[(dump-heap-and-exit [output handle?]) void?]{
 
