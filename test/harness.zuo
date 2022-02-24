@@ -1,0 +1,57 @@
+#lang zuo
+
+(provide check
+         check-fail
+
+         arity
+         not-integer)
+
+(define (check* e a b)
+  (unless (equal? a b)
+    (error (~a "failed: "
+               (~s e)
+               "\n  result: " (~v a)
+               "\n  result: " (~v b)))))
+
+(define-syntax (check stx)
+  (unless (list? stx) (bad-syntax stx))
+  (list* (quote-syntax check*)
+         (list (quote-syntax quote) stx)
+         (let ([len (length (cdr stx))])
+           (cond
+             [(= 1 len) (cons #t (cdr stx))]
+             [(= 2 len) (cdr stx)]
+             [else (bad-syntax stx)]))))
+
+(define (check-fail* e msg)
+  (define p (process (hash-ref (runtime-env) 'exe #f)
+                     ""
+                     (hash 'stdin 'pipe 'stdout 'pipe 'stderr 'pipe)))
+  (fd-write (ref p 'stdin) (~a "#lang zuo " (~s e)))
+  (fd-close (ref p 'stdin))
+  (define out (fd-read (ref p 'stdout) eof))
+  (define err (fd-read (ref p 'stderr) eof))
+  (fd-close (ref p 'stdout))
+  (fd-close (ref p 'stderr))
+  (process-wait (ref p 'process))
+  (when (= 0 (process-status (ref p 'process)))
+    (error (~a "check-fail: failed to fail: " (~s e)
+               "\n  stdout: " (~s out)
+               "\n  stderr: " (~s err))))
+  (let loop ([i 0])
+    (when (> i (- (string-length err) (string-length msg)))
+      (error (~a "check-fail: didn't find expected message: " (~s e)
+                 "\n  expected: " msg
+                 "\n  stderr: " (~s err))))
+    (unless (string=? (substring err i (+ i (string-length msg))) msg)
+      (loop (+ i 1)))))
+
+(define-syntax (check-fail stx)
+  (unless (and (list? stx) (= 3 (length stx))) (bad-syntax stx))
+  (list (quote-syntax check-fail*)
+        (list (quote-syntax quote) (cadr stx))
+        (cadr (cdr stx))))
+
+;; Some common error messages
+(define arity "wrong argument count")
+(define not-integer "not an integer")

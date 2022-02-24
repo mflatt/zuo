@@ -34,7 +34,7 @@
 (define cdar
   (lambda (v)
     (if (pair? v)
-        (let ([a (cdr v)])
+        (let ([a (car v)])
           (if (pair? a)
               (cdr a)
               (bad 'cdar v)))

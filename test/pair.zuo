@@ -1,0 +1,84 @@
+#lang zuo
+
+(require "harness.zuo")
+
+(alert "pairs")
+
+(check (null? '()))
+(check (null? 10) #f)
+(check (null? '(1)) #f)
+
+(check (pair? '()) #f)
+(check (pair? 10) #f)
+(check (pair? '(1)))
+
+(check (list? '()))
+(check (list? 10) #f)
+(check (list? '(1)))
+(check (list? '(1 2 3 4 5 6 7)))
+(check (list? '(1 . 2)) #f)
+(check (list? '(1 2 3 4 5 6 . 7)) #f)
+
+(check (cons 1 2) '(1 . 2))
+
+(check (car '(1 2)) 1)
+(check (car '(1 . 2)) 1)
+(check-fail (car '()) "not a pair")
+(check-fail (car 'apple) "not a pair")
+
+(check (cdr '(1 . 2)) 2)
+(check (cdr '(1 2)) '(2))
+(check-fail (cdr '()) "not a pair")
+(check-fail (cdr 'apple) "not a pair")
+
+(check (list) '())
+(check (list 1 2 3) '(1 2 3))
+
+(check (list* 1) 1)
+(check (list* 1 2 3) '(1 2 . 3))
+(check-fail (list*) arity)
+
+(check (append) '())
+(check (append 1) 1)
+(check (append '(1 2)) '(1 2))
+(check (append '(1 2) 3) '(1 2 . 3))
+(check (append '(1 2) '(3 4)) '(1 2 3 4))
+(check (append '(1 2) '(3 4) 5) '(1 2 3 4 . 5))
+
+(check (reverse '()) '())
+(check (reverse '(1 2 3)) '(3 2 1))
+(check-fail (reverse 1) "not a list")
+(check-fail (reverse '(1 . 2)) "not a list")
+
+(check (list-ref '(1) 0) 1)
+(check (list-ref '(1 . 2) 0) 1)
+(check (list-ref '(1 2 3 . 4) 2) 3)
+(check-fail (list-ref '(1 . 2) 1) "encountered a non-pair")
+
+(check (list-tail '() 0) '())
+(check (list-tail 1 0) 1)
+(check (list-tail '(1 . 2) 1) 2)
+(check (list-tail '(1 2 3 . 4) 2) '(3 . 4))
+(check-fail (list-tail '(1 . 2) 2) "encountered a non-pair")
+
+(check (caar '((1) (2))) 1)
+(check-fail (caar 1) "not a valid argument")
+(check-fail (caar '(1)) "not a valid argument")
+
+(check (cadr '((1 2) (3 4))) '(3 4))
+(check-fail (cadr 1) "not a valid argument")
+(check-fail (cadr '(1)) "not a valid argument")
+
+(check (cdar '((1 2) (3 4))) '(2))
+(check-fail (cdar 1) "not a valid argument")
+(check-fail (cdar '(1 . 2)) "not a valid argument")
+
+(check (cddr '((1 2) (3 4) (5 6))) '((5 6)))
+(check-fail (cddr 1) "not a valid argument")
+(check-fail (cddr '(1 . 2)) "not a valid argument")
+
+(check '(1 2 3) (map (lambda (x) (+ x 1)) '(0 1 2)))
+(check '(-5 -6 -7) (map (lambda (x y) (+ x y)) '(0 1 2) '(-5 -7 -9)))
+(check '((3 2 1)) (map (lambda (a b c) (list c b a)) '(1) '(2) '(3)))
+(check-fail (map (lambda (a) a) 1) "not a list")
+(check-fail (map (lambda (a b) a) '(1 2) 1) "not a list")
