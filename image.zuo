@@ -1,6 +1,6 @@
 #lang zuo
 
-(define (current-program) "embed-lib.zuo")
+(define (current-program) (hash-ref (runtime-env) 'script "image.zuo"))
 
 (define (need-arg args)
   (when (null? (cdr args))
@@ -27,7 +27,7 @@
                  '(zuo)
                  given-libs))
 
-(define heap
+(define image
   (let ([ht (process (hash-ref (runtime-env) 'exe #f) "" (hash 'stdin 'pipe 'stdout 'pipe))])
     (define p (hash-ref ht 'process #f))
     (define in (hash-ref ht 'stdin #f))
@@ -37,14 +37,14 @@
     (for-each (lambda (lib)
                 (fd-write in (~a "(module->hash '" lib ")\n")))
               libs)
-    (fd-write in "(dump-heap-and-exit (fd-open-output 'stdout)))\n")
+    (fd-write in "(dump-image-and-exit (fd-open-output 'stdout)))\n")
     (fd-close in)
-    (let ([heap (fd-read out eof)])
+    (let ([image (fd-read out eof)])
       (fd-close out)
       (process-wait p)
       (unless (= 0 (process-status p))
-        (error "heap dump failed"))
-      heap)))
+        (error "image dump failed"))
+      image)))
 
 (define out-file (hash-ref cmd 'output #f))
 
@@ -77,18 +77,18 @@
 (for-each
  (lambda (line)
    (cond
-     [(string=? line "#define EMBEDDED_BOOT_HEAP 0")
+     [(string=? line "#define EMBEDDED_IMAGE 0")
       (unless (hash-ref cmd 'keep-collects? #f)
         (fd-write out (~a "#define ZUO_LIB_PATH NULL\n")))
-      (fd-write out (~a "#define EMBEDDED_BOOT_HEAP 1\n"))
-      (fd-write out (~a "static zuo_uint32_t emedded_boot_heap_len = "
-                        (quotient (string-length heap) 4)
+      (fd-write out (~a "#define EMBEDDED_IMAGE 1\n"))
+      (fd-write out (~a "static zuo_uint32_t emedded_boot_image_len = "
+                        (quotient (string-length image) 4)
                         ";\n"))
-      (fd-write out (~a "static zuo_uint32_t emedded_boot_heap[] = {\n"))
+      (fd-write out (~a "static zuo_uint32_t emedded_boot_image[] = {\n"))
       (let ([accum->line (lambda (accum) (apply ~a (reverse (cons "\n" accum))))])
         (let loop ([i 0] [col 0] [accum '()])
           (cond
-            [(= i (string-length heap))
+            [(= i (string-length image))
              (unless (null? accum)
                (fd-write out (accum->line accum)))]
             [(= col 8)
@@ -96,7 +96,7 @@
              (loop i 0 '())]
             [else
              (loop (+ i 4) (+ col 1)
-                   (cons (~a " 0x" (~hex (string-u32-ref heap i)) ",")
+                   (cons (~a " 0x" (~hex (string-u32-ref image i)) ",")
                          accum))])))
       (fd-write out (~a " 0 };\n"))]
      [else

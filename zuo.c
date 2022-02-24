@@ -44,8 +44,8 @@ typedef HANDLE zuo_raw_handle_t;
 typedef int zuo_raw_handle_t;
 #endif
 
-/* the "embed-lib.zuo" script looks for this line: */
-#define EMBEDDED_BOOT_HEAP 0
+/* the "image.zuo" script looks for this line: */
+#define EMBEDDED_IMAGE 0
 
 #ifndef ZUO_LIB_PATH
 # define ZUO_LIB_PATH "lib"
@@ -3368,14 +3368,14 @@ static char *zuo_string_to_c(zuo_t *obj) {
   return s;
 }
 
-static zuo_t *zuo_dump_heap_and_exit(zuo_t *fd_obj) {
+static zuo_t *zuo_dump_image_and_exit(zuo_t *fd_obj) {
   zuo_int_t len;
   char *dump;
   zuo_raw_handle_t fd;
 
   if ((fd_obj->tag != zuo_handle_tag)
       || ((zuo_handle_t *)fd_obj)->u.h.status != zuo_handle_open_fd_out_status)
-    zuo_fail1w("dump-heap-and-exit", "not an open ouput file descriptor", fd_obj);
+    zuo_fail1w("dump-image-and-exit", "not an open ouput file descriptor", fd_obj);
 
   fd = ((zuo_handle_t *)fd_obj)->u.h.handle;
 
@@ -4411,7 +4411,7 @@ static zuo_t *zuo_self_path(char *exec_file) {
 
 #define TRIE_SET_TOP_ENV(name, make_prim)        \
   do {                                           \
-    if (boot_heap == NULL) {                     \
+    if (boot_image == NULL) {                    \
       zuo_t *sym = zuo_symbol(name);             \
       zuo_trie_set(z.o_top_env, sym, make_prim); \
     } else {                                     \
@@ -4434,7 +4434,7 @@ static zuo_t *zuo_self_path(char *exec_file) {
   zuo_trie_set(z.o_top_env, zuo_symbol(name), val)
 
 int main(int argc, char **argv) {
-  char *load_file = NULL, *library_path = NULL, *boot_heap = NULL;
+  char *load_file = NULL, *library_path = NULL, *boot_image = NULL;
   char *argv0 = argv[0];
   zuo_t *exe_path, *load_path;
 
@@ -4475,7 +4475,7 @@ int main(int argc, char **argv) {
       exit(0);
     } else if (!strcmp(argv[0], "-B") || !strcmp(argv[0], "--boot")) {
       if (argc > 1) {
-        boot_heap = argv[1];
+        boot_image = argv[1];
         argc -= 2;
         argv += 2;
       } else {
@@ -4627,16 +4627,16 @@ int main(int argc, char **argv) {
 
   ZUO_TOP_ENV_SET_PRIMITIVE0("runtime-env", zuo_runtime_env);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE1("dump-heap-and-exit", zuo_dump_heap_and_exit);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("dump-image-and-exit", zuo_dump_image_and_exit);
 
-# if EMBEDDED_BOOT_HEAP
-  if (!boot_heap)
-    zuo_fasl_restore((char *)emedded_boot_heap, emedded_boot_heap_len * sizeof(zuo_int32_t));
+# if EMBEDDED_IMAGE
+  if (!boot_image)
+    zuo_fasl_restore((char *)emedded_boot_image, emedded_boot_image_len * sizeof(zuo_int32_t));
   else {
 # endif
 
-    if (boot_heap) {
-      FILE *f = fopen(boot_heap, "r");
+    if (boot_image) {
+      FILE *f = fopen(boot_image, "r");
       zuo_int_t len;
       char *dump = zuo_drain(f, 0, -1, &len);
       fclose(f);
@@ -4663,7 +4663,7 @@ int main(int argc, char **argv) {
       ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
     }
 
-# if EMBEDDED_BOOT_HEAP
+# if EMBEDDED_IMAGE
   }
 # endif
         

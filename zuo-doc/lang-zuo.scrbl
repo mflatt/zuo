@@ -838,7 +838,7 @@ Zuo process. The hash table includes the following keys:
 Reports the current wall-clock time as a pair: seconds since January
 1, 1970 and additional nanoseconds.}
 
-@defproc[(dump-heap-and-exit [output handle?]) void?]{
+@defproc[(dump-image-and-exit [output handle?]) void?]{
 
 Writes an image of the current Zuo process to @racket[output], which
 must be an open output file or stream, and then exits.

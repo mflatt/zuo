@@ -43,7 +43,7 @@ executable as the root of the library-collection tree. You can supply
 an alternate collection path with the @Flag{X} command-line flag.
 
 You can also create an instance of Zuo with a set of libraries
-embedded as a heap image. Embedding a heap image has two advantages:
+embedded as an image. Embedding an image has two advantages:
 
 @itemlist[
 
@@ -55,16 +55,16 @@ embedded as a heap image. Embedding a heap image has two advantages:
 
 ]
 
-The @filepath{embed-heap.zuo} script included with the Zuo sources
+The @filepath{image.zuo} script included with the Zuo sources
 generates a @filepath{.c} file that is a copy of @filepath{zuo.c} plus
 embedded modules. By default, the @racketmodname[zuo] module and its
 dependencies are included, but you can specify others with
 @DPFlag{lib}. In addition, the default collection-root path is
 disabled in the generated copy, unless you supply
-@DFlag{keep-collects} when running @filepath{embed-heap.zo}.
+@DFlag{keep-collects} when running @filepath{image.zo}.
 
-You can use heap images without embedding. The
-@racket[dump-heap-and-exit] Zuo kernel permitive creates a heap image,
+You can use images without embedding. The @racket[dump-image-and-exit]
+Zuo kernel permitive creates an image containing all loaded modules,
 and a @Flag{B} or @DFlag{boot} command-line flag for Zuo uses the
 given boot image on startup.
 
@@ -201,8 +201,8 @@ under no obligation to use any of those.
 A call @racket[(module->hash _M)] primitive checks whether the module
 @racket[_M] is already loaded and returns its hash if so. The
 @racket[zuo/kernel] module is always preloaded, but other modules may
-be preloaded in a heap image that was create by
-@racket[dump-heap-and-exit]. If a module @racket[_M] is not already
+be preloaded in an image that was created by
+@racket[dump-image-and-exit]. If a module @racket[_M] is not already
 loaded, @racket[module->hash] reads the beginning of @racket[_M]'s
 source to parse the @hash-lang[] specification and get the path of the
 language module @racket[_L]; a recursive call @racket[(module->hash
