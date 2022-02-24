@@ -19,11 +19,25 @@
       (syntax-error "duplicate definition" id))
     (let* ([sym (syntax-e id)]
            [def-id (gensym sym)]
-           [var (variable sym)]
-           [new-state (add-binding state id (as-specific (make-defined var)))]
-           ;; construct an expression with the var inlined:
-           [new-s (list variable-set! var (list name-lambda (cadr (cdr s)) id))])
-      (k new-s new-state))))
+           [id+rhs (list id (cadr (cdr s)))]
+           [vars (state-variables state)])
+      (cond
+        [(not vars) ; => at module top
+         ;; generate inlined variable
+         (let* ([var (variable sym)]
+                [state (add-binding state id (as-specific (make-defined var)))]
+                ;; construct an expression with the var inlined:
+                [new-s (cons set-var-tag (cons var id+rhs))])
+           (k new-s state))]
+        [else
+         ;; generate local-variable creation
+         (let* ([state (add-binding state id (make-defined def-id))]
+                [state (state-set-variables state
+                                            (cons (list def-id (list variable (list 'quote sym)))
+                                                  vars))]
+                ;; construct an expression to set the var:
+                [new-s (cons set-var-tag (cons def-id id+rhs))])
+           (k new-s state))]))))
 
 (define (expand-define-syntax s state parse)
   (unless (and (list? s) (= 3 (length s)) (identifier? (cadr s)))
@@ -263,13 +277,18 @@
   ;; a global mutable table like Racket's; that functional accumulator, plus
   ;; the fact that all body positions are just inside a binding, combine to act
   ;; as a kind of "outside edge" scope.
-  (let* ([es+state+provides (expand-sequence es state #f mod-path ctx parse)]
+  (let* ([outside-vars (state-variables state)]
+         [state (state-set-variables state '())] ; inital empty vars for this body
+         [es+state+provides (expand-sequence es state #f mod-path ctx parse)]
          [es (car es+state+provides)]
-         [state (cadr es+state+provides)])
-    (cond
-      [(null? es) (syntax-error "empty body after expansion" orig-s)]
-      [(null? (cdr es)) (parse (car es) state)]
-      [else (cons 'begin (map (lambda (s) (parse s state)) es))])))
+         [state (cadr es+state+provides)]
+         [vars (state-variables state)] ; get var binding clauses for this body
+         [state (state-set-variables state outside-vars)]
+         [body (cond
+                 [(null? es) (syntax-error "empty body after expansion" orig-s)]
+                 [(null? (cdr es)) (parse (car es) state)]
+                 [else (cons 'begin (map (lambda (s) (parse s state)) es))])])
+    (nest-bindings vars body)))
 
 (define (parse-lambda s state mod-path ctx parse)
   (unless (>= (length s) 3) (bad-syntax s))
@@ -418,8 +437,9 @@
                                  (cons 'begin es)))]
                           [else
                            (map (lambda (e) (parse e state)) s)]))]
-                     [(eq? rator name-lambda) ; form created by `define` to propagate name
-                      (name-lambda (parse (cadr s) state) (cadr (cdr s)))]
+                     [(eq? rator set-var-tag) ; form created by `expand-define`
+                      (let ([rhs (parse (cadr (cddr s)) state)])
+                        (list variable-set! (cadr s) (name-lambda rhs (cadr (cdr s)))))]
                      [else (map (lambda (e) (parse e state)) s)]))]
                 [(identifier? s)
                  (let* ([bind (resolve state s #f)])

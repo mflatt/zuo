@@ -53,3 +53,6 @@
                                 (list 'let (list (car new-cls))
                                       (nest-bindings (cdr new-cls)))))])
     (nest-bindings (reverse new-cls))))
+
+;; Use to communicate a `variable-set!` form from `define` to `parse`:
+(define set-var-tag (string->uninterned-symbol "setvar"))

@@ -69,7 +69,7 @@ expander does not impose or automate that binding. See
 
 @; ----------------------------------------
 
-@section{Syntactic Forms}
+@section{Binding and Control Forms}
 
 A @racketmodname[zuo] syntactic form is either a @deftech{definition}
 form or an @deftech{expression forms}. Expressions can appear in
@@ -354,6 +354,11 @@ string=?] from @racketmodname[racket], or more precisely analogous to
 Returns the two's complement interpretation of four bytes in
 @racket[str] starting at index @racket[k] using the host machine's
 endianness.}
+
+@defform[(char str)]{
+
+Expands to @racket[(string-ref str 0)], where @racket[str] must be a
+string of length 1.}
 
 
 @section{Symbols}
@@ -706,6 +711,18 @@ one additional key derived from @racket['mode]:
          @racket[#f])}
 
 ]}
+
+@defproc[(directory-list [dir path-string?]) list?]{
+
+Returns a list of path strings for files in @racket[dir].
+}
+
+
+@defproc[(current-time) pair?]{
+
+Reports the current wall-clock time as a pair: seconds since January
+1, 1970 and additional nanoseconds.}
+
 
 @defproc*[([(process [executable path-string?] [arg string?] ...) hash?]
            [(process [executable path-string?] [arg string?] ... [options hash?]) hash?])]{

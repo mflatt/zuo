@@ -7,6 +7,7 @@
          "let.zuo"
          "define.zuo"
          "quasiquote.zuo"
+         "more-syntax.zuo"
          "../more.zuo")
 
 (provide (all-from-out "and-or.zuo"
@@ -16,4 +17,5 @@
                        "let.zuo"
                        "define.zuo"
                        "quasiquote.zuo"
+                       "more-syntax.zuo"
                        "../more.zuo"))

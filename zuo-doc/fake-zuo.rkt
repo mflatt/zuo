@@ -108,6 +108,7 @@
     eof
 
     stat
+    current-time
 
     process
     process-status

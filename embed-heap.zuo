@@ -51,10 +51,6 @@
 (define zuo.c (fd-read (fd-open-input "zuo.c") eof))
 (define out (fd-open-output (or out-file 'stdout)))
 
-(define-syntax char
-  (lambda (stx)
-    (string-ref (cadr stx) 0)))
-
 (define lines
   (let loop ([start 0] [i 0])
     (cond

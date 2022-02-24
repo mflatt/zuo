@@ -1,5 +1,7 @@
 #lang zuo
 
+(define args (hash-ref (runtime-env) 'arguments '()))
+
 (for-each
  alert
  (append
@@ -8,7 +10,7 @@
         ""
         "This message is from \"zuofile.zuo\"."
         "")
-  (if (null? (hash-ref (runtime-env) 'arguments '()))
+  (if (null? args)
       (list
        "Probably, you're seeing this message because you ran Zuo with no arguments,"
        "in which case \"zuofile.zuo\" in the current directory is loaded by default."
@@ -29,5 +31,5 @@
        "Here are the arguments you provided:"
        (map (lambda (arg)
               (~a "  " (~v arg)))
-            (hash-ref (runtime-env) 'arguments '()))))
+            args)))
   (list "")))

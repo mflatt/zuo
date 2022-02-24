@@ -1,14 +1,18 @@
 #lang zuo/datum
 
-;; The state of expansion is a combinion of bindings and "nominals",
-;; which is information about `require`s that is used to implement
-;; `(provide (all-from-out ....))`
+;; The state of expansion is a combinion of
+;;  * bindings
+;;  * defined variables being lifted, or #f for a module top
+;;  * "nominals", which is information about `require`s that is
+;;    used to implement `(provide (all-from-out ....))`
 
-(define make-state cons)
+(define make-state (lambda (binds nominals) (cons binds (cons #f nominals))))
 (define state-binds car)
-(define state-nominals cdr)
+(define state-variables cadr)
+(define state-nominals cddr)
 (define (state-set-binds state binds) (cons binds (cdr state)))
-(define (state-set-nominals state nominals) (cons (car state) nominals))
+(define (state-set-nominals state nominals) (cons (car state) (cons (cadr state) nominals)))
+(define (state-set-variables state variables) (cons (car state) (cons variables (cddr state))))
 
 ;; helper to lookup or update nominals:
 (define (call-with-nominal state mod-path default-ids k)

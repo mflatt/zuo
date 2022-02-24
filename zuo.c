@@ -16,6 +16,7 @@
 # include <sys/types.h>
 # include <sys/wait.h>
 # include <sys/stat.h>
+# include <time.h>
 #endif
 
 #if 0
@@ -1306,6 +1307,8 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
         p2 = ((zuo_pair_t *)p2)->cdr;
       if (p2 == z.o_null)
         out_string(out, "list ");
+      else if (_zuo_cdr(p)->tag != zuo_pair_tag)
+        out_string(out, "cons ");
       else
         out_string(out, "list* ");
     }
@@ -1758,6 +1761,8 @@ static zuo_t *zuo_read_all_str(const char *s, zuo_int_t len, zuo_int_t start) {
 
   while (1) {
     zuo_t *obj = zuo_in((const unsigned char *)s, &o, 0);
+    if (obj == z.o_eof)
+      break;
     p = zuo_cons(obj, z.o_null);
     if (first == z.o_null)
       first = last = p;
@@ -1765,9 +1770,6 @@ static zuo_t *zuo_read_all_str(const char *s, zuo_int_t len, zuo_int_t start) {
       ((zuo_pair_t *)last)->cdr = p;
       last = p;
     }
-    skip_whitespace((const unsigned char *)s, &o, 0);
-    if (s[o] == 0)
-      break;
   }
   
   return first;
@@ -3384,7 +3386,7 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
 }
 
 /*======================================================================*/
-/* filesystem                                                           */
+/* filesystem and time                                                  */
 /*======================================================================*/
 
 #if defined(__APPLE__) && defined(__MACH__)
@@ -3460,6 +3462,26 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
 #endif
 
   return result;
+}
+
+zuo_t *zuo_current_time() {
+#ifdef ZUO_WINDOWS
+  FILETIME ft;
+  zuo_int_t t;
+
+  GetSystemTimeAsFileTime(&ft);
+  t = (((zuo_int_t)ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+  /* measurement interval is 100 nanoseconds = 1/10 microseconds, and
+     adjust by number of seconds between Windows (1601) and Unix (1970) epochs */
+  return zuo_cons(zuo_integer(total / 10000000 - 11644473600L),
+                  zuo_integer((total % 10000000) * 100);
+#else
+  struct timespec t;
+  if (clock_gettime(CLOCK_REALTIME, &t) != 0)
+    zuo_fail("error gettig time");
+  return zuo_cons(zuo_integer(t.tv_sec),
+                  zuo_integer(t.tv_nsec));
+#endif
 }
 
 /*======================================================================*/
@@ -4239,7 +4261,8 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
-
+  ZUO_TOP_ENV_SET_PRIMITIVE0("current-time", zuo_current_time);
+  
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, 1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
