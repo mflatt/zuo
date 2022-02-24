@@ -2762,6 +2762,7 @@ static zuo_t *zuo_get_envvars()
         last = pr;
       }
       free(p);
+      i++;
     }
 
     FreeEnvironmentStringsW(e);
@@ -2820,7 +2821,7 @@ static void *zuo_envvars_block(const char *who, zuo_t *envvars)
     r_len += namelen;
     r[r_len++] = '=';
     memcpy(r + r_len, val, vallen * sizeof(wchar_t));
-    r_len += vallen + 1;
+    r_len += vallen;
     r[r_len++] = 0;
 
     free(name);
@@ -3274,9 +3275,12 @@ static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
 #ifdef ZUO_WINDOWS
       {
         DWORD dgot;
-        if (!ReadFile(fd, s + offset, amt, &dgot, NULL))
-          got = -1;
-        else
+        if (!ReadFile(fd, s + offset, amt, &dgot, NULL)) {
+	  if (GetLastError() == ERROR_BROKEN_PIPE)
+	    got = 0;
+	  else
+	    got = -1;
+        } else
           got = dgot;
       }
 #else      
@@ -3984,6 +3988,7 @@ static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
 #ifdef ZUO_WINDOWS
   {
     HANDLE rh, wh;
+
     if (!CreatePipe(_r, _w, NULL, 0))
       zuo_fail("pipe creation failed");
   }
@@ -4208,6 +4213,23 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     startup.hStdOutput = out_w;
     startup.hStdError = err_w;
 
+    /* dup handles to make them inheritable */
+    if (!DuplicateHandle(GetCurrentProcess(), startup.hStdInput,
+			 GetCurrentProcess(), &startup.hStdInput,
+			 0, 1 /* inherit */,
+			 DUPLICATE_SAME_ACCESS))
+      zuo_fail1w(who, "input handle dup failed", command);
+    if (!DuplicateHandle(GetCurrentProcess(), startup.hStdOutput,
+			 GetCurrentProcess(), &startup.hStdOutput,
+			 0, 1 /* inherit */,
+			 DUPLICATE_SAME_ACCESS))
+      zuo_fail1w(who, "input handle dup failed", command);
+    if (!DuplicateHandle(GetCurrentProcess(), startup.hStdError,
+			 GetCurrentProcess(), &startup.hStdError,
+			 0, 1 /* inherit */,
+			 DUPLICATE_SAME_ACCESS))
+      zuo_fail1w(who, "input handle dup failed", command);
+
     cr_flag = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
 
     if (dir != z.o_undefined)
@@ -4225,6 +4247,11 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     if (wd_w != NULL)
       free(wd_w);
 
+    /* close inheritable dups */
+    CloseHandle(startup.hStdInput);
+    CloseHandle(startup.hStdOutput);
+    CloseHandle(startup.hStdError);
+    
     pid = info.hProcess;
   }
 #else
@@ -4359,9 +4386,9 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
           ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
           ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)(intptr_t)w;
           return p;
-        } else
-          zuo_fail1w("process-wait", "status query failed", p);
-      }
+	}
+      } else
+	zuo_fail1w("process-wait", "status query failed", p);
       a[i++] = sci;
     }
 
