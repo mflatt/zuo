@@ -1084,7 +1084,7 @@ static zuo_t *zuo_trie_lookup(zuo_t *trie, zuo_t *sym) {
   return trie_lookup(trie, ((zuo_symbol_t *)sym)->id);
 }
 
-/* trie mutation, used only for the symbol table and inital env */
+/* trie mutation, used only for the inital env, pid table, and fd table */
 static void trie_set(zuo_t *trie, zuo_int_t id, zuo_t *key, zuo_t *val) {
   while (id > 0) {
     zuo_t *next = ((zuo_trie_node_t *)trie)->next[id & ZUO_TRIE_BFACTOR_MASK];
@@ -1155,6 +1155,10 @@ static zuo_t *trie_remove(zuo_t *trie, zuo_int_t id, int depth) {
     new_trie = trie_clone(trie);
     ((zuo_trie_node_t *)new_trie)->next[i] = sub_trie;
     new_trie->count -= 1;
+
+    if ((sub_trie != z.o_undefined)
+        || (new_trie->val != z.o_undefined))
+      return (zuo_t *)new_trie;
   } else {
     if (((zuo_trie_node_t *)trie)->val == z.o_undefined)
       return trie;
@@ -1165,9 +1169,7 @@ static zuo_t *trie_remove(zuo_t *trie, zuo_int_t id, int depth) {
     new_trie->val = z.o_undefined;
   }
 
-  if ((depth > 0)
-      && new_trie->key == z.o_undefined
-      && new_trie->val == z.o_undefined) {
+  if (depth > 0) {
     int i;
     for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
       if (new_trie->next[i] != z.o_undefined)
