@@ -818,17 +818,37 @@ Returns information about the file, directory, or link referenced by
 link; otherwise, information is reported about the target of a link.
 
 If no such file, directory, or link exists, the result is @racket[#f].
-Otherwise, the hash table has the same keys and values as
-@realracket[file-or-directory-stat] from @racketmodname[racket], plus
-one additional key derived from @racket['mode]:
+Otherwise, the hash table has similar keys and values as
+@realracket[file-or-directory-stat] from @racketmodname[racket], but
+with only certain keys per platform:
 
 @itemlist[
 
- @item{@racket['type]: @racket['file], @racket['dir], or
-         @racket['link] (only when @racket[follow-links?] is
-         @racket[#f])}
+ @item{Unix: @racket['device-id], @indexed-racket['inode],
+       @racket['mode], @racket['type] (abbreviated),
+       @racket['hardlink-count], @racket['user-id],
+       @racket['group-id], @racket['device-id-for-special-file],
+       @racket['size], @racket['block-size], @racket['block-count],
+       @racket['access-time-seconds], @racket['modify-time-seconds],
+       @racket['change-time-seconds],
+       @racket['access-time-nanoseconds],
+       @racket['modify-time-nanoseconds], and
+       @racket['change-time-nanoseconds]}
+ 
+ @item{Windows: @racket['device-id], @indexed-racket['inode],
+       @racket['mode] (read and write bits only), @racket['type]
+       (abbreviated), @racket['hardlink-count], @racket['size],
+       @racket['access-time-seconds], @racket['modify-time-seconds],
+       @racket['creation-time-seconds],
+       @racket['access-time-nanoseconds],
+       @racket['modify-time-nanoseconds], and
+       @racket['creation-time-nanoseconds]}
+ 
+]
 
-]}
+The abbreviated @racket['type] field contains @racket['file],
+@racket['dir], or @racket['link], with @racket['link] only on Unix and
+only when @racket[follow-links?] is @racket[#f].}
 
 @defproc[(ls [dir path-string?]) list?]{
 
