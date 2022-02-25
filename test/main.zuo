@@ -8,5 +8,12 @@
 (require "hash.zuo")
 (require "procedure.zuo")
 (require "path.zuo")
+(require "opaque.zuo")
+(require "variable.zuo")
+(require "module-path.zuo")
+(require "kernel.zuo")
+(require "read+print.zuo")
+
+(require "cycle.zuo")
 
 (alert "... tests passed!")

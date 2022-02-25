@@ -98,9 +98,9 @@ Zuo's kernel supports the kind kinds of data:
  @item{@deftech{variables}, which are named, set-once, single-valued
        containers;}
 
- @item{opaque objects that pair a key and a value, where the value can
-       be accessed only by supplying the key (which is typically kept
-       private using lexical scope); and}
+ @item{@deftech{opaque objects} that pair a key and a value, where the
+       value can be accessed only by supplying the key (which is
+       typically kept private using lexical scope); and}
 
  @item{@deftech{handles}, which represent system resources like files
        or processes.}

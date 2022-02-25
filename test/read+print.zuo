@@ -1,0 +1,6 @@
+#lang zuo
+
+(require "harness.zuo")
+
+(alert "reading and printing")
+

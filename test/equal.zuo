@@ -43,3 +43,8 @@
 (check-fail (= 'apple 1) not-integer)
 (check-fail (string=? 1 'apple) "not a string")
 (check-fail (string=? 'apple 1) "not a string")
+
+(check (eq? (void) (void)))
+(check (void? (void)))
+(check (not (void? 'void)))
+(check (any? (void)))

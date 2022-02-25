@@ -485,7 +485,7 @@ allowed via @racket[key].}
 @defproc[(opaque-ref [key any?] [v any?] [failure-val any?]) any?]{
 
 Returns the value encapsulated in @racket[v] if its is an opaque
-object access allowed via @racket[key], @racket[failure-val] otherwise.}
+object with access allowed via @racket[key], @racket[failure-val] otherwise.}
 
 
 @section{Variables}
@@ -548,13 +548,13 @@ Secref["module-protocol"]}
 
 @defproc[(kernel-eval [s-exp any?]) any?]{
 
-Evaluates a term as if it appeared in a @racket[zuo/kernel] module
+Evaluates a term as if it appeared in a @racketmodname[zuo/kernel] module
 (but the result does not have to be a @tech{hash table}).}
 
 @defproc[(kernel-env) hash?]{
 
 Returns a @tech{hash table} that maps each primitive and constant name
-available in the body of a @racket[zuo/kernel] module to its value.}
+available in the body of a @racketmodname[zuo/kernel] module to its value.}
 
 
 @section{Miscellaneous}
@@ -592,7 +592,13 @@ S-expressions (in order as they appeared in the string).}
 Like @realracket*[~v ~a ~s], but with no formatting options. These
 three format options corresponds to @realracket[print] style,
 @realracket[display] style, and @realracket[write] style,
-respectively.}
+respectively.
+
+Unlike uninterned symbols in @racketmodname[racket], Zuo uninterned
+symbols format in @realracket[print] and @realracket[write] styles with
+@litchar{#<symbol:}...@litchar{>}. @tech{Opaque objects},
+@tech{handles}, and @tech{variables} print with
+@litchar{#<:}...@litchar{>} notation in all styles.}
 
 
 @defproc[(alert [v any?] ...) void?]{

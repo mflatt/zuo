@@ -107,7 +107,7 @@
                     [req-path (car req-path+filter+check)]
                     [filter (cadr req-path+filter+check)]
                     [check (cadr (cdr req-path+filter+check))]
-                    [in-mod-path (module-path-join req-path mod-path)]
+                    [in-mod-path (module-path-join mod-path req-path)]
                     [mod (module->hash in-mod-path)]
                     [provides (hash-ref mod 'macromod-provides #f)]
                     [m-binds (hash-ref mod merge-bindings-export-key #f)]
@@ -155,7 +155,7 @@
     (bad-syntax s))
   (let* ([include-ctx (car s)]
          [in-mod-path (unwrap-mod-path (cadr s))]
-         [in-mod-path (module-path-join in-mod-path mod-path)]
+         [in-mod-path (module-path-join mod-path in-mod-path)]
          [mod (module->hash in-mod-path)]
          [datums (hash-ref mod 'datums #f)])
     (unless datums (error "not an includable module" in-mod-path))

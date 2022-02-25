@@ -253,7 +253,7 @@
                                   (if (= 2 (length e))
                                       (let* ([name (car (cdr e))]
                                              [mod-path (cdr e+path)]
-                                             [mod-path (module-path-join name mod-path)]
+                                             [mod-path (module-path-join mod-path name)]
                                              [mod (module->hash mod-path)])
                                         (let ([inc-es (hash-ref mod 'datums #f)])
                                           (if inc-es

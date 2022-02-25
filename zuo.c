@@ -2361,7 +2361,7 @@ static zuo_t *zuo_append(zuo_t *objs) {
 }
 
 static zuo_t *zuo_variable_p(zuo_t *var) {
-  return (var->tag != zuo_variable_tag) ? z.o_true : z.o_false;
+  return (var->tag == zuo_variable_tag) ? z.o_true : z.o_false;
 }
 
 static zuo_t *zuo_variable_ref(zuo_t *var) {
@@ -2369,8 +2369,11 @@ static zuo_t *zuo_variable_ref(zuo_t *var) {
   if (var->tag != zuo_variable_tag)
     zuo_fail1w("variable-ref", "not a variable", var);
   val = ((zuo_variable_t *)var)->val;
-  if (val == z.o_undefined)
-    zuo_fail1("undefined", ((zuo_variable_t *)var)->name);
+  if (val == z.o_undefined) {
+    fprintf(stderr, "undefined: ");
+    zuo_fwrite(stderr, ((zuo_variable_t *)var)->name);
+    zuo_fail("");
+  }
   return val;
 }
 
@@ -3166,7 +3169,7 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
   }
 
   if (suffix == 0)
-    zuo_fail1w(who, "relative module library path lacks \".zou\"", rel_mod_path);
+    zuo_fail1w(who, "relative module library path lacks \".zuo\"", rel_mod_path);
 
   *_ups = ups;
 
@@ -3174,7 +3177,7 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
                           len - ups_until - (keep_suffix ? 0 : suffix));
 }
 
-zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
+zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
   const char *who = "module-path-join";
   int saw_slash = 0, ups = 0, keep_suffix;
   zuo_t *rel_str;
@@ -3203,7 +3206,7 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
       zuo_t *l = zuo_split_path(mod_path);
       mod_path = _zuo_car(l);
       if (mod_path == z.o_false)
-        zuo_fail1w(who, "too many \"up\" elements", rel_mod_path);
+        zuo_fail1w(who, "too many up elements", rel_mod_path);
       ups--;
     }
 
@@ -3217,14 +3220,18 @@ zuo_t *zuo_module_path_join(zuo_t *rel_mod_path, zuo_t *base_mod_path) {
   } else {
     zuo_t *mod_path = base_mod_path;
     while (ups > 0) {
-      zuo_t *l = zuo_split_path(mod_path);
-      mod_path = _zuo_car(l);
+      zuo_t *l;
       if (mod_path == z.o_false)
-        zuo_fail1w(who, "too many \"up\" elements", rel_mod_path);
-      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), "."))
+        zuo_fail1w(who, "too many up elements", rel_mod_path);
+      l = zuo_split_path(mod_path);
+      mod_path = _zuo_car(l);
+      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), ".") != 0)
         ups--;
     }
-    return zuo_build_path(mod_path, rel_str);
+    if (mod_path == z.o_false)
+      return rel_str;
+    else
+      return zuo_build_path(mod_path, rel_str);
   }
 }
 

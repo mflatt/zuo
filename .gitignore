@@ -4,6 +4,8 @@
 /zuo.obj
 /zuo.o
 
+/build
+
 compiled/
 
 # common backups, autosaves, lock files, OS meta-files
