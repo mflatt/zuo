@@ -49,6 +49,8 @@
       (syntax-error "duplicate definition" id))
     (let* ([e (parse (cadr (cdr s)) state)]
            [proc (kernel-eval (name-lambda e id))])
+      (unless (and (procedure? proc) (not (= 0 (bitwise-and (procedure-arity-mask proc) 6))))
+        (error "define-syntax: not a procedure of one or two arguments" proc))
       (add-binding state id (as-specific (make-defined-macro proc))))))
 
 (define (expand-require s state mod-path)
@@ -442,7 +444,8 @@
                         (list variable-set! (cadr s) (name-lambda rhs (cadr (cdr s)))))]
                      [(and (eq? bind void) (null? (cdr s))) (void)] ; ad hoc optimization
                      [(and (eq? bind hash) (null? (cdr s))) (hash)] ; ad hoc optimization
-                     [else (map (lambda (e) (parse e state)) s)]))]
+                     [(list? s) (map (lambda (e) (parse e state)) s)]
+                     [else (bad-syntax s)]))]
                 [(identifier? s)
                  (let* ([bind (resolve state s #f)])
                    (cond

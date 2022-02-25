@@ -45,13 +45,15 @@
                   (unless (= (length a) 2)
                     (bad-syntax a))
                   (if (= depth 0)
-                      (list (quote-syntax append) (cadr a) (loop (cdr s) depth))
+                      (if (null? (cdr s))
+                          (cadr a)
+                          (list (quote-syntax append) (cadr a) (loop (cdr s) depth)))
                       (loop-pair cons (quote-syntax cons) a (cdr s) depth))]
                  [(and (identifier? a)
                        (free-id=? (syntax-e a) 'quasiquote))
                   (unless (= (length s) 2)
                     (bad-syntax s))
-                  (loop-pair list (quote-syntax list) a (cadr s) (- depth 1))]
+                  (loop-pair list (quote-syntax list) a (cadr s) (+ depth 1))]
                  [else
                   (loop-pair cons (quote-syntax cons) a (cdr s) depth)]))]
             [else (list quot s)]))))))

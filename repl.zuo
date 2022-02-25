@@ -5,7 +5,7 @@
 
 (alert "REPL for single-line kernel expressions:")
 (define in (fd-open-input 'stdin))
-(define out (fd-open-output 'stdout))
+(define out (fd-open-output 'stdout (hash)))
 (fd-write out "> ")
 (let loop ([pending ""])
   (define line-end (let loop ([i 0])

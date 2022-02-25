@@ -2,6 +2,7 @@
 
 (provide check
          check-fail
+         check-fail*
          check-output
 
          run-zuo*

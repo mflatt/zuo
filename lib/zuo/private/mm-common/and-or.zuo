@@ -13,7 +13,7 @@
   (lambda (stx)
     (if (list? stx)
         (if (null? (cdr stx))
-            #t
+            #f
             (if (null? (cddr stx))
                 (cadr stx)
                 (list (quote-syntax let) (list (list 'tmp (cadr stx)))
@@ -39,7 +39,6 @@
 (define-syntax cond
   (lambda (stx free-id=?)
     (if (and (list? stx)
-             (pair? (cdr stx))
              (letrec ([ok-clauses?
                        (lambda (l)
                          (or (null? l)
@@ -48,17 +47,19 @@
                                     (>= (length cl) 2)
                                     (ok-clauses? (cdr l))))))])
                (ok-clauses? (cdr stx))))
-        (let ([cl1 (cadr stx)]
-              [cls (cddr stx)])
-          (list 'if (if (and (null? cls)
-                             (identifier? (car cl1))
-                             (free-id=? 'else (car cl1)))
-                        #t
-                        (car cl1))
-                (cons (quote-syntax let) (cons '() (cdr cl1)))
-                (if (null? cls)
-                    '(void)
-                    (cons (quote-syntax cond) cls))))
+        (if (null? (cdr stx))
+            (list (quote-syntax void))
+            (let ([cl1 (cadr stx)]
+                  [cls (cddr stx)])
+              (list 'if (if (and (null? cls)
+                                 (identifier? (car cl1))
+                                 (free-id=? 'else (car cl1)))
+                            #t
+                            (car cl1))
+                    (cons (quote-syntax let) (cons '() (cdr cl1)))
+                    (if (null? cls)
+                        '(void)
+                        (cons (quote-syntax cond) cls)))))
         (bad-syntax stx))))
 
 (define-syntax when

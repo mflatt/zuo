@@ -20,5 +20,7 @@
 (require "filesystem.zuo")
 (require "image.zuo")
 (require "cycle.zuo")
+(require "form.zuo")
+(require "form-hygienic.zuo")
 
 (alert "... tests passed!")

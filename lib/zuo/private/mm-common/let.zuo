@@ -25,7 +25,7 @@
                      (unless (and (list? binding)
                                   (= 2 (length binding))
                                   (identifier? (car binding)))
-                       (syntax-error "named let: ill-formed binding" binding)))
+                       (syntax-error "named let: bad syntax at binding" binding)))
                    bindings)
          (let ([args (map car bindings)]
                [inits (map cadr bindings)])
@@ -44,11 +44,12 @@
     (unless (and (list? stx) (>= (length stx) 3))
       (bad-syntax stx))
     (let ([bindings (cadr stx)])
+      (unless (list? bindings) (bad-syntax stx))
       (for-each (lambda (binding)
                   (unless (and (list? binding)
                                (= 2 (length binding))
                                (identifier? (car binding)))
-                    (syntax-error "let*: ill-formed binding" binding)))
+                    (syntax-error "let*: bad syntax at binding" binding)))
                 bindings)
       (letrec ([nest-bindings
                 (lambda (bindings)
