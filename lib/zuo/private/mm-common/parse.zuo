@@ -440,6 +440,8 @@
                      [(eq? rator set-var-tag) ; form created by `expand-define`
                       (let ([rhs (parse (cadr (cddr s)) state)])
                         (list variable-set! (cadr s) (name-lambda rhs (cadr (cdr s)))))]
+                     [(and (eq? bind void) (null? (cdr s))) (void)] ; ad hoc optimization
+                     [(and (eq? bind hash) (null? (cdr s))) (hash)] ; ad hoc optimization
                      [else (map (lambda (e) (parse e state)) s)]))]
                 [(identifier? s)
                  (let* ([bind (resolve state s #f)])

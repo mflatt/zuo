@@ -29,6 +29,9 @@
 (check-fail (build-path "z" 0) "not a path string")
 (check-fail (build-path "z" "/x") "path is not relative")
 
+(check (build-path "x") "x")
+(check (build-path "x" "y" "z") (if unix? "x/y/z" "x\\y\\z"))
+
 (check (split-path "x/y") '("x/" . "y"))
 (check (split-path "x/y/") '("x/" . "y"))
 (check (split-path "x//y/") '("x//" . "y"))

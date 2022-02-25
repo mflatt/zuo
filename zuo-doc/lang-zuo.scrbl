@@ -336,11 +336,13 @@ are more restricted and do not apply @racket[proc] to the last
 argument in tail position.}
 
 @deftogether[(
+@defproc[(member [v any?] [lst list?])
+         (or/c pair? #f)]
 @defproc[(assoc [v any?] [lst list?])
          (or/c pair? #f)]
 )]{
 
-Like @realracket*[assoc] from @racketmodname[racket].}
+Like @realracket*[member assoc] from @racketmodname[racket].}
 
 
 @section{Strings}
@@ -465,10 +467,10 @@ and to contains no nul bytes.
 
 Returns @racket[#t] if @racket[v] is a path string, @racket[#f] otherwise.}
 
-@defproc[(build-path [base path-string?] [rel path-string?]) path-string?]{
+@defproc[(build-path [base path-string?] [rel path-string?] ...) path-string?]{
 
 Combines @racket[base] path (absolute or relative) with the relative
-path @racket[rel], adding a path separator as needed.}
+paths @racket[rel], adding path separators as needed.}
 
 @defproc[(split-path [path path-string?]) pair?]{
 
@@ -878,10 +880,6 @@ supported on Windows.}
 
 Uses @racket[stat] to check for a file, directory, or link,
 respectively.}
-
-@defproc[(touch [name path-string?]) void?]{
-
-Opens @racket[name] for output and closes it without writing.}
 
 
 @section{Run Time Configuration}

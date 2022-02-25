@@ -3080,37 +3080,54 @@ static zuo_t *zuo_current_directory() {
   return obj;
 }
 
-static zuo_t *zuo_build_path(zuo_t *pre, zuo_t *post) {
+static zuo_t *zuo_build_path(zuo_t *paths) {
+  zuo_t *pre, *post;
   zuo_string_t *path;
   zuo_uint_t len;
   int add_sep;
 
+  pre = _zuo_car(paths);
   check_path_string("build-path", pre);
-  check_path_string("build-path", post);
+
+  paths = _zuo_cdr(paths);
+
+  while (1) {
+    if (paths == z.o_null)
+      return pre;
+
+    post = _zuo_car(paths);
+    paths = _zuo_cdr(paths);
   
-  if (zuo_path_is_absolute(ZUO_STRING_PTR(post)))
-    zuo_fail1w("build-path", "second path is not relative", post);
+    check_path_string("build-path", post);
+  
+    if (zuo_path_is_absolute(ZUO_STRING_PTR(post)))
+      zuo_fail1w("build-path", "additional path is not relative", post);
 
-  /* add separator beteween `pre` and `post`? */
-  len = ZUO_STRING_LEN(pre);
-  if (ZUO_IS_PATH_SEP(((zuo_string_t *)pre)->s[len-1]))
-    add_sep = 0;
-  else {
-    len += 1;
-    add_sep = 1;
-  }
-  len += ZUO_STRING_LEN(post);
+    /* add separator beteween `pre` and `post`? */
+    len = ZUO_STRING_LEN(pre);
+    if (ZUO_IS_PATH_SEP(((zuo_string_t *)pre)->s[len-1]))
+      add_sep = 0;
+    else {
+      len += 1;
+      add_sep = 1;
+    }
+    len += ZUO_STRING_LEN(post);
 
-  path = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
-  path->len = len;
-  path->s[len] = 0;
-  len = ZUO_STRING_LEN(pre);
-  memcpy(&path->s, ZUO_STRING_PTR(pre), len);
-  if (add_sep)
-    path->s[len++] = ZUO_PATH_SEP;
-  memcpy(&path->s[len], ZUO_STRING_PTR(post), ZUO_STRING_LEN(post));
+    path = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
+    path->len = len;
+    path->s[len] = 0;
+    len = ZUO_STRING_LEN(pre);
+    memcpy(&path->s, ZUO_STRING_PTR(pre), len);
+    if (add_sep)
+      path->s[len++] = ZUO_PATH_SEP;
+    memcpy(&path->s[len], ZUO_STRING_PTR(post), ZUO_STRING_LEN(post));
 
-  return (zuo_t *)path;
+    pre = (zuo_t *)path;
+  }  
+}
+
+static zuo_t *zuo_build_path2(zuo_t *pre, zuo_t *post) {
+  return zuo_build_path(zuo_cons(pre, zuo_cons(post, z.o_null)));
 }
 
 static zuo_t *zuo_split_path(zuo_t *p) {
@@ -3146,7 +3163,7 @@ static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
   if (zuo_path_is_absolute(ZUO_STRING_PTR(path)))
     return path;
   else
-    return zuo_build_path(Z.o_current_directory, path);
+    return zuo_build_path2(Z.o_current_directory, path);
 }
 
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
@@ -3165,7 +3182,7 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
                                          zuo_cons(zuo_string(".zuo"),
                                                   z.o_null))));
 
-  return zuo_build_path(Z.o_library_path, strobj);
+  return zuo_build_path2(Z.o_library_path, strobj);
 }
 
 zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int *_ups, int keep_suffix) {
@@ -3270,7 +3287,7 @@ zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
     if (mod_path == z.o_false)
       return rel_str;
     else
-      return zuo_build_path(mod_path, rel_str);
+      return zuo_build_path2(mod_path, rel_str);
   }
 }
 
@@ -3909,7 +3926,7 @@ static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   else
     result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("file"));
   result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
-  result = zuo_hash_set(result, zuo_symbol("device"), zuo_integer(stat_buf.st_dev));
+  result = zuo_hash_set(result, zuo_symbol("device-id"), zuo_integer(stat_buf.st_dev));
   result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(stat_buf.st_ino));
   result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(stat_buf.st_nlink));
   result = zuo_hash_set(result, zuo_symbol("user-id"), zuo_integer(stat_buf.st_uid));
@@ -4059,7 +4076,7 @@ static zuo_t *zuo_ls(zuo_t *dir_path) {
   char *s;
   zuo_t *first = z.o_null, *last = NULL, *pr;
 
-  wwildpath = zuo_to_wide(ZUO_STRING_PTR(zuo_build_path(dir_path, zuo_string("*"))));
+  wwildpath = zuo_to_wide(ZUO_STRING_PTR(zuo_build_path2(dir_path, zuo_string("*"))));
 
   if ((handle = _wfindfirst(wwildpath, &fileinfo)) == (intptr_t)-1)
     zuo_fail1w_errno(who, "failed", dir_path);
@@ -4400,7 +4417,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     DWORD cr_flag;
 
     if ((dir != z.o_undefined) && !zuo_path_is_absolute(ZUO_STRING_PTR(command)))
-      command = zuo_build_path(dir, command);
+      command = zuo_build_path2(dir, command);
     command_w = zuo_to_wide(ZUO_STRING_PTR(command));
     
     for (i = 0; i < argc; i++) {
@@ -4750,7 +4767,7 @@ static char *zuo_self_path_c(char *exec_file)
       if (!*path)
 	break;
 
-      m = zuo_build_path(zuo_string(path), zuo_string(exec_file));
+      m = zuo_build_path2(zuo_string(path), zuo_string(exec_file));
 
       if (access(ZUO_STRING_PTR(m), X_OK) == 0)
         return zuo_string_to_c(zuo_path_to_complete_path(m));
@@ -4954,7 +4971,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("opaque", zuo_opaque);
   ZUO_TOP_ENV_SET_PRIMITIVE3("opaque-ref", zuo_opaque_ref);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE2("build-path", zuo_build_path);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("build-path", zuo_build_path, 1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
   ZUO_TOP_ENV_SET_PRIMITIVE1("relative-path?", zuo_relative_path_p);
   ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
@@ -5056,8 +5073,8 @@ int main(int argc, char **argv) {
   } else if (zuo_lib_path != NULL) {
     Z.o_library_path = zuo_string(zuo_lib_path);
     if (zuo_relative_path_p(Z.o_library_path) == z.o_true)
-      Z.o_library_path = zuo_build_path(_zuo_car(zuo_split_path(exe_path)),
-                                        Z.o_library_path);
+      Z.o_library_path = zuo_build_path2(_zuo_car(zuo_split_path(exe_path)),
+                                         Z.o_library_path);
   } else
     Z.o_library_path = z.o_false;
 
@@ -5074,7 +5091,7 @@ int main(int argc, char **argv) {
     st = zuo_stat(load_path, z.o_true);
     if ((st != z.o_false)
         && (zuo_hash_ref(st, zuo_symbol("type"), z.o_false) == zuo_symbol("dir")))
-      load_path = zuo_build_path(load_path, zuo_string("main.zuo"));
+      load_path = zuo_build_path2(load_path, zuo_string("main.zuo"));
   } else
     load_path = zuo_path_to_complete_path(zuo_string("stdin"));
 

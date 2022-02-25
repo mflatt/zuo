@@ -10,6 +10,7 @@
 
          equal?
          assoc
+         member
 
          ref
 
@@ -19,7 +20,6 @@
          
          mkdir*
          rm*
-         touch
 
          :error :truncate :must-truncate :append :update :can-update)
 
@@ -50,7 +50,6 @@
                                 (hash-keys a)))]
         [else #f])))
 
-
 (define (assoc k lst)
   (unless (list? lst) (error "assoc: not a list" lst))
   (letrec ([assoc (lambda (lst)
@@ -64,7 +63,18 @@
                              a
                              (assoc (cdr lst))))]))])
     (assoc lst)))
-                           
+
+(define (member k lst)
+  (unless (list? lst) (error "member: not a list" lst))
+  (letrec ([member (lambda (lst)
+                     (cond
+                       [(null? lst) #f]
+                       [else
+                        (if (equal? k (car lst))
+                            lst
+                            (member (cdr lst)))]))])
+    (member lst)))
+
 (define ref
   (let ([not-there (string->uninterned-symbol "no")])
     (lambda (ht k)
@@ -109,10 +119,6 @@
                    (rm* (build-path p e)))
                  (ls p))
        (rmdir p)])))
-
-(define (touch p)
-  (unless (path-string? p) (error "touch: not a path string" p))
-  (fd-close (fd-open-output p (hash 'exists 'can-update))))
 
 (define :error (hash 'exists 'error))
 (define :truncate (hash 'exists 'truncate))
