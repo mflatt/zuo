@@ -18,7 +18,7 @@
 (require "file-handle.zuo")
 (require "process.zuo")
 (require "filesystem.zuo")
-
+(require "image.zuo")
 (require "cycle.zuo")
 
 (alert "... tests passed!")

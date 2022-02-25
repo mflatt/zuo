@@ -4,6 +4,7 @@
          check-fail
          check-output
 
+         run-zuo*
          run-zuo
          contains?
          
@@ -31,11 +32,12 @@
              [(= 2 len) (cdr stx)]
              [else (bad-syntax stx)]))))
 
-(define (run-zuo e k)
-  (define p (process (hash-ref (runtime-env) 'exe #f)
-                     ""
-                     (hash 'stdin 'pipe 'stdout 'pipe 'stderr 'pipe)))
-  (fd-write (ref p 'stdin) (~a "#lang " language-name " " (~s e)))
+(define (run-zuo* args input k)
+  (define p (apply process
+                   (cons (hash-ref (runtime-env) 'exe #f)
+                         (append args
+                                 (list (hash 'stdin 'pipe 'stdout 'pipe 'stderr 'pipe))))))
+  (fd-write (ref p 'stdin) input)
   (fd-close (ref p 'stdin))
   (define out (fd-read (ref p 'stdout) eof))
   (define err (fd-read (ref p 'stderr) eof))
@@ -43,6 +45,9 @@
   (fd-close (ref p 'stderr))
   (process-wait (ref p 'process))
   (k (process-status (ref p 'process)) out err))
+
+(define (run-zuo e k)
+  (run-zuo* '("") (~a "#lang " language-name " " (~s e)) k))
 
 (define (contains? err msg)
   (let loop ([i 0])
