@@ -22,5 +22,7 @@
 (require "cycle.zuo")
 (require "form.zuo")
 (require "form-hygienic.zuo")
+(require "macro.zuo")
+(require "macro-hygienic.zuo")
 
 (alert "... tests passed!")
