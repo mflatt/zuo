@@ -291,6 +291,9 @@ static struct {
     zuo_t *o_interp_k;
     zuo_t *o_interp_in_proc; /* used for a stack trace on error */
 
+    /* for cycle detection */
+    zuo_t *o_pending_modules;
+
 #ifdef ZUO_UNIX
     /* process status table and fd table */
     zuo_t *o_pid_table;
@@ -3620,17 +3623,6 @@ static zuo_t *zuo_dump_image_and_exit(zuo_t *fd_obj) {
     Z.o_interp_k = z.o_done_k; /* in case of a failure that might try to show a stack trace */
   }
 
-  /* forget about any modules that are being loaded but not yet done: */
-  {
-    zuo_t *l, *new_l = z.o_null, *pr;
-    for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
-      pr = _zuo_car(l);
-      if (_zuo_cdr(pr)->tag == zuo_trie_node_tag)
-        new_l = zuo_cons(pr, new_l);
-    }
-    z.o_modules = new_l;
-  }
-
   dump = zuo_fasl_dump(&len);
   zuo_fill(dump, len, NULL, fd);
 
@@ -3647,11 +3639,22 @@ static zuo_t *zuo_handle_p(zuo_t *var) {
 
 static zuo_t *zuo_module_to_hash(zuo_t *module_path);
 
+static int zuo_module_path_equal(zuo_t *a, zuo_t *b) {
+  if (a->tag == zuo_symbol_tag)
+    return (a == b);
+  else if (b->tag == zuo_symbol_tag)
+    return 0;
+  else
+    return zuo_string_eql(a, b) == z.o_true;
+}
+
 static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, zuo_int_t input_len) {
   char *input = input_to_read_and_free;
   char *lang;
   zuo_int_t post;
   zuo_t *v;
+
+  Z.o_pending_modules = zuo_cons(module_path, Z.o_pending_modules);
 
   lang = zuo_read_language(input, &post);
   Z.o_stash = zuo_cons(module_path, Z.o_stash);
@@ -3686,11 +3689,16 @@ static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, 
   if (v->tag != zuo_trie_node_tag)
     zuo_fail1("module did not produce a hash table", module_path);
 
+  z.o_modules = zuo_cons(zuo_cons(module_path, v), z.o_modules);
+
+  ASSERT(zuo_module_path_equal(module_path, _zuo_car(Z.o_pending_modules)));
+  Z.o_pending_modules = _zuo_cdr(Z.o_pending_modules);
+
   return v;
 }
 
 static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
-  zuo_t *file_path, *l, *pr, *mod;
+  zuo_t *file_path, *l, *mod;
 
   check_module_path("module->hash", module_path);
 
@@ -3698,29 +3706,19 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
     module_path = zuo_path_to_complete_path(module_path);
 
   /* check for already-loaded module */
-  pr = z.o_undefined;
   for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
-    pr = _zuo_car(l);
-    if (module_path->tag == zuo_symbol_tag) {
-      if (_zuo_car(pr) == module_path)
-        break;
-    } else if (_zuo_car(pr)->tag == zuo_string_tag) {
-      if (zuo_string_eql(_zuo_car(pr), module_path) == z.o_true)
-        break;
-    }
+    zuo_t *a = _zuo_car(l);
+    if (zuo_module_path_equal(module_path, _zuo_car(a)))
+      return _zuo_cdr(a);
   }
 
-  if (l != z.o_null) {
-    mod = _zuo_cdr(pr);
-    if (mod->tag != zuo_trie_node_tag)
+  /* check for cycles module */
+  for (l = Z.o_pending_modules; l != z.o_null; l = _zuo_cdr(l)) {
+    if (zuo_module_path_equal(module_path, _zuo_car(l)))
       zuo_fail1("cycle in module loading", module_path);
-    return mod;
   }
 
   /* not already loaded */
-
-  pr = zuo_cons(module_path, z.o_undefined);
-  z.o_modules = zuo_cons(pr, z.o_modules);
 
   if (module_path->tag == zuo_symbol_tag)
     file_path = zuo_library_path_to_file_path(module_path);
@@ -3749,14 +3747,7 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
     input = zuo_drain(in, 0, -1, &in_len);
     fclose(in);
 
-    Z.o_stash = zuo_cons(pr, Z.o_stash);
-      
     mod = zuo_eval_module(module_path, input, in_len);
-
-    pr = _zuo_car(Z.o_stash);
-    Z.o_stash = _zuo_cdr(Z.o_stash);
-
-    _zuo_cdr(pr) = mod;
   }
 
   if (zuo_logging) {
@@ -4996,6 +4987,7 @@ int main(int argc, char **argv) {
         
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
+  Z.o_pending_modules = z.o_null;
   Z.o_stash = z.o_false;
 
 #ifdef ZUO_UNIX
