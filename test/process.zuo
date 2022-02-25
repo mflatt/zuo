@@ -11,10 +11,10 @@
 (let ()
   (define echo-to-file.zuo (build-path tmp-dir "echo-to-file.zuo"))
   
-  (let ([out (fd-open-output echo-to-file.zuo)])
+  (let ([out (fd-open-output echo-to-file.zuo :truncate)])
     (fd-write out (~a "#lang zuo\n"
                       (~s '(let* ([args (ref (runtime-env) 'args)]
-                                  [out (fd-open-output (car args))])
+                                  [out (fd-open-output (car args) :truncate)])
                              (fd-write out (cadr args))))))
     (fd-close out))
   
@@ -61,7 +61,7 @@
 (let ()
   (define runtime-to-file
     (~a "#lang zuo\n"
-        (~s `(let* ([out (fd-open-output ,answer.txt)])
+        (~s `(let* ([out (fd-open-output ,answer.txt :truncate)])
                (fd-write out (~s (cons
                                   (ref (runtime-env) 'dir)
                                   (ref (runtime-env) 'env))))))))

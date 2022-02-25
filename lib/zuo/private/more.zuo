@@ -17,7 +17,12 @@
          directory-exists?
          link-exists?
          
-         mkdir*)
+         mkdir*
+         rm*
+         touch
+
+         :error :truncate :must-truncate :append :update :can-update)
+
 
 ;; mainly for contracts in the docs:
 (define (any? v) #t)
@@ -63,25 +68,55 @@
 (define ref
   (let ([not-there (string->uninterned-symbol "no")])
     (lambda (ht k)
+      (unless (hash? ht) (error "ref: not a hash table" ht))
       (let ([v (hash-ref ht k not-there)])
         (if (eq? v not-there)
             (error "ref: key is not present" k)
             v)))))
 
 (define (file-exists? p)
+  (unless (path-string? p) (error "file-exists?: not a path string" p))
   (let ([s (stat p #t)])
     (and s (eq? (ref s 'type) 'file))))
 
 (define (directory-exists? p)
+  (unless (path-string? p) (error "directory-exists?: not a path string" p))
   (let ([s (stat p #t)])
     (and s (eq? (ref s 'type) 'dir))))
 
 (define (link-exists? p)
+  (unless (path-string? p) (error "link-exists?: not a path string" p))
   (let ([s (stat p #f)])
     (and s (eq? (ref s 'type) 'link))))
 
 (define (mkdir* p)
+  (unless (path-string? p) (error "mkdir*: not a path string" p))
   (unless (directory-exists? p)
     (let ([l (split-path p)])
       (when (car l) (mkdir* (car l)))
       (mkdir p))))
+
+(define (rm* p)
+  (unless (path-string? p) (error "rm*: not a path string" p))
+  (define info (stat p #f))
+  (when info
+    (define type (ref info 'type))
+    (cond
+      [(eq? type 'file) (rm p)]
+      [(eq? type 'link) (rm p)]
+      [else
+       (for-each (lambda (e)
+                   (rm* (build-path p e)))
+                 (ls p))
+       (rmdir p)])))
+
+(define (touch p)
+  (unless (path-string? p) (error "touch: not a path string" p))
+  (fd-close (fd-open-output p (hash 'exists 'can-update))))
+
+(define :error (hash 'exists 'error))
+(define :truncate (hash 'exists 'truncate))
+(define :must-truncate (hash 'exists 'must-truncate))
+(define :append (hash 'exists 'append))
+(define :update (hash 'exists 'update))
+(define :can-update (hash 'exists 'can-update))

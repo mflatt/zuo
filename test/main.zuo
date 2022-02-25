@@ -16,6 +16,8 @@
 (require "syntax.zuo")
 (require "syntax-hygienic.zuo")
 (require "file-handle.zuo")
+(require "process.zuo")
+(require "filesystem.zuo")
 
 (require "cycle.zuo")
 

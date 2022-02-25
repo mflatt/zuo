@@ -1,0 +1,20 @@
+#lang zuo
+
+(require "harness.zuo")
+
+(alert "filesystem")
+
+(check (hash? (stat tmp-dir #f)))
+(check (stat (build-path tmp-dir "nonesuch.txt") #f) #f)
+
+(define exists.txt (build-path tmp-dir "exists.txt"))
+(rm* exists.txt)
+
+(define now (current-time))
+
+(touch exists.txt)
+
+(let ([s (stat tmp-dir #f)])
+  (check (ref s 'type) 'dir))
+
+

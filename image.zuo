@@ -37,7 +37,7 @@
     (for-each (lambda (lib)
                 (fd-write in (~a "(module->hash '" lib ")\n")))
               libs)
-    (fd-write in "(dump-image-and-exit (fd-open-output 'stdout)))\n")
+    (fd-write in "(dump-image-and-exit (fd-open-output 'stdout (hash))))\n")
     (fd-close in)
     (let ([image (fd-read out eof)])
       (fd-close out)
@@ -49,7 +49,9 @@
 (define out-file (hash-ref cmd 'output #f))
 
 (define zuo.c (fd-read (fd-open-input "zuo.c") eof))
-(define out (fd-open-output (or out-file 'stdout)))
+(define out (if out-file
+                (fd-open-output out-file (hash 'exists 'truncate))
+                (fd-open-output 'stdout (hash))))
 
 (define lines
   (let loop ([start 0] [i 0])

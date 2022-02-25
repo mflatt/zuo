@@ -3309,6 +3309,27 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int a
 }
 
 /*======================================================================*/
+/* optional arguments through a hash table                              */
+/*======================================================================*/
+
+static zuo_t *zuo_consume_option(zuo_t **_options, const char *name) {
+  zuo_t *sym = zuo_symbol(name);
+  zuo_t *opt = zuo_hash_ref(*_options, sym, z.o_undefined);
+  
+  if (opt != z.o_undefined)
+    *_options = zuo_hash_remove(*_options, sym);
+  
+  return opt;
+}
+
+static void check_options_consumed(const char *who, zuo_t *options) {
+  if (((zuo_trie_node_t *)options)->count > 0) {
+    options = zuo_hash_keys(options);
+    zuo_fail1w(who, "unrecognized option", _zuo_car(options));
+  }
+}
+
+/*======================================================================*/
 /* files/streams                                                        */
 /*======================================================================*/
 
@@ -3498,36 +3519,91 @@ static zuo_t *zuo_fd_open_input(zuo_t *path) {
   }
 }
 
-static zuo_t *zuo_fd_open_output(zuo_t *path) {
+static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
   const char *who = "fd-open-output";
   zuo_raw_handle_t fd;
 
   if (zuo_is_path_string(path)) {
+    zuo_t *exists;
+
+    if (options->tag != zuo_trie_node_tag)
+      zuo_fail1w(who, "not a hash table", options);
+    exists = zuo_consume_option(&options, "exists");
+
+    check_options_consumed(who, options);
+    
 #ifdef ZUO_UNIX
-    fd = open(ZUO_STRING_PTR(path), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd == -1)
-      zuo_fail1w_errno(who, "file open failed", path);
+    {
+      int mode = O_CREAT | O_EXCL;
+
+      if (exists != z.o_undefined) {
+        if (exists != zuo_symbol("error")) {
+          if (exists == zuo_symbol("truncate"))
+            mode = O_CREAT | O_TRUNC;
+          else if (exists == zuo_symbol("must-truncate"))
+            mode = O_TRUNC;
+          else if (exists == zuo_symbol("append"))
+            mode = O_CREAT | O_APPEND;
+          else if (exists == zuo_symbol("update"))
+            mode = 0;
+          else if (exists == zuo_symbol("can-update"))
+            mode = O_CREAT;
+          else
+            zuo_fail1w(who, "invalid exists mode", exists);
+        }
+      }
+      
+      fd = open(ZUO_STRING_PTR(path), O_WRONLY | mode, 0666);
+      if (fd == -1)
+        zuo_fail1w_errno(who, "file open failed", path);
+    }
 #endif
 #ifdef ZUO_WINDOWS
-    wchar_t *wp = zuo_to_wide(ZUO_STRING_PTR(path));
-    fd = CreateFileW(wp,
-                     GENERIC_WRITE,
-                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                     NULL,
-                     CREATE_ALWAYS,
-                     0,
-                     NULL);
-    if (fd == INVALID_HANDLE_VALUE)
-      zuo_fail1w(who, "file open failed", path);
-    free(wp);
+    {
+      wchar_t *wp = zuo_to_wide(ZUO_STRING_PTR(path));
+      DWORD mode = OPEN_EXISTING;
+
+      if (exists != z.o_undefined) {
+        if (exists != zuo_symbol("error")) {
+          if (exists == zuo_symbol("truncate"))
+            mode = CREATE_ALWAYS;
+          else if (exists == zuo_symbol("must-truncate"))
+            mode = TRUNCATE_EXISTING;
+          else if (exists == zuo_symbol("append")) {
+            mode = CREATE_ALWAYS;
+            append = 1;
+          } else if (exists == zuo_symbol("update"))
+            mode = OPEN_EXISTING;
+          else if (exists == zuo_symbol("can-update"))
+            mode = OPEN_ALWAYS;
+          else
+            zuo_fail1w(who, "invalid exists mode", exists);
+        }
+      }
+      
+      fd = CreateFileW(wp,
+                       GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL,
+                       mode,
+                       0,
+                       NULL);
+      if (fd == INVALID_HANDLE_VALUE)
+        zuo_fail1w(who, "file open failed", path);
+      free(wp);
+    }
 #endif
     return zuo_fd_handle(fd, zuo_handle_open_fd_out_status);
   } else if (path == zuo_symbol("stdout")) {
+    if ((options->tag != zuo_trie_node_tag) || (((zuo_trie_node_t *)options)->count != 0))
+      zuo_fail1w(who, "non-empty options with 'stdout", options);
     fd = zuo_get_std_handle(1);
     return zuo_handle(fd, zuo_handle_open_fd_out_status);
   } else {
     if (path != zuo_symbol("stderr"))
       zuo_fail1w(who, "not a path string, 'stdout, or 'stderr", path);
+    if ((options->tag != zuo_trie_node_tag) || (((zuo_trie_node_t *)options)->count != 0))
+      zuo_fail1w(who, "non-empty options with 'stderr", options);
     fd = zuo_get_std_handle(2);
     return zuo_handle(fd, zuo_handle_open_fd_out_status);
   }
@@ -4067,27 +4143,6 @@ zuo_t *zuo_current_time() {
   return zuo_cons(zuo_integer(t / 10000000 - 11644473600L),
                   zuo_integer((t % 10000000) * 100));
 #endif
-}
-
-/*======================================================================*/
-/* optional arguments through a hash table                              */
-/*======================================================================*/
-
-static zuo_t *zuo_consume_option(zuo_t **_options, const char *name) {
-  zuo_t *sym = zuo_symbol(name);
-  zuo_t *opt = zuo_hash_ref(*_options, sym, z.o_undefined);
-  
-  if (opt != z.o_undefined)
-    *_options = zuo_hash_remove(*_options, sym);
-  
-  return opt;
-}
-
-static void check_options_consumed(const char *who, zuo_t *options) {
-  if (((zuo_trie_node_t *)options)->count > 0) {
-    options = zuo_hash_keys(options);
-    zuo_fail1w(who, "unrecognized option", _zuo_car(options));
-  }
 }
 
 /*======================================================================*/
@@ -4909,7 +4964,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-open-input", zuo_fd_open_input);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("fd-open-output", zuo_fd_open_output);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("fd-open-output", zuo_fd_open_output);
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-close", zuo_fd_close);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-read", zuo_fd_read);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);

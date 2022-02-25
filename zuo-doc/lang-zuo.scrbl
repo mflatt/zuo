@@ -679,14 +679,37 @@ Opens a file for reading or obtains a reference to standard input when
 @racket[filename] is @racket['stdin]. The result handle can be used
 with @racket[fd-read] and closed with @racket[fd-close].}
 
-@defproc[(fd-open-output [filename path-string?]) handle?]{
+@deftogether[(
+@defproc[(fd-open-output [filename path-string?]
+                         [options hash?]) handle?]
+@defthing[:error hash?]
+@defthing[:truncate hash?]
+@defthing[:must-truncate hash?]
+@defthing[:append hash?]
+@defthing[:update hash?]
+@defthing[:can-update hash?]
+)]{
 
-Opens a file for writing, obtains a reference to standard output when
-@racket[filename] is @racket['stdout], or obtains a reference to
-standard error when @racket[filename] is @racket['stderr]. When
-opening a file, the file is created if it does not exist, and the file
-is truncated if it does exist. The result handle can be used with
-@racket[fd-write] and closed with @racket[fd-close].}
+The @racket[fd-open-output] procedure opens a file for writing,
+obtains a reference to standard output when @racket[filename] is
+@racket['stdout], or obtains a reference to standard error when
+@racket[filename] is @racket['stderr]. When opening a file,
+@racket[options] specifies options as described below, but
+@racket[options] must be empty for @racket['stdout] or
+@racket['stderr]. The result handle can be used with @racket[fd-write]
+and closed with @racket[fd-close].
+
+In @racket[options], a single key is currently recognized:
+@racket['exists]. The mapping for @racket['exists] must be one of the
+symbols accepted for @racket[#:exists] by
+@realracket[open-output-file] from @racketmodname[racket], but not
+@racket['replace] or @racket['truncate/replace], and the default
+mapping is @racket['error]. Any other key in @racket[options] is an
+error.
+
+The @racket[:error], @racket[:truncate], @racket[:must-truncate],
+@racket[:append], @racket[:update], and @racket[:can-update] hash
+tables each map @racket['exists] to the corresponding mode.}
 
 @defproc[(fd-close [handle handle?]) void?]{
 
@@ -813,6 +836,13 @@ Returns a list of path strings for files in @racket[dir].}
 
 Deletes the file or link @racket[name].}
 
+@defproc[(rm* [name path-string?]) void?]{
+
+Deletes the file, directory, or link @racket[name], including the
+directory content if @racket[name] refers to a directory (and not to a
+link to a directory). Unlike @racket[rm], it's not an error if
+@racket[name] does not refer to an existing file, directory, or link.}
+
 @defproc[(mv [name path-string?] [new-name path-string?]) void?]{
 
 Renames the file, directory, or link @racket[name] to @racket[new-name].}
@@ -820,6 +850,11 @@ Renames the file, directory, or link @racket[name] to @racket[new-name].}
 @defproc[(mkdir [dir path-string?]) void?]{
 
 Creates a directory @racket[dir].}
+
+@defproc[(mkdir* [dir path-string?]) void?]{
+
+Creates a directory @racket[dir] if it does not already exist, along
+with its ancector directories.}
 
 @defproc[(rmdir [dir path-string?]) void?]{
 
@@ -834,6 +869,19 @@ function is not supported on Windows.}
 
 Gets the content of a link @racket[name]. This function is not
 supported on Windows.}
+
+@deftogether[(
+@defproc[(file-exists? [name path-string?]) booelan?]
+@defproc[(directory-exists? [name path-string?]) booelan?]
+@defproc[(link-exists? [name path-string?]) booelan?]
+)]{
+
+Uses @racket[stat] to check for a file, directory, or link,
+respectively.}
+
+@defproc[(touch [name path-string?]) void?]{
+
+Opens @racket[name] for output and closes it without writing.}
 
 
 @section{Run Time Configuration}
