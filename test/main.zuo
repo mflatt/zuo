@@ -14,6 +14,8 @@
 (require "kernel.zuo")
 (require "read+print.zuo")
 (require "syntax.zuo")
+(require "syntax-hygienic.zuo")
+(require "file-handle.zuo")
 
 (require "cycle.zuo")
 

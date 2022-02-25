@@ -60,13 +60,13 @@
                   "\n  stderr: " (~s err))))
      (unless (contains? err msg)
        (error (~a "check-fail: didn't find expected message: " (~s e)
-                  "\n  expected: " msg
+                  "\n  expected: " (~s msg)
                   "\n  stderr: " (~s err)))))))
 
 (define-syntax (check-fail stx)
   (unless (and (list? stx) (= 3 (length stx))) (bad-syntax stx))
   (list (quote-syntax check-fail*)
-        (list (quote-syntax quote) (cadr stx))
+        (list (quote-syntax quasiquote) (cadr stx))
         (cadr (cdr stx))))
 
 (define (check-output* e stdout stderr)

@@ -9,6 +9,12 @@
 (check (not (string? 'apple)))
 (check (not (string? 10)))
 
+(check (string 48 97) "0a")
+(check (string) "")
+(check-fail (string -1) "not an integer in [0, 255]")
+(check-fail (string 256) "not an integer in [0, 255]")
+(check-fail (string "a") "not an integer in [0, 255]")
+
 (check (string-length "") 0)
 (check (string-length "apple") 5)
 (check-fail (string-length 'apple) not-string)

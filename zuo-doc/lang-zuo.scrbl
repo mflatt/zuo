@@ -342,6 +342,7 @@ Zuo @deftech{strings} are sequences of bytes.
 
 @deftogether[(
 @defproc[(string? [v any?]) boolean?]
+@defproc[(string [char integer?] ...) string?]
 @defproc[(string-length [str string?]) integer?]
 @defproc[(string-ref [str string?] [k integer?]) integer?]
 @defproc[(substring [str string?] 
@@ -350,7 +351,7 @@ Zuo @deftech{strings} are sequences of bytes.
 @defproc[(string=? [str1 string?] [str2 string?]) boolean?]
 )]{
 
-Analogous to @realracket*[string? string-length string-ref substring
+Analogous to @realracket*[string? string string-length string-ref substring
 string=?] from @racketmodname[racket], or more precisely analogous to
 @realracket*[bytes? bytes-length bytes-ref subbytes bytes=?] frmo
 @racketmodname[racket].}
