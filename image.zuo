@@ -76,18 +76,23 @@
                           (substring "0123456789abcdef" i (+ i 1)))
                         accum))))))
 
+(define embedded-image-line "#define EMBEDDED_IMAGE 0")
+(define embedded-image-line/cr (~a embedded-image-line "\r"))
+
 (for-each
  (lambda (line)
    (cond
-     [(string=? line "#define EMBEDDED_IMAGE 0")
+     [(or (string=? line embedded-image-line)
+	  (string=? line embedded-image-line/cr))
+      (define nl (if (string=? line embedded-image-line/cr) "\r\n" "\n"))
       (unless (hash-ref cmd 'keep-collects? #f)
-        (fd-write out (~a "#define ZUO_LIB_PATH NULL\n")))
-      (fd-write out (~a "#define EMBEDDED_IMAGE 1\n"))
+        (fd-write out (~a "#define ZUO_LIB_PATH NULL" nl)))
+      (fd-write out (~a "#define EMBEDDED_IMAGE 1" nl))
       (fd-write out (~a "static zuo_uint32_t emedded_boot_image_len = "
                         (quotient (string-length image) 4)
-                        ";\n"))
-      (fd-write out (~a "static zuo_uint32_t emedded_boot_image[] = {\n"))
-      (let ([accum->line (lambda (accum) (apply ~a (reverse (cons "\n" accum))))])
+                        ";" nl))
+      (fd-write out (~a "static zuo_uint32_t emedded_boot_image[] = {" nl))
+      (let ([accum->line (lambda (accum) (apply ~a (reverse (cons nl accum))))])
         (let loop ([i 0] [col 0] [accum '()])
           (cond
             [(= i (string-length image))
@@ -100,8 +105,7 @@
              (loop (+ i 4) (+ col 1)
                    (cons (~a " 0x" (~hex (string-u32-ref image i)) ",")
                          accum))])))
-      (fd-write out (~a " 0 };\n"))]
+      (fd-write out (~a " 0 };" nl))]
      [else
       (fd-write out (~a line "\n"))]))
  lines)
-

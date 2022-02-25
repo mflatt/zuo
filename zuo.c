@@ -27,6 +27,7 @@
 # include <direct.h>
 # include <io.h>
 # include <sys/stat.h>
+# include <fcntl.h>
 #endif
 
 #if 0
@@ -90,6 +91,12 @@ static void zuo_configure() {
       s++;
     }
   }
+
+#ifdef ZUO_WINDOWS
+  _setmode(0, _O_BINARY);
+  _setmode(1, _O_BINARY);
+  _setmode(2, _O_BINARY);
+#endif
 }
 
 /*======================================================================*/
@@ -879,15 +886,15 @@ static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
   stream.image = dump + header_size + map_len;
   stream.heap_size = 0;
   stream.offset = 0;
-  
-  /* compure heap size and replace image offsets with heap offsets */
+
+  /* compute heap size and replace image offsets with heap offsets */
   for (i = 0; i < map_len; i++) {
     zuo_int32_t delta = stream.map[i];
     zuo_int32_t tag = stream.image[delta];
     zuo_int_t sz;
 
     ASSERT((tag >= 0) && (tag < zuo_forwarded_tag));
-    
+
     if (tag == zuo_string_tag)
       sz = object_size(tag, BUILD_INT(stream.image[delta+1], stream.image[delta+2]));
     else
@@ -907,7 +914,7 @@ static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
   }
 
   zuo_symbol_count = ((zuo_fasl_header_t *)dump)->symbol_count;
-  
+
   zuo_replace_heap(stream.heap, stream.heap_size * alloc_factor, stream.heap_size);
 }
 
@@ -3578,7 +3585,8 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
 #ifdef ZUO_WINDOWS
     {
       wchar_t *wp = zuo_to_wide(ZUO_STRING_PTR(path));
-      DWORD mode = OPEN_EXISTING;
+      DWORD mode = CREATE_NEW;
+      int append = 0;
 
       if (exists != z.o_undefined) {
         if (exists != zuo_symbol("error")) {
@@ -3587,7 +3595,7 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
           else if (exists == zuo_symbol("must-truncate"))
             mode = TRUNCATE_EXISTING;
           else if (exists == zuo_symbol("append")) {
-            mode = CREATE_ALWAYS;
+            mode = OPEN_ALWAYS;
             append = 1;
           } else if (exists == zuo_symbol("update"))
             mode = OPEN_EXISTING;
@@ -3608,6 +3616,9 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
       if (fd == INVALID_HANDLE_VALUE)
         zuo_fail1w(who, "file open failed", path);
       free(wp);
+
+      if (append)
+	SetFilePointer(fd, 0, NULL, FILE_END);
     }
 #endif
     return zuo_fd_handle(fd, zuo_handle_open_fd_out_status);
@@ -3833,7 +3844,7 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
     zuo_int_t in_len;
     
     filename = ZUO_STRING_PTR(file_path);
-    in = fopen(filename, "r");
+    in = fopen(filename, "rb");
     if (in == NULL)
       zuo_fail1("could not open module file", file_path);
     
@@ -3872,86 +3883,115 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
 # define zuo_st_ctim st_ctim
 #endif
 
+#ifdef ZUO_WINDOWS
+static zuo_t *zuo_filetime_pair(FILETIME *ft){
+  zuo_int_t t;
+  t = (((zuo_int_t)ft->dwHighDateTime) << 32) | ft->dwLowDateTime;
+  /* measurement interval is 100 nanoseconds = 1/10 microseconds, and
+     adjust by number of seconds between Windows (1601) and Unix (1970) epochs */
+  return zuo_cons(zuo_integer(t / 10000000 - 11644473600L),
+                  zuo_integer((t % 10000000) * 100));
+}
+# define TO_INT64(a, b) (((zuo_int_t)(a) << 32) | (((zuo_int_t)b) & (zuo_int_t)0xFFFFFFFF))
+#endif
+
 static zuo_t *zuo_stat(zuo_t *path, zuo_t *follow_links) {
   const char *who = "stat";
   zuo_t *result = z.o_empty_hash;
-#ifdef ZUO_UNIX
-  struct stat stat_buf;
-#endif
-#ifdef ZUO_WINDOWS
-  struct __stat64 stat_buf;
-  wchar_t *wp;
-#endif
-  int stat_result;
 
   check_path_string(who, path);
 
 #ifdef ZUO_UNIX
-  do {
-    if (follow_links == z.o_false)
-      stat_result = lstat(ZUO_STRING_PTR(path), &stat_buf);
+  {
+    struct stat stat_buf;
+    int stat_result;
+  
+    do {
+      if (follow_links == z.o_false)
+	stat_result = lstat(ZUO_STRING_PTR(path), &stat_buf);
+      else
+	stat_result = stat(ZUO_STRING_PTR(path), &stat_buf);
+    } while ((stat_result == -1) && (errno == EINTR));
+
+    if (stat_result != 0) {
+      if (errno != ENOENT)
+	zuo_fail1w_errno(who, "failed", path);
+      return z.o_false;
+    }
+  
+    if (S_ISDIR(stat_buf.st_mode))
+      result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("dir"));
+    else if (S_ISLNK(stat_buf.st_mode))
+      result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("link"));
     else
-      stat_result = stat(ZUO_STRING_PTR(path), &stat_buf);
-  } while ((stat_result == -1) && (errno == EINTR));
+      result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("file"));
+    result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
+    result = zuo_hash_set(result, zuo_symbol("device-id"), zuo_integer(stat_buf.st_dev));
+    result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(stat_buf.st_ino));
+    result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(stat_buf.st_nlink));
+    result = zuo_hash_set(result, zuo_symbol("user-id"), zuo_integer(stat_buf.st_uid));
+    result = zuo_hash_set(result, zuo_symbol("group-id"), zuo_integer(stat_buf.st_gid));
+    result = zuo_hash_set(result, zuo_symbol("device-id-for-special-file"), zuo_integer(stat_buf.st_rdev));
+    result = zuo_hash_set(result, zuo_symbol("size"), zuo_integer(stat_buf.st_size));
+    result = zuo_hash_set(result, zuo_symbol("block-size"), zuo_integer(stat_buf.st_blksize));
+    result = zuo_hash_set(result, zuo_symbol("block-count"), zuo_integer(stat_buf.st_blocks));
+    result = zuo_hash_set(result, zuo_symbol("access-time-seconds"), zuo_integer(stat_buf.zuo_st_atim.tv_sec));
+    result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_atim.tv_nsec));
+    result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_sec));
+    result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_nsec));
+    result = zuo_hash_set(result, zuo_symbol("creation-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_sec));
+    result = zuo_hash_set(result, zuo_symbol("creation-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_nsec));
+  }
 #endif  
 #ifdef ZUO_WINDOWS
-  wp = zuo_to_wide(ZUO_STRING_PTR(path));
+  {
+    wchar_t *wp = zuo_to_wide(ZUO_STRING_PTR(path));
+    HANDLE fdh;
+    BY_HANDLE_FILE_INFORMATION info;
+    zuo_t *p;
 
-  do {
-    /* No stat/lstat distinction under Windows */
-    stat_result = _wstat64(wp, &stat_buf);
-  } while ((stat_result == -1) && (errno == EINTR));
-#endif
+    fdh = CreateFileW(wp,
+                      0, /* not even read access => just get info */
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                      NULL,
+                      OPEN_EXISTING,
+                      FILE_FLAG_BACKUP_SEMANTICS,
+                      NULL);
+    
+    if (fdh == INVALID_HANDLE_VALUE) {
+      DWORD err = GetLastError();
+      if ((err != ERROR_FILE_NOT_FOUND) && (err != ERROR_PATH_NOT_FOUND))
+	zuo_fail1w(who, "failed", path);
+      return z.o_false;
+    }
 
-  if (stat_result != 0) {
-    if (errno != ENOENT)
-      zuo_fail1w_errno(who, "failed", path);
-    return z.o_false;
+    if (!GetFileInformationByHandle(fdh, &info))
+      zuo_fail1w(who, "failed", path);
+
+    CloseHandle(fdh);
+
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+      result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("dir"));
+    else
+      result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("file"));
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+      result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(0444));
+    else
+      result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(0666));
+    result = zuo_hash_set(result, zuo_symbol("device-id"), zuo_integer(info.dwVolumeSerialNumber));
+    result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(TO_INT64(info.nFileIndexHigh, info.nFileIndexLow)));
+    result = zuo_hash_set(result, zuo_symbol("size"), zuo_integer(TO_INT64(info.nFileSizeHigh, info.nFileSizeLow)));
+    result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(info.nNumberOfLinks));
+    p = zuo_filetime_pair(&info.ftCreationTime);
+    result = zuo_hash_set(result, zuo_symbol("creation-time-seconds"), _zuo_car(p));
+    result = zuo_hash_set(result, zuo_symbol("creation-time-nanoseconds"), _zuo_cdr(p));
+    p = zuo_filetime_pair(&info.ftLastWriteTime);
+    result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), _zuo_car(p));
+    result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), _zuo_cdr(p));
+    p = zuo_filetime_pair(&info.ftLastAccessTime);
+    result = zuo_hash_set(result, zuo_symbol("access-time-seconds"), _zuo_car(p));
+    result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), _zuo_cdr(p));
   }
-
-#ifdef ZUO_WINDOWS
-  free(wp);
-#endif
-
-#ifdef ZUO_UNIX
-  if (S_ISDIR(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("dir"));
-  else if (S_ISLNK(stat_buf.st_mode))
-    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("link"));
-#endif
-#ifdef ZUO_WINDOWS
-  if (stat_buf.st_mode & _S_IFDIR)
-    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("dir"));
-#endif
-  else
-    result = zuo_hash_set(result, zuo_symbol("type"), zuo_symbol("file"));
-  result = zuo_hash_set(result, zuo_symbol("mode"), zuo_integer(stat_buf.st_mode));
-  result = zuo_hash_set(result, zuo_symbol("device-id"), zuo_integer(stat_buf.st_dev));
-  result = zuo_hash_set(result, zuo_symbol("inode"), zuo_integer(stat_buf.st_ino));
-  result = zuo_hash_set(result, zuo_symbol("hardlink-count"), zuo_integer(stat_buf.st_nlink));
-  result = zuo_hash_set(result, zuo_symbol("user-id"), zuo_integer(stat_buf.st_uid));
-  result = zuo_hash_set(result, zuo_symbol("group-id"), zuo_integer(stat_buf.st_gid));
-  result = zuo_hash_set(result, zuo_symbol("device-id-for-special-file"), zuo_integer(stat_buf.st_rdev));
-  result = zuo_hash_set(result, zuo_symbol("size"), zuo_integer(stat_buf.st_size));
-#ifdef ZUO_UNIX
-  result = zuo_hash_set(result, zuo_symbol("block-size"), zuo_integer(stat_buf.st_blksize));
-  result = zuo_hash_set(result, zuo_symbol("block-count"), zuo_integer(stat_buf.st_blocks));
-  result = zuo_hash_set(result, zuo_symbol("access-time-seconds"), zuo_integer(stat_buf.zuo_st_atim.tv_sec));
-  result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_atim.tv_nsec));
-  result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_sec));
-  result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_mtim.tv_nsec));
-  result = zuo_hash_set(result, zuo_symbol("creation-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_sec));
-  result = zuo_hash_set(result, zuo_symbol("creation-time-nanoseconds"), zuo_integer(stat_buf.zuo_st_ctim.tv_nsec));
-#endif
-#ifdef ZUO_WINDOWS  
-  result = zuo_hash_set(result, zuo_symbol("block-size"), zuo_integer(0));
-  result = zuo_hash_set(result, zuo_symbol("block-count"), zuo_integer(0));
-  result = zuo_hash_set(result, zuo_symbol("access-time-seconds"), zuo_integer(stat_buf.zuo_st_atim));
-  result = zuo_hash_set(result, zuo_symbol("access-time-nanoseconds"), zuo_integer(0));
-  result = zuo_hash_set(result, zuo_symbol("modify-time-seconds"), zuo_integer(stat_buf.zuo_st_mtim));
-  result = zuo_hash_set(result, zuo_symbol("modify-time-nanoseconds"), zuo_integer(0));
-  result = zuo_hash_set(result, zuo_symbol("change-time-seconds"), zuo_integer(stat_buf.zuo_st_ctim));
-  result = zuo_hash_set(result, zuo_symbol("change-time-nanoseconds"), zuo_integer(0));
 #endif
 
   return result;
@@ -4082,11 +4122,18 @@ static zuo_t *zuo_ls(zuo_t *dir_path) {
     zuo_fail1w_errno(who, "failed", dir_path);
 
   do {
-    s = zuo_from_wide(fileinfo.name);
-    pr = zuo_cons(zuo_string(s), z.o_null);
-    free(s);
-    if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
-    last = pr;
+    if ((fileinfo.name[0] == '.')
+        && ((fileinfo.name[1] == 0)
+            || ((fileinfo.name[1] == '.')
+                && (fileinfo.name[2] == 0)))) {
+      /* skip */
+    } else {
+      s = zuo_from_wide(fileinfo.name);
+      pr = zuo_cons(zuo_string(s), z.o_null);
+      free(s);
+      if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
+      last = pr;
+    }
   } while (_wfindnext(handle, &fileinfo) == 0);
   _findclose(handle);
 
@@ -4151,14 +4198,9 @@ zuo_t *zuo_current_time() {
 #endif
 #ifdef ZUO_WINDOWS
   FILETIME ft;
-  zuo_int_t t;
 
   GetSystemTimeAsFileTime(&ft);
-  t = (((zuo_int_t)ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
-  /* measurement interval is 100 nanoseconds = 1/10 microseconds, and
-     adjust by number of seconds between Windows (1601) and Unix (1970) epochs */
-  return zuo_cons(zuo_integer(t / 10000000 - 11644473600L),
-                  zuo_integer((t % 10000000) * 100));
+  return zuo_filetime_pair(&ft);
 #endif
 }
 
@@ -4595,17 +4637,21 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
     
     for (l = pids_i; l != z.o_null; l = _zuo_cdr(l)) {
       zuo_t *p = _zuo_car(l);
-      HANDLE sci = ZUO_HANDLE_RAW(p);
-      DWORD w;
-      if (GetExitCodeProcess(sci, &w)) {
-        if (w != STILL_ACTIVE) {
-          ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
-          ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)(intptr_t)w;
-          return p;
-	}
-      } else
-	zuo_fail1w("process-wait", "status query failed", p);
-      a[i++] = sci;
+      if (((zuo_handle_t *)p)->u.h.status == zuo_handle_process_done_status)
+        return p;
+      else {
+	HANDLE sci = ZUO_HANDLE_RAW(p);
+	DWORD w;
+	if (GetExitCodeProcess(sci, &w)) {
+	  if (w != STILL_ACTIVE) {
+	    ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
+	    ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)(intptr_t)w;
+	    return p;
+	  }
+	} else
+	  zuo_fail1w("process-wait", "status query failed", p);
+	a[i++] = sci;
+      }
     }
 
     (void)WaitForMultipleObjects(i, a, FALSE, 0);
@@ -5023,7 +5069,7 @@ int main(int argc, char **argv) {
 # endif
 
     if (boot_image) {
-      FILE *f = fopen(boot_image, "r");
+      FILE *f = fopen(boot_image, "rb");
       zuo_int_t len;
       char *dump = zuo_drain(f, 0, -1, &len);
       fclose(f);
