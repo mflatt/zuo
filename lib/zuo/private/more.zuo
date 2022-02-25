@@ -9,6 +9,7 @@
          boolean?
 
          equal?
+         assoc
 
          ref
 
@@ -44,6 +45,21 @@
                                 (hash-keys a)))]
         [else #f])))
 
+
+(define (assoc k lst)
+  (unless (list? lst) (error "assoc: not a list" lst))
+  (letrec ([assoc (lambda (lst)
+                    (cond
+                      [(null? lst) #f]
+                      [else
+                       (let ([a (car lst)])
+                         (unless (pair? a)
+                           (error "assoc: non-pair found in list" a))
+                         (if (equal? (car a) k)
+                             a
+                             (assoc (cdr lst))))]))])
+    (assoc lst)))
+                           
 (define ref
   (let ([not-there (string->uninterned-symbol "no")])
     (lambda (ht k)

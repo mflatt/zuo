@@ -1605,7 +1605,7 @@ static int peek_input(const unsigned char *s, zuo_int_t *_o, const char *want) {
       return 0;
   }
   c = s[(*_o)+i];
-  if (isdigit(c) || isalpha(c) || strchr(symbol_chars, c))
+  if ((c != 0) && (isdigit(c) || isalpha(c) || strchr(symbol_chars, c)))
     return 0;
   return 1;
 }
@@ -1743,7 +1743,7 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
     char *s2;
     while (1) {
       c = s[*_o];
-      if (isalpha(c) || isdigit(c) || strchr(symbol_chars, c))
+      if ((c != 0) && (isalpha(c) || isdigit(c) || strchr(symbol_chars, c)))
         (*_o)++;
       else
         break;
@@ -1850,7 +1850,7 @@ static zuo_t *zuo_read_all(zuo_t *obj, zuo_t *start_i) {
 }
 
 static int zuo_is_symbol_module_char(int c) {
-  return isalpha(c) || isdigit(c) || strchr("-_+/", c);
+  return (c != 0) && (isalpha(c) || isdigit(c) || strchr("-_+/", c));
 }
 
 static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
@@ -4476,14 +4476,11 @@ zuo_t *zuo_process_status(zuo_t *p) {
 zuo_t *zuo_process_wait(zuo_t *pids_i) {
   zuo_t *l;
 
-  if (is_process_handle(pids_i))
-    pids_i = zuo_cons(pids_i, z.o_null);
-    
-  for (l = pids_i; l->tag == zuo_pair_tag; l = _zuo_cdr(l))
-    if (!is_process_handle(_zuo_car(l)))
-      break;
-  if (l != z.o_null)
-    zuo_fail1w("process-wait", "not a process handle or list of process handles", pids_i);
+  for (l = pids_i; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *p = _zuo_car(l);
+    if (!is_process_handle(p))
+      zuo_fail1w("process-wait", "not a process handle", p);
+  }
 
 #ifdef ZUO_UNIX
   /* loop until on of the handles is marked as done */
@@ -4929,7 +4926,7 @@ int main(int argc, char **argv) {
   
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, 1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("process-wait", zuo_process_wait);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("process-wait", zuo_process_wait, 1);
 
   ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error, 0);
   ZUO_TOP_ENV_SET_PRIMITIVEN("alert", zuo_alert, 0);
@@ -5003,7 +5000,7 @@ int main(int argc, char **argv) {
     Z.o_library_path = zuo_path_to_complete_path(zuo_string(library_path));
   } else if (zuo_lib_path != NULL) {
     Z.o_library_path = zuo_string(zuo_lib_path);
-    if (zuo_relative_path_p(Z.o_library_path) == z.o_false)
+    if (zuo_relative_path_p(Z.o_library_path) == z.o_true)
       Z.o_library_path = zuo_build_path(_zuo_car(zuo_split_path(exe_path)),
                                         Z.o_library_path);
   } else

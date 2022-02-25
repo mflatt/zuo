@@ -335,6 +335,13 @@ Like @realracket*[map for-each foldl andmap ormap] from
 are more restricted and do not apply @racket[proc] to the last
 argument in tail position.}
 
+@deftogether[(
+@defproc[(assoc [v any?] [lst list?])
+         (or/c pair? #f)]
+)]{
+
+Like @realracket*[assoc] from @racketmodname[racket].}
+
 
 @section{Strings}
 
