@@ -630,14 +630,16 @@ used in a macro expansion.
 @defproc[(syntax-e [v identifier?]) symbol?]
 @defproc[(syntax->datum [v any?]) any?]
 @defproc[(datum->syntax [ctx identifier?] [v any?]) any?]
-@defproc[(bound-identifier=? [id1 (or/c symbol? identifier?)]
-                             [id2 (or/c symbol? identifier?)]) boolean?]
+@defproc[(bound-identifier=? [id1 identifier?]
+                             [id2 identifier?]) boolean?]
 )]{
 
 Analogous to @realracket*[identifier? syntax-e syntax->datum
-datum->syntax bound-identifier=?] from @racketmodname[racket]. The
-@racket[bound-identifier=?] function accepts symbols as well as syntax
-objects, where a symbol is equal only to itself.}
+datum->syntax bound-identifier=?] from @racketmodname[racket]. Plain
+symbols count as an identifier, however, and for
+@racket[bound-identifier=?], a symbol is equal only to itself. The
+@racket[datum->syntax] function always just returns its second
+argument.}
 
 @defproc[(syntax-error [message string?] [stx any?]) void?]{
 

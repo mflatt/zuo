@@ -30,6 +30,18 @@
                 [else stx]))])
     syntax->datum))
 
+(define checked-syntax-e
+  (let ([syntax-e (lambda (x)
+                    (unless (identifier? x) (error "syntax-e: not a syntax object" x))
+                    (syntax-e x))])
+    syntax-e))
+(define checked-datum->syntax
+  (let ([datum->syntax (lambda (ctx d)
+                         (unless (identifier? ctx) (error "datum->syntax: not a syntax object" ctx))
+                         d)])
+    datum->syntax))
+(define checked-syntax->datum syntax->datum)
+
 ;; Binding information has three parts:
 ;;   * ctx                : the current binding context
 ;;   * sym -> ctx         : the per-symbol default context for plain symbols
@@ -108,6 +120,8 @@
   (cons ctx binds))
 
 (define (bound-identifier=? a b)
+  (unless (identifier? a) (error "bound-identifier=?: not a syntax object" a))
+  (unless (identifier? b) (error "bound-identifier=?: not a syntax object" b))
   (or (and (syntactic-closure? a)
            (syntactic-closure? b)
            (eq? (syntactic-closure-sym a) (syntactic-closure-sym b))

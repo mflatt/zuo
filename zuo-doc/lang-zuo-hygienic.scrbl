@@ -1,10 +1,17 @@
 #lang scribble/manual
-@(require (for-label zuo-doc/fake-zuo)
+@(require (for-label (except-in zuo-doc/fake-zuo
+                                identifier?
+                                syntax-e
+                                syntax->datum
+                                datum->syntax
+                                bound-identifier=?)
+                     zuo-doc/fake-zuo-hygienic)
           "real-racket.rkt")
 
 @title{Zuo with Hygienic Macros}
 
-@defmodulelang[zuo/hygienic]
+@defmodulelang[zuo/hygienic #:no-declare #:packages ()]
+@declare-exporting[zuo-doc/fake-zuo-hygienic #:packages ()]
 
 The @racketmodname[zuo/hygienic] language provides the same set of
 bindings as @racketmodname[zuo], but with hygienic macros. Its
@@ -45,3 +52,20 @@ identifiers and binding scope, and different rules for
        expander into a new context.}
 
 ]
+
+These differences particularly affect the functions that operate on
+@tech{syntax objects}:
+
+@deftogether[(
+@defproc[(identifier? [v any?]) boolean?]
+@defproc[(syntax-e [v identifier?]) symbol?]
+@defproc[(syntax->datum [v any?]) any?]
+@defproc[(datum->syntax [ctx identifier?] [v any?]) any?]
+@defproc[(bound-identifier=? [id1 identifier?]
+                             [id2 identifier?]) boolean?]
+)]{
+
+Unlike the @racketmodname[zuo] function, @racket[identifier?] does not
+recognize a plain symbol as an identifier. The @racket[datum->syntax]
+function converts symbols in @racket[v] to syntax objects using the
+context of @racket[ctx].}

@@ -42,6 +42,20 @@
                               [else s]))])
     syntax->datum))
 
+(define checked-syntax-e
+  (let ([syntax-e (lambda (stx)
+                    (unless (identifier? stx)
+                      (error "syntax-e: not a syntax object" stx))
+                    (syntax-e stx))])
+    syntax-e))
+(define checked-datum->syntax
+  (let ([datum->syntax (lambda (ctx v)
+                         (unless (identifier? ctx)
+                           (error "datum->syntax: not a syntax object" ctx))
+                         (datum->syntax ctx v))])
+    datum->syntax))
+(define checked-syntax->datum syntax->datum)
+
 ;; Note: no lazy propagation, so this isn't going to scale well
 (define adjust-scope
   (letrec ([adjust-scope
@@ -123,8 +137,8 @@
       [else #f])))
 
 (define (bound-identifier=? id1 id2)
-  (unless (identifier? id1) (error "bound-identifier=?: not an identifier" id1))
-  (unless (identifier? id2) (error "bound-identifier=?: not an identifier" id2))
+  (unless (identifier? id1) (error "bound-identifier=?: not a syntax object" id1))
+  (unless (identifier? id2) (error "bound-identifier=?: not a syntax object" id2))
   (and (eq? (syntax-e id1) (syntax-e id2))
        (scope-set=? (identifier-scopes id1)
                     (identifier-scopes id2))))

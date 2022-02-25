@@ -1319,12 +1319,12 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
       out_string(out, "\"");
     }
   } else if (obj->tag == zuo_symbol_tag) {
-    if (mode == zuo_print_mode)
-      out_char(out, '\'');
     if ((mode == zuo_display_mode)
-        || (obj == zuo_symbol_from_string(ZUO_STRING_PTR(((zuo_symbol_t *)obj)->str), z.o_false)))
+        || (obj == zuo_symbol_from_string(ZUO_STRING_PTR(((zuo_symbol_t *)obj)->str), z.o_false))) {
+      if (mode == zuo_print_mode)
+        out_char(out, '\'');
       zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
-    else {
+    } else {
       out_string(out, "#<symbol:");
       zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
       out_string(out, ">");
@@ -2308,7 +2308,7 @@ static void zuo_falert(FILE* f, zuo_t *objs) {
       && (_zuo_car(objs)->tag == zuo_string_tag)) {
     zuo_fdisplay(f, _zuo_car(objs));
     objs = _zuo_cdr(objs);
-    if (objs != z.o_null) fprintf(stderr, ": ");
+    if (objs != z.o_null) fprintf(f, ": ");
   }
   zuo_fdisplay(f, zuo_tilde_v(objs));
 }

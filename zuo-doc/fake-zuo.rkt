@@ -102,6 +102,12 @@
     variable-ref
     variable-set!
 
+    identifier?
+    syntax-e
+    syntax->datum
+    datum->syntax
+    bound-identifier=?
+
     fd-open-input
     fd-open-output
     fd-close

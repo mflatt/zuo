@@ -13,6 +13,7 @@
 (require "module-path.zuo")
 (require "kernel.zuo")
 (require "read+print.zuo")
+(require "syntax.zuo")
 
 (require "cycle.zuo")
 

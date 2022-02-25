@@ -31,9 +31,9 @@
   (let* ([provides top-form-provides]
          [add (lambda (provides name val) (hash-set provides name (make-core-initial-bind val)))]
          [provides (add provides 'identifier? identifier?)]
-         [provides (add provides 'syntax-e syntax-e)]
-         [provides (add provides 'syntax->datum syntax->datum)]
-         [provides (add provides 'datum->syntax datum->syntax)]
+         [provides (add provides 'syntax-e checked-syntax-e)]
+         [provides (add provides 'syntax->datum checked-syntax->datum)]
+         [provides (add provides 'datum->syntax checked-datum->syntax)]
          [provides (add provides 'bound-identifier=? bound-identifier=?)])
     provides))
 
