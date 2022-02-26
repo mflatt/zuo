@@ -110,12 +110,6 @@ static void zuo_configure() {
       s++;
     }
   }
-
-#ifdef ZUO_WINDOWS
-  _setmode(0, _O_BINARY);
-  _setmode(1, _O_BINARY);
-  _setmode(2, _O_BINARY);
-#endif
 }
 
 /*======================================================================*/
@@ -1259,6 +1253,91 @@ static zuo_t *zuo_trie_keys(zuo_t *trie_in, zuo_t *accum) {
 }
 
 /*======================================================================*/
+/* terminal support                                                     */
+/*======================================================================*/
+
+#ifdef ZUO_WINDOWS
+static int zuo_ansi_ok = 0;
+#endif
+
+static void zuo_init_terminal() {
+#ifdef ZUO_WINDOWS
+  int i;
+  HANDLE h;
+
+  for (i = 0; i < 3; i++) {
+    _setmode(i, _O_BINARY);
+
+    if (i != 0) {
+      h = GetStdHandle((i == 1) ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+      if (GetFileType(h) == FILE_TYPE_CHAR) {
+        /* Try to enable ANSI escape codes, which should work for a recent
+           enough version of Windows */
+        DWORD mode = 0;
+        GetConsoleMode(h, &mode);
+# ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#  define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
+# endif
+        zuo_ansi_ok = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+      }
+    }
+  }
+#endif
+}
+
+static zuo_raw_handle_t zuo_get_std_handle(int which) {
+#ifdef ZUO_UNIX
+  return which;
+#endif
+#ifdef ZUO_WINDOWS
+  HANDLE h;
+
+  switch (which) {
+  case 0:
+    which = STD_INPUT_HANDLE;
+    break;
+  case 1:
+    which = STD_OUTPUT_HANDLE;
+    break;
+  default:
+    which = STD_ERROR_HANDLE;
+    break;
+  }
+  
+  return GetStdHandle(which);
+#endif
+}
+
+int zuo_is_ansi_terminal(zuo_raw_handle_t fd) {
+#ifdef ZUO_UNIX
+  /* assuming that all terminals support ANSI escapes... */
+  return isatty(fd);
+#endif
+#ifdef ZUO_WINDOWS
+  if (GetFileType((HANDLE)fd) == FILE_TYPE_CHAR) {
+    DWORD mode;
+    if (GetConsoleMode((HANDLE)fd, &mode))
+      return 1;
+  }
+  return 0;
+#endif
+}
+
+static void zuo_print_terminal(int which, const char *str) {
+  if (zuo_is_ansi_terminal(zuo_get_std_handle(which))) {
+    fprintf((which == 1) ? stdout : stderr, "%s", str);
+  }
+}
+
+#define ZUO_ERROR_COLOR "\033[91m"
+#define ZUO_ALERT_COLOR "\033[94m"
+#define ZUO_NORMAL_COLOR "\033[0m"
+
+static void zuo_error_color() {
+  zuo_print_terminal(2, ZUO_ERROR_COLOR);
+}
+
+/*======================================================================*/
 /* printing                                                             */
 /*======================================================================*/
 
@@ -1549,7 +1628,10 @@ static void zuo_stack_dump() {
 }
 
 static void zuo_fail(const char *str) {
+  if (str[0] != 0)
+    zuo_error_color();
   fprintf(stderr, "%s\n", str);
+  zuo_print_terminal(2, ZUO_NORMAL_COLOR);
   zuo_stack_dump();
   exit(1);
 }
@@ -1562,12 +1644,14 @@ static void zuo_show_err1w(const char *who, const char *str, zuo_t *obj) {
 }
 
 static void zuo_fail1w(const char *who, const char *str, zuo_t *obj) {
+  zuo_error_color();
   zuo_show_err1w(who, str, obj);
   zuo_fail("");
 }
 
 static void zuo_fail1w_errno(const char *who, const char *str, zuo_t *obj) {
   const char *msg = strerror(errno);
+  zuo_error_color();
   zuo_show_err1w(who, str, obj);
   fprintf(stderr, " (%s)", msg);
   zuo_fail("");
@@ -1605,6 +1689,7 @@ static const char *symbol_chars = "~!@#$%^&*-_=+:<>?/.";
 static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth);
 
 static void zuo_read_fail(const unsigned char *s, zuo_int_t *_o, const char *msg) {
+  zuo_error_color();
   fprintf(stderr, "read: %s at position %d", msg, (int)*_o);
   zuo_fail("");
 }
@@ -2396,14 +2481,17 @@ static void zuo_falert(FILE* f, zuo_t *objs) {
 }
 
 static zuo_t *zuo_error(zuo_t *objs) {
+  zuo_error_color();
   zuo_falert(stderr, objs);
   zuo_fail("");
   return z.o_undefined;
 }
 
 static zuo_t *zuo_alert(zuo_t *objs) {
+  zuo_print_terminal(1, ZUO_ALERT_COLOR);
   zuo_falert(stdout, objs);
   fprintf(stdout, "\n");
+  zuo_print_terminal(1, ZUO_NORMAL_COLOR);
   fflush(stdout);
   return z.o_void;
 }
@@ -2452,6 +2540,7 @@ static zuo_t *zuo_variable_ref(zuo_t *var) {
     zuo_fail1w("variable-ref", "not a variable", var);
   val = ((zuo_variable_t *)var)->val;
   if (val == z.o_undefined) {
+    zuo_error_color();
     fprintf(stderr, "undefined: ");
     zuo_fwrite(stderr, ((zuo_variable_t *)var)->name);
     zuo_fail("");
@@ -2500,6 +2589,7 @@ static void zuo_undump(zuo_t *d) {
 }
 
 static void bad_form(zuo_t *e) {
+  zuo_error_color();
   fprintf(stderr, "bad kernel syntax: ");
   zuo_fwrite(stderr, e);
   zuo_fail("");
@@ -3408,47 +3498,6 @@ static void check_options_consumed(const char *who, zuo_t *options) {
 /* files/streams                                                        */
 /*======================================================================*/
 
-static zuo_raw_handle_t zuo_get_std_handle(int which) {
-#ifdef ZUO_UNIX
-  return which;
-#endif
-#ifdef ZUO_WINDOWS
-  HANDLE h;
-
-  switch (which) {
-  case 0:
-    which = STD_INPUT_HANDLE;
-    break;
-  case 1:
-    which = STD_OUTPUT_HANDLE;
-    break;
-  default:
-    which = STD_ERROR_HANDLE;
-    break;
-  }
-  
-  h = GetStdHandle(which);
-
-  if ((h == INVALID_HANDLE_VALUE) || (h == NULL))
-    return h;
-
-  if ((which == STD_OUTPUT_HANDLE) || (which == STD_ERROR_HANDLE)) {
-    if (GetFileType(h) == FILE_TYPE_CHAR) {
-      /* Try to enable ANSI escape codes, which should work for a recent
-         enough version of Windows */
-      DWORD mode = 0;
-      GetConsoleMode(h, &mode);
-# ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
-#  define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
-# endif
-      SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-    }
-  }
-
-  return h;
-#endif
-}
-
 static zuo_t *zuo_fd_handle(zuo_raw_handle_t handle, zuo_handle_status_t status)  {
   zuo_t *h = zuo_handle(handle, status);
 #ifdef ZUO_UNIX
@@ -3689,19 +3738,26 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
   }
 }
 
-static zuo_t *zuo_fd_close(zuo_t *fd_h) {
+static void zuo_check_input_output_fd(const char *who, zuo_t *fd_h) {
   if (fd_h->tag == zuo_handle_tag) {
     zuo_handle_t *h = (zuo_handle_t *)fd_h;
     if ((h->u.h.status == zuo_handle_open_fd_out_status)
         || (h->u.h.status == zuo_handle_open_fd_in_status)) {
-      zuo_close(h->u.h.u.handle);
-      h->u.h.status = zuo_handle_closed_status;
-      return z.o_void;
+      return;
     }
   }
 
-  zuo_fail1w("fd-close", "not an open input or output file descriptor", fd_h);
-  return z.o_undefined;
+  zuo_fail1w(who, "not an open input or output file descriptor", fd_h);
+}
+
+static zuo_t *zuo_fd_close(zuo_t *fd_h) {
+  zuo_check_input_output_fd("fd-close", fd_h);
+  {
+    zuo_handle_t *h = (zuo_handle_t *)fd_h;
+    zuo_close(h->u.h.u.handle);
+    h->u.h.status = zuo_handle_closed_status;
+  }
+  return z.o_void;
 }
 
 zuo_t *zuo_fd_write(zuo_t *fd_h, zuo_t *str) {
@@ -3742,6 +3798,11 @@ static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
   str = zuo_sized_string(data, len);
 
   return str;
+}
+
+static zuo_t *zuo_fd_ansi_terminal_p(zuo_t *fd_h) {
+  zuo_check_input_output_fd("fd-ansi-terminal?", fd_h);
+  return zuo_is_ansi_terminal(ZUO_HANDLE_RAW(fd_h)) ? z.o_true : z.o_false;
 }
 
 static char *zuo_string_to_c(zuo_t *obj) {
@@ -4928,6 +4989,7 @@ int main(int argc, char **argv) {
   zuo_check_sanity();
 
   zuo_configure();
+  zuo_init_terminal();
 
   argc--;
   argv++;
@@ -4966,6 +5028,7 @@ int main(int argc, char **argv) {
         argc -= 2;
         argv += 2;
       } else {
+        zuo_error_color();
         fprintf(stderr, "%s: expected a path after -B", argv0);
         zuo_fail("");
       }
@@ -4978,6 +5041,7 @@ int main(int argc, char **argv) {
         argc -= 2;
         argv += 2;
       } else {
+        zuo_error_color();
         fprintf(stderr, "%s: expected a path after -X", argv0);
         zuo_fail("");
       }
@@ -4986,6 +5050,7 @@ int main(int argc, char **argv) {
       argv++;
       break;
     } else if (argv[0][0] == '-') {
+      zuo_error_color();
       fprintf(stderr, "%s: unrecognized flag: %s", argv0, argv[0]);
       zuo_fail("");
     } else
@@ -5086,6 +5151,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-close", zuo_fd_close);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-read", zuo_fd_read);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("fd-ansi-terminal?", zuo_fd_ansi_terminal_p);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("stat", zuo_stat);
   ZUO_TOP_ENV_SET_PRIMITIVE1("rm", zuo_rm);
@@ -5183,6 +5249,7 @@ int main(int argc, char **argv) {
     load_file = "main.zuo";
     load_path = zuo_string(load_file);
     if (zuo_stat(load_path, z.o_true) == z.o_false) {
+      zuo_error_color();
       fprintf(stderr, "%s: no file specified, and no \"main.zuo\" found", argv0);
       zuo_fail("");
     }

@@ -611,22 +611,23 @@ symbols format in @realracket[print] and @realracket[write] styles with
 @litchar{#<:}...@litchar{>} notation in all styles.}
 
 
-@defproc[(alert [v any?] ...) void?]{
-
-Prints to standard output using the same formatting rules as
-@racket[error]. This function is useful for simple logging and
-debugging tasks.}
-
-
 @defproc[(error [v any?] ...) void?]{
 
-Exits as an error after printing the @racket[v]s to standard error.
+Exits as an error after printing the @racket[v]s to standard error,
+using an error color if standard error is a terminal.
 
 If the first @racket[v] is a string, its character are printed output
 @realracket[display]-style, and then @litchar{: } is printed. All
 other @racket[v]s (including the first one if it's not a string) are
 combined using @racket[~v], and that resulting string is written
 @realracket[display]-style.}
+
+
+@defproc[(alert [v any?] ...) void?]{
+
+Prints to standard output using the same formatting rules as
+@racket[error], but in an alert color for terminals. This function is
+useful for simple logging and debugging tasks.}
 
 
 @section{Syntax Objects}
@@ -739,6 +740,12 @@ Writes the bytes of @racket[str] to the output file or output stream
 associated with @racket[handle], erroring for any other kind of
 @racket[handle].}
 
+@defproc[(fd-ansi-terminal? [handle handle?]) boolean?]{
+
+Returns @racket[#t] if the open input or output stream associated with
+@racket[handle] is a terminal and likely to support ANSI escape codes,
+@racket[#f] otherwise.}
+
 @defthing[eof any?]{
 
 A constant representing an end-of-file.}
@@ -849,7 +856,7 @@ with only certain keys per platform:
 The abbreviated @racket['type] field contains @racket['file],
 @racket['dir], or @racket['link], with @racket['link] only on Unix and
 only when @racket[follow-links?] is @racket[#f].}
-
+<
 @defproc[(ls [dir path-string?]) list?]{
 
 Returns a list of path strings for files in @racket[dir].}
