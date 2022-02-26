@@ -3460,8 +3460,7 @@ static zuo_t *zuo_fd_handle(zuo_raw_handle_t handle, zuo_handle_status_t status)
   return h;
 }
 
-static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
-                       zuo_int_t amount, zuo_int_t *_len) {
+static char *zuo_drain(zuo_raw_handle_t fd, zuo_int_t amount, zuo_int_t *_len) {
   char *s;
   zuo_int_t sz = 256, offset = 0;
 
@@ -3471,29 +3470,23 @@ static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
   s = malloc(sz+1);
   while ((amount < 0) || (offset < amount)) {
     zuo_int_t got;
-    if (f) {
-      got = fread(s + offset, 1, sz - offset, f);
-      if ((got == 0) && ferror(f))
-        got = -1;
-    } else {
-      zuo_int_t amt = sz - offset;
-      if (amt > 4096) amt = 4096;
+    zuo_int_t amt = sz - offset;
+    if (amt > 4096) amt = 4096;
 #ifdef ZUO_UNIX
-      got = read(fd, s + offset, amt);
+    got = read(fd, s + offset, amt);
 #endif
 #ifdef ZUO_WINDOWS
-      {
-        DWORD dgot;
-        if (!ReadFile(fd, s + offset, amt, &dgot, NULL)) {
-	  if (GetLastError() == ERROR_BROKEN_PIPE)
-	    got = 0;
-	  else
-	    got = -1;
-        } else
-          got = dgot;
-      }
-#endif
+    {
+      DWORD dgot;
+      if (!ReadFile(fd, s + offset, amt, &dgot, NULL)) {
+        if (GetLastError() == ERROR_BROKEN_PIPE)
+          got = 0;
+        else
+          got = -1;
+      } else
+        got = dgot;
     }
+#endif
 
     if (got < 0)
       zuo_fail("error reading stream");
@@ -3525,30 +3518,24 @@ static char *zuo_drain(FILE *f, zuo_raw_handle_t fd,
   return s;
 }
 
-static void zuo_fill(const char *s, zuo_int_t len, FILE *f, zuo_raw_handle_t fd) {
+static void zuo_fill(const char *s, zuo_int_t len, zuo_raw_handle_t fd) {
   zuo_int_t done = 0;
   while (done < len) {
     zuo_int_t did;
-    if (f) {
-      did = fwrite(s + done, 1, len - done, f);
-      if (did < len - done)
-        did = -1;
-    } else {
-      zuo_int_t amt = len - done;
-      if (amt > 4096) amt = 4096;
+    zuo_int_t amt = len - done;
+    if (amt > 4096) amt = 4096;
 #ifdef ZUO_UNIX
-      did = write(fd, s + done, amt);
+    did = write(fd, s + done, amt);
 #endif
 #ifdef ZUO_WINDOWS
-      {
-        DWORD ddid;
-        if (!WriteFile(fd, s + done, amt, &ddid, NULL))
-          did = -1;
-        else
-          did = ddid;
-      }
-#endif
+    {
+      DWORD ddid;
+      if (!WriteFile(fd, s + done, amt, &ddid, NULL))
+        did = -1;
+      else
+        did = ddid;
     }
+#endif
 
     if (did < 0)
       zuo_fail("error writing to stream");
@@ -3557,18 +3544,25 @@ static void zuo_fill(const char *s, zuo_int_t len, FILE *f, zuo_raw_handle_t fd)
   }
 }
 
-static void zuo_close(zuo_raw_handle_t handle)
+static void zuo_close_handle(zuo_raw_handle_t handle)
 {
 #ifdef ZUO_UNIX
   close(handle);
-  trie_set(Z.o_fd_table, handle, z.o_undefined, z.o_undefined);
 #endif
 #ifdef ZUO_WINDOWS
   CloseHandle(handle);
 #endif
 }
 
-static zuo_t *zuo_fd_open_input(zuo_t *path) {
+static void zuo_close(zuo_raw_handle_t handle)
+{
+  zuo_close_handle(handle);
+#ifdef ZUO_UNIX
+  trie_set(Z.o_fd_table, handle, z.o_undefined, z.o_undefined);
+#endif
+}
+
+static zuo_raw_handle_t zuo_fd_open_input_handle(zuo_t *path) {
   const char *who = "fd-open-input";
   zuo_raw_handle_t fd;
 
@@ -3591,13 +3585,17 @@ static zuo_t *zuo_fd_open_input(zuo_t *path) {
       zuo_fail1w(who, "file open failed", path);
     free(wp);
 #endif
-    return zuo_fd_handle(fd, zuo_handle_open_fd_in_status);
+    return fd;
   } else {
     if (path != zuo_symbol("stdin"))
       zuo_fail1w(who, "not a path string or 'stdin", path);
     fd = zuo_get_std_handle(0);
-    return zuo_handle(fd, zuo_handle_open_fd_in_status);
+    return fd;
   }
+}
+
+static zuo_t *zuo_fd_open_input(zuo_t *path) {
+  return zuo_handle(zuo_fd_open_input_handle(path), zuo_handle_open_fd_in_status);
 }
 
 static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
@@ -3718,7 +3716,7 @@ zuo_t *zuo_fd_write(zuo_t *fd_h, zuo_t *str) {
 
   check_string(who, str);
 
-  zuo_fill(ZUO_STRING_PTR(str), ZUO_STRING_LEN(str), NULL, ZUO_HANDLE_RAW(fd_h));
+  zuo_fill(ZUO_STRING_PTR(str), ZUO_STRING_LEN(str), ZUO_HANDLE_RAW(fd_h));
 
   return z.o_void;
 }
@@ -3740,7 +3738,7 @@ static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
       zuo_fail1w(who, "not a nonnegative integer or eof", amount);
   }
 
-  data = zuo_drain(NULL, ZUO_HANDLE_RAW(fd_h), amt, &len);
+  data = zuo_drain(ZUO_HANDLE_RAW(fd_h), amt, &len);
   if (data == NULL)
     return z.o_eof;
   
@@ -3785,7 +3783,7 @@ static zuo_t *zuo_dump_image_and_exit(zuo_t *fd_obj) {
   }
 
   dump = zuo_fasl_dump(&len);
-  zuo_fill(dump, len, NULL, fd);
+  zuo_fill(dump, len, fd);
 
   exit(0);
 }
@@ -3896,17 +3894,14 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
   }
 
   {
-    FILE *in;
-    char *filename, *input;
+    zuo_raw_handle_t in;
+    char *input;
     zuo_int_t in_len;
     
-    filename = ZUO_STRING_PTR(file_path);
-    in = fopen(filename, "rb");
-    if (in == NULL)
-      zuo_fail1("could not open module file", file_path);
+    in = zuo_fd_open_input_handle(file_path);
     
-    input = zuo_drain(in, 0, -1, &in_len);
-    fclose(in);
+    input = zuo_drain(in, -1, &in_len);
+    zuo_close_handle(in);
 
     mod = zuo_eval_module(module_path, input, in_len);
   }
@@ -5132,10 +5127,10 @@ int main(int argc, char **argv) {
 # endif
 
     if (boot_image) {
-      FILE *f = fopen(boot_image, "rb");
+      zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_string(boot_image));
       zuo_int_t len;
-      char *dump = zuo_drain(f, 0, -1, &len);
-      fclose(f);
+      char *dump = zuo_drain(in, -1, &len);
+      zuo_close_handle(in);
       zuo_fasl_restore(dump, len);
       free(dump);
     } else {
@@ -5208,7 +5203,8 @@ int main(int argc, char **argv) {
 
   if (load_file[0] == 0) {
     zuo_int_t in_len;
-    char *input = zuo_drain(stdin, 0, -1, &in_len);
+    zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_symbol("stdin"));
+    char *input = zuo_drain(in, -1, &in_len);
     (void)zuo_eval_module(load_path, input, in_len);
   } else
     (void)zuo_module_to_hash(load_path);
