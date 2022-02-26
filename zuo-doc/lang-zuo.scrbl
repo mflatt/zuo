@@ -632,7 +632,7 @@ useful for simple logging and debugging tasks.}
 
 @section{Syntax Objects}
 
-A @deftech{syntax object} combines a symbolic with a binding scope,
+A @deftech{syntax object} combines a symbol with a binding scope,
 where the two are used to determine a binding when the identifier is
 used in a macro expansion.
 
