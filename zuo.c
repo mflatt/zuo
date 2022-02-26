@@ -728,6 +728,7 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   case zuo_string_tag:
     {
       int i;
+      /* restore assumes that a string starts with its length */
       zuo_fasl_int(&((zuo_string_t *)obj)->len, stream);
       for (i = 0; i < ((zuo_string_t *)obj)->len; i++)
         zuo_fasl_char(&((zuo_string_t *)obj)->s[i], stream);
@@ -744,11 +745,23 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   case zuo_trie_node_tag:
     {
       int i;
-      /* restore assumes that a string starts with its length */
+      zuo_int32_t mask;
+      if (stream->mode == zuo_fasl_in)
+        zuo_fasl_int32(&mask, stream);
+      else {
+        mask = 0;
+        for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
+          if (((zuo_trie_node_t *)obj)->next[i] != z.o_undefined)
+            mask |= (1 << i);
+        zuo_fasl_int32(&mask, stream);
+      }
       zuo_fasl_ref(&((zuo_trie_node_t *)obj)->key, stream);
       zuo_fasl_ref(&((zuo_trie_node_t *)obj)->val, stream);
       for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
-        zuo_fasl_ref(&((zuo_trie_node_t *)obj)->next[i], stream);
+        if (mask & (1 << i))
+          zuo_fasl_ref(&((zuo_trie_node_t *)obj)->next[i], stream);
+        else
+          ((zuo_trie_node_t *)obj)->next[i] = z.o_undefined;
     }
     break;
   case zuo_variable_tag:
