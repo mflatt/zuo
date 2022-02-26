@@ -84,6 +84,8 @@ static const char *zuo_lib_path = ZUO_LIB_PATH;
 
 #define MIN_HEAP_SIZE (8*1024*1024)
 
+#define ALLOC_ALIGN(i) (((i) + (sizeof(zuo_intptr_t) - 1)) & ~(sizeof(zuo_intptr_t) -1))
+
 /*======================================================================*/
 /* run-time configuration                                               */
 /*======================================================================*/
@@ -186,7 +188,7 @@ typedef struct {
 /* Since `len` overlaps with forwarding, we can tentatively get the "length" from any object */
 #define ZUO_STRING_LEN(obj) (((zuo_string_t *)(obj))->len)
 
-#define ZUO_STRING_ALLOC_SIZE(len) (((sizeof(zuo_string_t) + (len) + 1 + 3) >> 2) << 2)
+#define ZUO_STRING_ALLOC_SIZE(len) (sizeof(zuo_string_t) + (len))
 #define ZUO_STRING_PTR(obj) ((char *)&((zuo_string_t *)(obj))->s)
 
 typedef struct {
@@ -380,7 +382,8 @@ static zuo_t *zuo_new(int tag, zuo_int_t size) {
   zuo_t *obj;
 
   ASSERT(size >= sizeof(zuo_forwarded_t));
-  ASSERT(!(size & 0x3));
+
+  size = ALLOC_ALIGN(size);
   
   if (to_space == NULL) {
     to_space = malloc(heap_size);
@@ -445,7 +448,7 @@ void zuo_update(zuo_t **addr_to_update) {
   zuo_t *obj = *addr_to_update;
 
   if (obj->tag != zuo_forwarded_tag) {
-    zuo_int_t size = object_size(obj->tag, ZUO_STRING_LEN(obj));
+    zuo_int_t size = ALLOC_ALIGN(object_size(obj->tag, ZUO_STRING_LEN(obj)));
     zuo_t *new_obj = (zuo_t *)((char *)to_space + allocation_offset);
     allocation_offset += size;
 
@@ -511,7 +514,7 @@ static void zuo_trace_objects() {
   while (trace_offset < allocation_offset) {
     zuo_t *obj = (zuo_t *)((char *)to_space + trace_offset);
     zuo_trace(obj);
-    trace_offset += object_size(obj->tag, ZUO_STRING_LEN(obj));
+    trace_offset += ALLOC_ALIGN(object_size(obj->tag, ZUO_STRING_LEN(obj)));
   }
 }
 
@@ -936,7 +939,7 @@ static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
       sz = object_size(tag, 0);
 
     stream.map[i] = stream.heap_size;
-    stream.heap_size += sz;
+    stream.heap_size += ALLOC_ALIGN(sz);
   }
 
   stream.heap = malloc(stream.heap_size * alloc_factor);
@@ -1968,7 +1971,7 @@ static zuo_t *dispatch_primitiveN(void *proc, zuo_t *args) {
 }
 
 static zuo_t *zuo_primitiveN(zuo_t *(*f)(zuo_t *), int min_args, zuo_t *name) {
-  return zuo_primitive(dispatch_primitiveN, (void *)f, -1 << min_args, name);
+  return zuo_primitive(dispatch_primitiveN, (void *)f, -(1 << min_args), name);
 }
 
 /*======================================================================*/
@@ -2303,6 +2306,10 @@ static zuo_t *zuo_modulo(zuo_t *n, zuo_t *m) {
   check_ints(n, m, who);
   m_i = ZUO_UINT_I(m);
   if (m_i == 0) zuo_fail1w(who, "divide by zero", m);
+  if (m_i == -1) {
+    /* avoid potential overflow a the minimum integer */
+    return zuo_integer(0);
+  }
   return zuo_integer(ZUO_INT_I(n) % m_i);
 }
 
