@@ -151,7 +151,7 @@ typedef struct {
 
 typedef struct {
   zuo_t obj;
-  zuo_int_t index;
+  zuo_int32_t index;
 } zuo_fasl_forwarded_t;
 
 typedef struct {
@@ -686,7 +686,7 @@ static void zuo_fasl_ref(zuo_t **_obj, zuo_fasl_stream_t *_stream) {
   } else {
     zuo_fasl_stream_out_t *stream = (zuo_fasl_stream_out_t *)_stream;
     zuo_t *obj = *_obj;
-    zuo_int32_t delta = ((char *)obj) - ((char *)stream->heap);
+    zuo_intptr_t delta = ((char *)obj) - ((char *)stream->heap);
     zuo_t *shadow_obj = (zuo_t *)(((char *)stream->shadow_heap) + delta);
 
     ASSERT((delta >= 0) && (delta < stream->heap_size));
@@ -871,10 +871,7 @@ static char *zuo_fasl_dump(zuo_int_t *_len) {
     zuo_t *obj = stream.objs[map_done];
 
     /* register location of this object in the image */
-    zuo_int32_t delta = ((char *)obj) - ((char *)stream.heap);
-    zuo_t *shadow_obj = (zuo_t *)(((char *)stream.shadow_heap) + delta);
-    ASSERT(shadow_obj->tag == zuo_forwarded_tag);
-    stream.map[((zuo_fasl_forwarded_t *)shadow_obj)->index] = stream.image_offset;
+    stream.map[map_done] = stream.image_offset;
 
     zuo_fasl(obj, &stream.stream);
   }
