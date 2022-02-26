@@ -37,21 +37,38 @@
 # define ASSERT(x) do { } while (0)
 #endif
 
-#include <stdint.h>
-
 /* `zuo_int_t` should be a 64-bit integer type, so we don't have to
    worry about Y2038 or large file sizes. `zuo_int32_t` should be a
-   32-bit integer type, obviously. */
+   32-bit integer type, obviously. `zuo_intptr_t` is an integer the
+   same width as a pointer. */
+#ifdef ZUO_UNIX
+#include <stdint.h>
+
 typedef int64_t zuo_int_t;
 typedef uint64_t zuo_uint_t;
 
 typedef int32_t zuo_int32_t;
 typedef uint32_t zuo_uint32_t;
 
-#ifdef ZUO_WINDOWS
-typedef HANDLE zuo_raw_handle_t;
-#else
+typedef intptr_t zuo_intptr_t;
+
 typedef int zuo_raw_handle_t;
+#endif
+#ifdef ZUO_WINDOWS
+/* avoiding stdint to work with very old compilers */
+typedef long long zuo_int_t;
+typedef unsigned long long zuo_uint_t;
+
+typedef int zuo_int32_t;
+typedef unsigned int zuo_uint32_t;
+
+# ifdef _WIN64
+typedef long long zuo_intptr_t;
+# else
+typedef long zuo_intptr_t;
+# endif
+
+typedef HANDLE zuo_raw_handle_t;
 #endif
 
 /* the "image.zuo" script looks for this line: */
@@ -162,7 +179,7 @@ typedef struct {
 
 typedef struct {
   zuo_t obj;
-  zuo_int_t len; /* must be at the same place as forwarding */
+  zuo_intptr_t len; /* must be at the same place as forwarding */
   unsigned char s[1];
 } zuo_string_t;
 
@@ -224,14 +241,17 @@ typedef struct zuo_handle_t {
   zuo_t obj;
   union {
     struct {
-      zuo_raw_handle_t handle;
       zuo_handle_status_t status;
+      union {
+        zuo_raw_handle_t handle;
+        zuo_int_t result;
+      } u;
     } h;
     zuo_t *forward; /* make sure the object is big enough */
   } u;
 } zuo_handle_t;
 
-#define ZUO_HANDLE_RAW(obj) (((zuo_handle_t *)(obj))->u.h.handle)
+#define ZUO_HANDLE_RAW(obj) (((zuo_handle_t *)(obj))->u.h.u.handle)
 
 typedef struct {
   zuo_t obj;
@@ -728,8 +748,10 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   case zuo_string_tag:
     {
       int i;
+      zuo_int_t len = ((zuo_string_t *)obj)->len;
       /* restore assumes that a string starts with its length */
-      zuo_fasl_int(&((zuo_string_t *)obj)->len, stream);
+      zuo_fasl_int(&len, stream);
+      ((zuo_string_t *)obj)->len = len;
       for (i = 0; i < ((zuo_string_t *)obj)->len; i++)
         zuo_fasl_char(&((zuo_string_t *)obj)->s[i], stream);
     }
@@ -1052,7 +1074,7 @@ static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env) {
 
 static zuo_t *zuo_handle(zuo_raw_handle_t handle, zuo_handle_status_t status) {
   zuo_handle_t *obj = (zuo_handle_t *)zuo_new(zuo_handle_tag, sizeof(zuo_handle_t));
-  obj->u.h.handle = handle;
+  obj->u.h.u.handle = handle;
   obj->u.h.status = status;
   return (zuo_t *)obj;
 }
@@ -3058,21 +3080,31 @@ static zuo_t *zuo_relative_path_p(zuo_t *obj) {
 
 static char *zuo_getcwd() {
   char *dir;
-
   char *s;
   int len = 256;
   
   s = malloc(len);
   while (1) {
+    int bigger;
 #ifdef ZUO_UNIX
     dir = getcwd(s, len);
+    bigger = !dir && (errno == ERANGE);
 #endif
 #ifdef ZUO_WINDOWS
-    dir = (char *)_wgetcwd((wchar_t *)s, len / sizeof(wchar_t));
+    {
+      DWORD have = len / sizeof(wchar_t), want;
+      want = GetCurrentDirectoryW(have, (wchar_t *)s);
+      if (want == 0)
+        dir = NULL;
+      else {
+        dir = s;
+        bigger = want > have;
+      }
+    }
 #endif
     if (dir)
       break;
-    if (errno == ERANGE) {
+    if (bigger) {
       free(s);
       len *= 2;
       s = malloc(len);
@@ -3402,6 +3434,9 @@ static zuo_raw_handle_t zuo_get_std_handle(int which) {
          enough version of Windows */
       DWORD mode = 0;
       GetConsoleMode(h, &mode);
+# ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#  define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
+# endif
       SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
   }
@@ -3657,7 +3692,7 @@ static zuo_t *zuo_fd_close(zuo_t *fd_h) {
     zuo_handle_t *h = (zuo_handle_t *)fd_h;
     if ((h->u.h.status == zuo_handle_open_fd_out_status)
         || (h->u.h.status == zuo_handle_open_fd_in_status)) {
-      zuo_close(h->u.h.handle);
+      zuo_close(h->u.h.u.handle);
       h->u.h.status = zuo_handle_closed_status;
       return z.o_void;
     }
@@ -3730,7 +3765,7 @@ static zuo_t *zuo_dump_image_and_exit(zuo_t *fd_obj) {
       || ((zuo_handle_t *)fd_obj)->u.h.status != zuo_handle_open_fd_out_status)
     zuo_fail1w("dump-image-and-exit", "not an open output file descriptor", fd_obj);
 
-  fd = ((zuo_handle_t *)fd_obj)->u.h.handle;
+  fd = ZUO_HANDLE_RAW(fd_obj);
 
   /* no runtime state is preserved */
   {
@@ -4099,60 +4134,66 @@ static zuo_t *zuo_ls(zuo_t *dir_path) {
   const char *who = "ls";
   check_path_string(who, dir_path);
 #ifdef ZUO_UNIX
-  DIR *dir;
-  struct dirent *e;
-  zuo_t *first = z.o_null, *last = NULL, *pr;
+  {
+    DIR *dir;
+    struct dirent *e;
+    zuo_t *first = z.o_null, *last = NULL, *pr;
   
-  dir = opendir(ZUO_STRING_PTR(dir_path));
-  if (!dir)
-    zuo_fail1w_errno(who, "failed", dir_path);
+    dir = opendir(ZUO_STRING_PTR(dir_path));
+    if (!dir)
+      zuo_fail1w_errno(who, "failed", dir_path);
   
-  while ((e = readdir(dir))) {
-    if ((e->d_name[0] == '.')
-        && ((e->d_name[1] == 0)
-            || ((e->d_name[1] == '.')
-                && (e->d_name[2] == 0)))) {
-      /* skip */
-    } else {
-      pr = zuo_cons(zuo_string(e->d_name), z.o_null);
-      if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
-      last = pr;
+    while ((e = readdir(dir))) {
+      if ((e->d_name[0] == '.')
+          && ((e->d_name[1] == 0)
+              || ((e->d_name[1] == '.')
+                  && (e->d_name[2] == 0)))) {
+        /* skip */
+      } else {
+        pr = zuo_cons(zuo_string(e->d_name), z.o_null);
+        if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
+        last = pr;
+      }
     }
+
+    closedir(dir);
+
+    return first;
   }
-
-  closedir(dir);
-
-  return first;
 #endif
 #ifdef ZUO_WINDOWS
-  wchar_t *wwildpath;
-  intptr_t handle;
-  struct _wfinddata_t fileinfo;
-  char *s;
-  zuo_t *first = z.o_null, *last = NULL, *pr;
+  {
+    wchar_t *wwildpath;
+    HANDLE handle;
+    WIN32_FIND_DATAW fileinfo;
+    char *s;
+    zuo_t *first = z.o_null, *last = NULL, *pr;
 
-  wwildpath = zuo_to_wide(ZUO_STRING_PTR(zuo_build_path2(dir_path, zuo_string("*"))));
+    wwildpath = zuo_to_wide(ZUO_STRING_PTR(zuo_build_path2(dir_path, zuo_string("*"))));
 
-  if ((handle = _wfindfirst(wwildpath, &fileinfo)) == (intptr_t)-1)
-    zuo_fail1w_errno(who, "failed", dir_path);
+    handle = FindFirstFileW(wwildpath, &fileinfo);
 
-  do {
-    if ((fileinfo.name[0] == '.')
-        && ((fileinfo.name[1] == 0)
-            || ((fileinfo.name[1] == '.')
-                && (fileinfo.name[2] == 0)))) {
-      /* skip */
-    } else {
-      s = zuo_from_wide(fileinfo.name);
-      pr = zuo_cons(zuo_string(s), z.o_null);
-      free(s);
-      if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
-      last = pr;
-    }
-  } while (_wfindnext(handle, &fileinfo) == 0);
-  _findclose(handle);
+    if (handle == INVALID_HANDLE_VALUE)
+      zuo_fail1w_errno(who, "failed", dir_path);
 
-  return first;
+    do {
+      if ((fileinfo.cFileName[0] == '.')
+          && ((fileinfo.cFileName[1] == 0)
+              || ((fileinfo.cFileName[1] == '.')
+                  && (fileinfo.cFileName[2] == 0)))) {
+        /* skip */
+      } else {
+        s = zuo_from_wide(fileinfo.cFileName);
+        pr = zuo_cons(zuo_string(s), z.o_null);
+        free(s);
+        if (last == NULL) first = pr; else ZUO_CDR(last) = pr;
+        last = pr;
+      }
+    } while (FindNextFileW(handle, &fileinfo));
+    FindClose(handle);
+
+    return first;
+  }
 #endif
 }
 
@@ -4350,7 +4391,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       zuo_pipe(&in_r, &in);
     } else if ((opt->tag == zuo_handle_tag)
                && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_in_status)) {
-      in_r = ((zuo_handle_t *)opt)->u.h.handle;
+      in_r = ZUO_HANDLE_RAW(opt);
     } else
       zuo_fail1w(who, "not 'pipe or an open input file descriptor", opt);
   }
@@ -4362,7 +4403,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       zuo_pipe(&out, &out_w);
     } else if ((opt->tag == zuo_handle_tag)
                && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_out_status)) {
-      out_w = ((zuo_handle_t *)opt)->u.h.handle;
+      out_w = ZUO_HANDLE_RAW(opt);
     } else
       zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
   }
@@ -4374,7 +4415,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       zuo_pipe(&err, &err_w);
     } else if ((opt->tag == zuo_handle_tag)
                && (((zuo_handle_t *)opt)->u.h.status == zuo_handle_open_fd_out_status)) {
-      err_w = ((zuo_handle_t *)opt)->u.h.handle;
+      err_w = ZUO_HANDLE_RAW(opt);
     } else
       zuo_fail1w(who, "not 'pipe or an open output file descriptor", opt);
   }
@@ -4599,7 +4640,7 @@ zuo_t *zuo_process_status(zuo_t *p) {
   if (((zuo_handle_t *)p)->u.h.status == zuo_handle_process_running_status)
     return zuo_symbol("running");
   else
-    return zuo_integer((zuo_int_t)((zuo_handle_t *)p)->u.h.handle);
+    return zuo_integer(((zuo_handle_t *)p)->u.h.u.result);
 }
 
 zuo_t *zuo_process_wait(zuo_t *pids_i) {
@@ -4633,11 +4674,11 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
       if (p->tag == zuo_handle_tag) {
         ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
         if (WIFEXITED(stat_loc))
-          ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)WEXITSTATUS(stat_loc);
+          ((zuo_handle_t *)p)->u.h.u.result = WEXITSTATUS(stat_loc);
         else {
           int r = WTERMSIG(stat_loc);
           if (r == 0) r = 256;
-          ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)r;
+          ((zuo_handle_t *)p)->u.h.u.result = r;
         }
         trie_set(Z.o_pid_table, pid, z.o_undefined, z.o_undefined);
       }
@@ -4660,7 +4701,7 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
 	if (GetExitCodeProcess(sci, &w)) {
 	  if (w != STILL_ACTIVE) {
 	    ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
-	    ((zuo_handle_t *)p)->u.h.handle = (zuo_raw_handle_t)(intptr_t)w;
+	    ((zuo_handle_t *)p)->u.h.u.result = w;
 	    return p;
 	  }
 	} else
