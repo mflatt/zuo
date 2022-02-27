@@ -143,7 +143,7 @@
        (scope-set=? (identifier-scopes id1)
                     (identifier-scopes id2))))
 
-(include "../mm-common/free-id-eq.zuo")
+(include "../base-common/free-id-eq.zuo")
 
 ;; Definition-context tracking is covered by scopes
 (define (new-defn-context* binds)

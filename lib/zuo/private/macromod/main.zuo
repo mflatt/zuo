@@ -1,6 +1,0 @@
-#lang zuo/private/macromod
-
-
-(provide (all-from-out zuo/private/macromod))
-
-(include "../mm-common/main.zuo")

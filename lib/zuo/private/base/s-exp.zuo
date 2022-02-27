@@ -128,7 +128,7 @@
            (eq? (syntactic-closure-ctx a) (syntactic-closure-ctx b)))
       (eq? a b)))
 
-(include "../mm-common/free-id-eq.zuo")
+(include "../base-common/free-id-eq.zuo")
 
 ;; syntax-quote turns a symbol into a syntactic closure, and leaves everything
 ;; else alone; the closure captures the enclosing context where the symbol is

@@ -1,3 +1,0 @@
-#lang zuo/private/macromod
-
-(include "../mm-common/define-help.zuo")

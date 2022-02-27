@@ -24,21 +24,23 @@
             merge-bindings-export-key (make-export-merge-binds ctx (state-binds state))))))
 
 (hash
- ;; makes `#lang zuo/private/macromod work:
+ ;; makes `#lang zuo/private/base[-hygienic] work:
  'read-and-eval (make-read-and-eval (lambda (ctx)
                                       (make-state (binds-create top-provides ctx)
                                                   (initial-nominals language-mod-path top-provides))))
- ;; makes `(require zuo/private/macromod)` work:
+ ;; makes `(require zuo/private/base[hygienic])` work:
  'macromod-provides top-provides
- ;; for making a new `#lang` with some initial imports:
- 'make-read-and-eval-with-initial-imports-from
+ ;; for making a new `#lang` with initial imports from `mod-path`:
+ 'make-language
  (lambda (mod-path)
    (let* ([mod (module->hash mod-path)]
           [provides (hash-ref mod 'macromod-provides #f)]
           [m-binds (hash-ref mod merge-bindings-export-key #f)])
      (unless provides 
        (syntax-error "not a compatible module for initial imports" mod-path))
-     (make-read-and-eval
-      (lambda (ctx)
-        (make-state (merge-binds* (binds-create provides ctx) m-binds)
-                    (initial-nominals mod-path provides)))))))
+     (hash 'read-and-eval
+           (make-read-and-eval
+            (lambda (ctx)
+              (make-state (merge-binds* (binds-create provides ctx) m-binds)
+                          (initial-nominals mod-path provides))))
+           'macromode-provides (hash-ref (module->hash mod-path) 'macromod-provides #f)))))

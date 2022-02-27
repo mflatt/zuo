@@ -1,8 +1,8 @@
-#lang zuo/private/defmacromod
+#lang zuo/private/base
 
-;; This module could be implemented in either `macromod` or
-;; `defmacromod`, but use use `defmacromod` to keep it faster
-;; (at last for `defmacromod`-only programs)
+;; This module could be implemented in either `base` or
+;; `base-hygienic`, but use use `base` to keep it faster
+;; (at least for `base`-only programs)
 
 (provide caar
          cadr

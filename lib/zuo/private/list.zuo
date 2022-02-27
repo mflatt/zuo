@@ -1,8 +1,8 @@
-#lang zuo/private/defmacromod
+#lang zuo/private/base
 
 ;; See note in "pair.zuo" about language choice
 
-(require "defmacromod/and-or.zuo")
+(require "base/and-or.zuo")
 
 (provide list*
          list-ref

@@ -1,7 +1,7 @@
-#lang zuo/private/defmacromod
+#lang zuo/private/base
 
-(require "defmacromod/and-or.zuo"
-         "defmacromod/define.zuo"
+(require "base/and-or.zuo"
+         "base/define.zuo"
          "list.zuo")
 
 (provide any?
