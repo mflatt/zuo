@@ -81,6 +81,7 @@
     string->symbol
     string->uninterned-symbol
     symbol->string
+    char
 
     hash
     hash-ref
@@ -97,6 +98,7 @@
     build-path
     split-path
     path->complete-path
+    quote-path
 
     variable
     variable-ref

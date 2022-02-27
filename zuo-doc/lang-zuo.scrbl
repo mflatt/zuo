@@ -484,6 +484,12 @@ without trailing separators.}
 
 Returns @racket[#t] if @racket[v] is a relative path, @racket[#f] otherwise.}
 
+@defform[(quote-path path)]{
+
+Expands to a path that refers to @racket[path] relative to the
+enclosing module's directory. The expansion is equivalent to
+@racket[(build-path (car (split-path (quote-module-path))) path)].}
+
 
 @section{Opaque Records}
 

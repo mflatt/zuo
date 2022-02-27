@@ -48,7 +48,7 @@
 
 (define out-file (hash-ref cmd 'output #f))
 
-(define zuo.c (fd-read (fd-open-input "zuo.c") eof))
+(define zuo.c (fd-read (fd-open-input (quote-path "zuo.c")) eof))
 (define out (if out-file
                 (fd-open-output out-file (hash 'exists 'truncate))
                 (fd-open-output 'stdout (hash))))
