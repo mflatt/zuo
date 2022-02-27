@@ -47,11 +47,18 @@
     (when (or (defined? id-bind)
               (defined-macro? id-bind))
       (syntax-error "duplicate definition" id))
-    (let* ([e (parse (cadr (cdr s)) state)]
-           [proc (kernel-eval (name-lambda e id))])
-      (unless (and (procedure? proc) (not (= 0 (bitwise-and (procedure-arity-mask proc) 6))))
-        (error "define-syntax: not a procedure of one or two arguments" proc))
-      (add-binding state id (as-specific (make-defined-macro proc))))))
+    (let* ([e (parse (cadr (cdr s)) id state)]
+           [proc (kernel-eval e)])
+      (unless (and (procedure? proc) (not (= 0 (bitwise-and (procedure-arity-mask proc) 14))))
+        (error "define-syntax: not a procedure of one, two, or three arguments" proc))
+      (let ([wrap (lambda (proc)
+                    (let ([mask (procedure-arity-mask proc)])
+                      (cond
+                        [(= (bitwise-and mask 8) 8) (lambda (s free=? name)
+                                                      (proc s free=? (and name (symbol->string (syntax-e name)))))]
+                        [(= (bitwise-and mask 4) 4) (lambda (s free=? name) (proc s free=?))]
+                        [else (lambda (s free=? name) (proc s))])))])
+        (add-binding state id (as-specific (make-defined-macro (wrap proc))))))))
 
 (define (expand-require s state mod-path)
   (let* ([check-renames
@@ -178,7 +185,7 @@
                                         (resolve state rator #f))])
                         (cond
                           [(macro? bind)
-                           (apply-macro bind s ctx (state-binds state)
+                           (apply-macro bind s ctx (state-binds state) #f
                                         (lambda (new-s new-binds)
                                           (let ([new-state (state-set-binds state new-binds)])
                                             (expand-seq (cons new-s (cdr es)) accum new-state provides))))]
@@ -271,8 +278,8 @@
            (resolve-provide s state ctx mod-path outs))
          (hash)
          (reverse provides)))
-           
-(define (parse-body orig-s es state mod-path ctx parse)
+
+(define (parse-body orig-s es name state mod-path ctx parse)
   ;; It could be natural and correct to create a new scope for this
   ;; body's definition context. That turns out to be unnecessary, though,
   ;; due to the way our binding table is accumulated in `state` instead of
@@ -288,13 +295,13 @@
          [state (state-set-variables state outside-vars)]
          [body (cond
                  [(null? es) (syntax-error "empty body after expansion" orig-s)]
-                 [(null? (cdr es)) (parse (car es) state)]
-                 [else (cons 'begin (map (lambda (s) (parse s state)) es))])])
+                 [(null? (cdr es)) (parse (car es) name state)]
+                 [else (cons 'begin (map (lambda (s) (parse s #f state)) es))])])
     (nest-bindings vars body)))
 
-(define (parse-lambda s state mod-path ctx parse)
-  (unless (>= (length s) 3) (bad-syntax s))
-  (let* ([formals (cadr s)]
+(define (parse-lambda-clause s clause state mod-path ctx parse)
+  (unless (>= (length clause) 2) (bad-syntax s))
+  (let* ([formals (car clause)]
          [new-formals (letrec ([reformal (lambda (f seen)
                                            (cond
                                              [(null? f) '()]
@@ -322,10 +329,42 @@
                                                         (car new-formals))]
                                           [else state]))])
                   (add-formals state formals new-formals))])
-    (list 'lambda new-formals
-          (parse-body s (add-scope (cddr s) new-scope) state mod-path ctx parse))))
+    (list new-formals
+          (parse-body s (add-scope (cdr clause) new-scope) #f state mod-path ctx parse))))
 
-(define (parse-let s state mod-path ctx parse)
+(define (parse-lambda s name state mod-path ctx parse)
+  (name-lambda name (cons 'lambda (parse-lambda-clause s (cdr s) state mod-path ctx parse))))
+
+(define (parse-case-lambda s name state mod-path ctx parse)
+  ;; turns into a dispatching `lambda` with a declared arity mask
+  (let* ([lams (map (lambda (clause)
+                      (unless (list? clause) (bad-syntax s))
+                      (cons 'lambda (parse-lambda-clause s clause state mod-path ctx parse)))
+                    (cdr s))]
+         [masks (map (lambda (clause)
+                       (letrec ([clause-mask (lambda (formals mask)
+                                               (cond
+                                                 [(null? formals) mask]
+                                                 [(pair? formals) (clause-mask (cdr formals) (* mask 2))]
+                                                 [else (- mask)]))])
+                         (clause-mask (car clause) 1)))
+                     (cdr s))]
+         [mask (foldl (lambda (one-mask mask) (bitwise-ior one-mask mask)) 0 masks)])
+    (name-lambda
+     name
+     (list 'lambda 'args mask
+           (list 'let (list (list 'bit (list arithmetic-shift 1 (list length 'args))))
+                 (letrec ([build-dispatch
+                           (lambda (lams masks)
+                             (cond
+                               [(null? lams) (list (void))]
+                               [(null? (cdr lams)) (list apply (car lams) 'args)]
+                               [else (list 'if (list = 0 (list bitwise-and 'bit (car masks)))
+                                           (build-dispatch (cdr lams) (cdr masks))
+                                           (list apply (car lams) 'args))]))])
+                   (build-dispatch lams masks)))))))
+
+(define (parse-let s name state mod-path ctx parse)
   (unless (>= (length s) 3) (bad-syntax s))
   (let* ([cls (cadr s)]
          [orig-state state]
@@ -337,7 +376,7 @@
                 (cond
                   [(null? cls)
                    (nest-bindings (reverse new-cls)
-                                  (parse-body s (add-scope (cddr s) new-scope) state mod-path ctx parse))]
+                                  (parse-body s (add-scope (cddr s) new-scope) name state mod-path ctx parse))]
                   [else
                    (let* ([cl (car cls)])
                      (unless (and (list? cl) (= 2 (length cl))) (bad-syntax s))
@@ -347,15 +386,13 @@
                          (duplicate-identifier id s))
                        (let* ([new-id (gensym (syntax-e id))])
                          (parse-clauses (cdr cls)
-                                        (cons (list new-id (name-lambda
-                                                            (parse (cadr cl) orig-state)
-                                                            id))
+                                        (cons (list new-id (parse (cadr cl) id orig-state))
                                               new-cls)
                                         (add-binding state (add-scope id new-scope) (make-local new-id))
                                         (cons id seen)))))]))])
       (parse-clauses cls '() state '()))))
 
-(define (parse-letrec s state mod-path ctx parse)
+(define (parse-letrec s name state mod-path ctx parse)
   (unless (>= (length s) 3) (bad-syntax s))
   (let* ([cls (cadr s)]
          [new-scope (make-scope "letrec")]
@@ -369,16 +406,15 @@
                              (map (lambda (new-id)
                                     (list new-id (list variable (list 'quote new-id))))
                                   new-ids)
-                             (list 'begin
-                                   (cons 'begin (map2 (lambda (cl new-id)
-                                                        (list variable-set! (car new-ids)
-                                                              (name-lambda
-                                                               (let ([rhs (cadr (car cls))])
-                                                                 (parse (add-scope rhs new-scope) state))
-                                                               (caar cls))))
-                                                      cls
-                                                      (reverse new-ids)))
-                                   (parse-body s (add-scope (cddr s) new-scope) state mod-path ctx parse)))]
+                             (cons 'begin
+                                   (append (map2 (lambda (cl new-id)
+                                                   (list variable-set! (car new-ids)
+                                                         (let ([rhs (cadr (car cls))])
+                                                           (parse (add-scope rhs new-scope) (caar cls) state))))
+                                                 cls
+                                                 (reverse new-ids))
+                                           (list
+                                            (parse-body s (add-scope (cddr s) new-scope) name state mod-path ctx parse)))))]
                            [else
                             (let* ([cl (car x-cls)])
                               (unless (and (list? cl) (= 2 (length cl))) (bad-syntax s))
@@ -395,7 +431,7 @@
 
 (define (make-parse ctx mod-path)
   (letrec ([parse
-            (lambda (s state)
+            (lambda (s name state)
               (cond
                 [(pair? s)
                  (let* ([rator (car s)]
@@ -403,19 +439,21 @@
                                    (resolve state rator #f))])
                    (cond
                      [(macro? bind)
-                      (apply-macro bind s ctx (state-binds state)
+                      (apply-macro bind s ctx (state-binds state) name
                                    (lambda (new-s new-binds)
-                                     (parse new-s (state-set-binds state new-binds))))]
+                                     (parse new-s name (state-set-binds state new-binds))))]
                      [(core-form? bind)
                       (unless (list? s) (bad-syntax s))
                       (let ([bind (form-id bind)])
                         (cond
                           [(eq? bind 'lambda)
-                           (parse-lambda s state mod-path ctx parse)]
+                           (parse-lambda s name state mod-path ctx parse)]
+                          [(eq? bind 'case-lambda)
+                           (parse-case-lambda s name state mod-path ctx parse)]
                           [(eq? bind 'let)
-                           (parse-let s state mod-path ctx parse)]
+                           (parse-let s name state mod-path ctx parse)]
                           [(eq? bind 'letrec)
-                           (parse-letrec s state mod-path ctx parse)]
+                           (parse-letrec s name state mod-path ctx parse)]
                           [(eq? bind 'quote)
                            (unless (= 2 (length s)) (bad-syntax s))
                            (list 'quote (syntax->datum (cadr s)))]
@@ -428,23 +466,23 @@
                           [(eq? bind 'if)
                            (unless (= 4 (length s)) (bad-syntax s))
                            (list 'if
-                                 (parse (cadr s) state)
-                                 (parse (cadr (cdr s)) state)
-                                 (parse (cadr (cddr s)) state))]
+                                 (parse (cadr s) #f state)
+                                 (parse (cadr (cdr s)) name state)
+                                 (parse (cadr (cddr s)) name state))]
                           [(eq? bind 'begin)
                            (unless (pair? (cdr s)) (bad-syntax s))
-                           (let ([es (map (lambda (e) (parse e state)) (cdr s))])
+                           (let ([es (map (lambda (e) (parse e #f state)) (cdr s))])
                              (if (null? (cdr es))
                                  (car es)
                                  (cons 'begin es)))]
                           [else
-                           (map (lambda (e) (parse e state)) s)]))]
+                           (map (lambda (e) (parse e #f state)) s)]))]
                      [(eq? rator set-var-tag) ; form created by `expand-define`
-                      (let ([rhs (parse (cadr (cddr s)) state)])
-                        (list variable-set! (cadr s) (name-lambda rhs (cadr (cdr s)))))]
+                      (let ([rhs (parse (cadr (cddr s)) (cadr (cdr s)) state)])
+                        (list variable-set! (cadr s) rhs))]
                      [(and (eq? bind void) (null? (cdr s))) (void)] ; ad hoc optimization
                      [(and (eq? bind hash) (null? (cdr s))) (hash)] ; ad hoc optimization
-                     [(list? s) (map (lambda (e) (parse e state)) s)]
+                     [(list? s) (map (lambda (e) (parse e #f state)) s)]
                      [else (bad-syntax s)]))]
                 [(identifier? s)
                  (let* ([bind (resolve state s #f)])
@@ -454,9 +492,9 @@
                      [(variable? bind) (list variable-ref (variable-var bind))]
                      [(literal? bind) (literal-val bind)]
                      [(macro? bind)
-                      (apply-macro bind s ctx state
+                      (apply-macro bind s ctx state name
                                    (lambda (new-s new-state)
-                                     (parse new-s state)))]
+                                     (parse new-s name state)))]
                      [(not bind) (syntax-error "unbound identifier" s)]
                      [(pair? bind) (syntax-error "cannot expand foreign syntax" s)]
                      [else bind]))]

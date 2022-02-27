@@ -144,13 +144,11 @@
                 [else v]))])
     (syntax-quote v)))
 
-(define (apply-macro m s ctx binds k)
+(define (apply-macro m s ctx binds name k)
   (let ([proc (if (defined-macro? m)
                   (defined-macro-proc m)
                   (macro-implementation m))])
-    (k (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-           (proc s (lambda (a b) (free-id=? binds a b)))
-           (proc s))
+    (k (proc s (lambda (a b) (free-id=? binds a b)) name)
        binds)))
 
 ;; Convert a local macro to one that can be used as imported elsewhere

@@ -27,10 +27,14 @@ representation (see @secref["module-protocol"]).
 @defform[#:link-target? #f #:id not-id id]
 @defform[#:link-target? #f #:id not-literal literal]
 @defform[#:link-target? #f #:id not-expr (expr expr ...)]
-@defform[(lambda formals expr)
+@defform[(lambda formals maybe-name maybe-arity-mask expr)
          #:grammar ([formals (id ...)
                              id
-                             (id ... . id)])]
+                             (id ... . id)]
+                    [maybe-name string
+                                code:blank]
+                    [maybe-arity-mask integer
+                                      code:blank])]
 @defform[(quote datum)]
 @defform[(if expr expr expr)]
 @defform[(let ([id expr]) expr)]
@@ -44,9 +48,15 @@ binding clause. Unlike the corresponding @racketmodname[racket] or
 @racketmodname[zuo] forms, the names of syntactic forms are not
 shadowed by a @racket[lambda] or @racket[let] binding, and they refer
 to syntactic forms only at the head of a term. A reference to an
-unbound variable is a run-time error. If a @racket[id] appears
+unbound variable is a run-time error. If an @racket[id] appears
 multiple times in @racket[formals], the last instance shadows the
 others.
+
+A @racket[lambda] form can optionally include a name and/or
+arity mask. If an arity mask is provided, it must be a subset of the mask
+implied by the @racket[formals]. If @racket[formals] allows 63 or more
+arguments, then it must allow any number of arguments (to be
+consistent with the possible arities expressed by a mask).
 
 Although @racket[let] and @racket[begin] could be encoded with
 @racket[lambda] easily enough, they're useful shortcuts to make

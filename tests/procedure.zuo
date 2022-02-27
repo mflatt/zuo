@@ -26,8 +26,16 @@
 (check (procedure-arity-mask call/cc) 2)
 (check (procedure-arity-mask +) -1)
 (check (procedure-arity-mask -) -2)
+(check (procedure-arity-mask stat) 6)
 (check (procedure-arity-mask process) -2)
+(check (procedure-arity-mask (lambda (x y z) z)) 8)
+(check (procedure-arity-mask (kernel-eval '(lambda (x y z) 0 z))) 0)
 (check (procedure-arity-mask (lambda (x y z . q) q)) -8)
+(check (procedure-arity-mask (kernel-eval '(lambda (x y z . q) -16 q))) -16)
+(check (procedure-arity-mask (case-lambda
+                               [(x) x]
+                               [(x y z) z]))
+       10)
 (check-fail (procedure-arity-mask 0) "not a procedure")
 
 (check (call/cc (lambda (k) (+ 1 (k 'ok)))) 'ok)

@@ -19,7 +19,7 @@
                            (unless (eq? v (void))
                              (alert (~v v))))]
            [add-print (lambda (s) (list print-result s))])
-      (kernel-eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e state))) es))))
+      (kernel-eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e #f state))) es))))
       (hash 'macromod-provides outs
             merge-bindings-export-key (make-export-merge-binds ctx (state-binds state))))))
 

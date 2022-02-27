@@ -1,0 +1,48 @@
+#lang zuo/datum
+
+(require "../pair.zuo"
+         "and-or.zuo"
+         "syntax-error.zuo"
+         "define-help.zuo"
+         "let.zuo")
+
+(provide (rename-out [opt-lambda lambda]))
+
+(define-syntax opt-lambda
+  (lambda (stx free=? name)
+    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
+    (let* ([args (cadr stx)]
+           [plain? (let loop ([args args])
+                    (cond
+                      [(null? args) #t]
+                      [(identifier? args) #t]
+                      [else (and (pair? args)
+                                 (identifier? (car args))
+                                 (loop (cdr args)))]))])
+      (cond
+        [plain?
+         (cons (quote-syntax lambda) (cdr stx))]
+        [else
+         (let* ([arg-names (check-args stx args)]
+                [main-id (datum->syntax (quote-syntax here)
+                                        (string->uninterned-symbol (or name "proc")))])
+           (list (quote-syntax letrec)
+                 (list
+                  (list main-id
+                        (cons
+                         (quote-syntax case-lambda)
+                         (let loop ([args args] [pre-args '()])
+                           (cond
+                             [(null? args) (list (cons arg-names (cddr stx)))]
+                             [(identifier? args) (let ([new-args (reverse pre-args)])
+                                                   (list (cons (append new-args args) (cddr stx))))]
+                             [(identifier? (car args)) (loop (cdr args) (cons (car args) pre-args))]
+                             [else
+                              (let* ([arg (car args)]
+                                     [arg-id (car arg)]
+                                     [default (cadr arg)]
+                                     [new-args (reverse pre-args)])
+                                (cons (list new-args (cons main-id
+                                                           (append new-args (list default))))
+                                      (loop (cdr args) (cons arg-id pre-args))))])))))
+                 main-id))]))))

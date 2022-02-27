@@ -1,6 +1,7 @@
 #lang zuo/private/base
 
 (require "base/and-or.zuo"
+         "base/let.zuo"
          "base/define.zuo"
          "list.zuo")
 
@@ -21,7 +22,9 @@
          mkdir*
          rm*
 
-         :error :truncate :must-truncate :append :update :can-update)
+         :error :truncate :must-truncate :append :update :can-update
+
+         string-split)
 
 
 ;; mainly for contracts in the docs:
@@ -126,3 +129,29 @@
 (define :append (hash 'exists 'append))
 (define :update (hash 'exists 'update))
 (define :can-update (hash 'exists 'can-update))
+
+(define (do-string-split who str sep-str)
+  (let* ([sep-len (string-length sep-str)]
+         [end (- (string-length str) (string-length sep-str))])
+    (let loop ([start 0] [i 0])
+      (cond
+        [(> i end)
+         (list (substring str start (string-length str)))]
+        [(and (= (string-ref str i) (string-ref sep-str 0))
+              (string=? (substring str i (+ i sep-len)) sep-str))
+         (cons (substring str start i)
+               (loop (+ i sep-len) (+ i sep-len)))]
+        [else (loop start (+ i 1))]))))
+
+(define string-split
+  (case-lambda
+    [(str sep-str)
+     (unless (string? str) (error "string-split: not a string" str))
+     (unless (and (string? sep-str)
+                  (> (string-length sep-str) 0))
+       (error "string-split: not a nonempty string" sep-str))
+     (do-string-split "string-split" str sep-str)]
+    [(str)
+     (unless (string? str) (error "string-split: not a string" str))
+     (filter (lambda (s) (> (string-length s) 0))
+             (do-string-split "string-items" str " "))]))

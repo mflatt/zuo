@@ -6,6 +6,7 @@
          "../list.zuo"
          "let.zuo"
          "define.zuo"
+         "opt-lambda.zuo"
          "quasiquote.zuo"
          "more-syntax.zuo"
          "../more.zuo")
@@ -16,6 +17,7 @@
                        "../list.zuo"
                        "let.zuo"
                        "define.zuo"
+                       "opt-lambda.zuo"
                        "quasiquote.zuo"
                        "more-syntax.zuo"
                        "../more.zuo"))

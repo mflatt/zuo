@@ -203,14 +203,12 @@
 (define (syntax-quote v mod-ctx binds)
   (list 'quote v))
 
-(define (apply-macro m s ctx binds k)
+(define (apply-macro m s ctx binds name k)
   (let* ([apply-macro
           (lambda (proc ctx)
             (let* ([new-scope (make-scope "macro")]
                    [s (add-scope s new-scope)]
-                   [s (if (= 4 (bitwise-and (procedure-arity-mask proc) 4))
-                          (proc s (lambda (a b) (free-id=? binds (datum->syntax ctx a) (datum->syntax ctx b))))
-                          (proc s))]
+                   [s (proc s (lambda (a b) (free-id=? binds (datum->syntax ctx a) (datum->syntax ctx b))) name)]
                    [s (datum->syntax ctx s)]
                    [s (flip-scope s new-scope)])
               (k s binds)))])

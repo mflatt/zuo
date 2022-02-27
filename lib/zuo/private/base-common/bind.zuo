@@ -21,7 +21,7 @@
   (foldl (lambda (sym provides)
            (hash-set provides sym (make-core-initial-bind (make-core-form sym))))
          kernel-provides
-         '(lambda let letrec quote if begin
+         '(lambda case-lambda let letrec quote if begin
                   define define-syntax require provide
                   quote-syntax quote-module-path
                   include)))

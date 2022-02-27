@@ -1,6 +1,7 @@
 #lang zuo/datum
 
-(require "define-help.zuo")
+(require "define-help.zuo"
+         "opt-lambda.zuo")
 
 (provide (rename-out [define-var-or-proc define]
                      [define-syntax-var-or-proc define-syntax]))

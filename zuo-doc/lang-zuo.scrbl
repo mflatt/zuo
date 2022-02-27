@@ -83,12 +83,12 @@ must be an expression form.
 @subsection{Expression Forms}
 
 @defform[(lambda formals body ...+)
-         #:grammar ([formals (id ...)
+         #:grammar ([formals (id ... [id expr] ...)
                              id
-                             (id ... . id)])]{
+                             (id ... [id expr] ... . id)])]{
 
 Analogous to @realracket[lambda] in @racketmodname[racket], but
-without keyword or optional arguments.}
+without keyword arguments.}
 
 
 @defform[#:link-target? #f #:id not-expr (expr expr ...)]{
@@ -265,10 +265,11 @@ Returns @racket[#t] if @racket[v] is an integer, @racket[#f] otherwise.}
 @defproc[(bitwise-and [n integer?] [m integer?]) integer?]
 @defproc[(bitwise-xor [n integer?] [m integer?]) integer?]
 @defproc[(bitwise-not [n integer?])  integer?]
+@defproc[(arithmetic-shift [n integer?] [m integer?])  integer?]
 )]{
 
 Analogous to @realracket*[+ - * quotient modulo = < <= > >=
-bitwise-ior bitwise-and bitwise-xor bitwise-not] from
+bitwise-ior bitwise-and bitwise-xor bitwise-not arithmetic-shift] from
 @racketmodname[racket], but on Zuo integers and sometimes constrained
 to two arguments.}
 
@@ -763,7 +764,7 @@ A constant representing an end-of-file.}
 Creates a new process to run @racket[executable] with the arguments
 @racket[args]. The result is a @tech{hash table} that at least
 contains the key @racket['process] mapped to a handle representing the
-new process. The process handle can be used with @racket[process-wait]
+new process. The process< handle can be used with @racket[process-wait]
 and @racket[process-status].
 
 If @racket[options] is supplied, it controls the process creation and
@@ -823,7 +824,7 @@ of handle.}
 
 @section{Filesystem}
 
-@defproc[(stat [name path-string?] [follow-links? any?]) (or/c hash? #f)]{
+@defproc[(stat [name path-string?] [follow-links? any? #t]) (or/c hash? #f)]{
 
 Returns information about the file, directory, or link referenced by
 @racket[name]. If @racket[follow-links?] is @racket[#f], then when

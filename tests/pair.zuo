@@ -118,4 +118,7 @@
 (check-fail (assoc "x" "y") "not a list")
 (check-fail (assoc "y" '((x . x) ("x" . x) y z)) "non-pair found in list")
 
-
+(check (filter (lambda (x) (> x 7)) '()) '())
+(check (filter (lambda (x) (> x 7)) '(1 11 2 12 3 13 4)) '(11 12 13))
+(check-fail (filter "x" '()) "not a procedure")
+(check-fail (filter (lambda (x) #t) "y") "not a list")

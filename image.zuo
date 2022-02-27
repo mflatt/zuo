@@ -13,10 +13,9 @@
       [(string=? (car args) "-o")
        (need-arg args)
        (loop (cddr args) (hash-set cmd 'output (cadr args)))]
-      [(or (string=? (car args) "+l") (string=? (car args) "++lib"))
+      [(string=? (car args) "--libs")
        (need-arg args)
-       (loop (cddr args) (hash-set cmd 'libs (cons (cadr args)
-                                                   (hash-ref cmd 'libs '()))))]
+       (loop (cddr args) (hash-set cmd 'libs (map string->symbol (string-split (cadr args)))))]
       [(string=? (car args) "--keep-collects")
        (loop (cdr args) (hash-set cmd 'keep-collects? #t))]
       [else
@@ -53,17 +52,7 @@
                 (fd-open-output out-file (hash 'exists 'truncate))
                 (fd-open-output 'stdout (hash))))
 
-(define lines
-  (let loop ([start 0] [i 0])
-    (cond
-      [(= i (string-length zuo.c))
-       (if (= start i)
-           '()
-           (list (substring zuo.c start i)))]
-      [(= (string-ref zuo.c i) (char "\n"))
-       (cons (substring zuo.c start i)
-             (loop (+ i 1) (+ i 1)))]
-      [else (loop start (+ i 1))])))
+(define lines (string-split zuo.c "\n"))
 
 (define (~hex v)
   (if (= v 0)

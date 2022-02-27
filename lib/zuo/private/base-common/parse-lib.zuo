@@ -3,11 +3,10 @@
 ;; Helpers for "parse.zuo" that depends on the implementation of
 ;; syntax objects
 
-(define (name-lambda form id)
-  (if (and (pair? form)
-           (eq? (car form) 'lambda))
+(define (name-lambda name form)
+  (if name
       ;; `zuo/kernel` recognizes this pattern to name the form
-      (list 'lambda (cadr form) (symbol->string (syntax-e id)) (cadr (cdr form)))
+      (cons 'lambda (cons (cadr form) (cons (symbol->string (syntax-e name)) (cddr form))))
       form))
 
 (define (syntax-error msg s)

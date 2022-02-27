@@ -49,3 +49,7 @@
 (check-fail (char) bad-stx)
 (check-fail (char "0" "more") bad-stx)
 (check-fail (char . "0") bad-stx)
+
+(check (string-split " apple pie  " " ") '("" "apple" "pie" "" ""))
+(check (string-split "__apple____pie__" "__") '("" "apple" "" "pie" ""))
+(check (string-split " apple pie  ") '("apple" "pie"))

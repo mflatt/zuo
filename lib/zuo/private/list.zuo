@@ -11,7 +11,8 @@
          for-each
          foldl
          andmap
-         ormap)
+         ormap
+         filter)
 
 (define list*
   (lambda (val . vals)
@@ -106,3 +107,9 @@
     (unless (procedure? f) (error "ormap: not a procedure" f))
     (unless (list? lst) (error "ormap: not a list" lst))
     (foldl (lambda (v a) (or a (f v))) #f lst)))
+
+(define filter
+  (lambda (f lst)
+    (unless (procedure? f) (error "filter: not a procedure" f))
+    (unless (list? lst) (error "filter: not a list" lst))
+    (reverse (foldl (lambda (v a) (if (f v) (cons v a) a)) '() lst))))
