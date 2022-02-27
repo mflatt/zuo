@@ -126,6 +126,8 @@
     rm*
     mkdir*
     :error :truncate :must-truncate :append :update :can-update
+    cleanable-file
+    cleanable-cancel
 
     process
     process-status

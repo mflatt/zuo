@@ -1,6 +1,6 @@
-/* Like Zuo overall, the kernel implementation here is layered. There
-   should be no need for forward function declarations, except locally
-   in the rare case of mutually recursive functions. */
+/* Like Zuo overall, the kernel implementation here is layered as much
+   as possible. There should be little need for forward function
+   declarations. */
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 # define ZUO_WINDOWS
@@ -21,6 +21,7 @@
 # include <sys/stat.h>
 # include <time.h>
 # include <dirent.h>
+# include <signal.h>
 #endif
 #ifdef ZUO_WINDOWS
 # include <windows.h>
@@ -233,10 +234,12 @@ typedef enum {
   zuo_handle_closed_status,
   zuo_handle_process_running_status,
   zuo_handle_process_done_status,
+  zuo_handle_cleanable_status,
 } zuo_handle_status_t;
 
 typedef struct zuo_handle_t {
   zuo_t obj;
+  zuo_int_t id;
   union {
     struct {
       zuo_handle_status_t status;
@@ -324,7 +327,8 @@ static struct {
     zuo_t *o_pid_table;
     zuo_t *o_fd_table;
 #endif
-
+    zuo_t *o_cleanable_table;
+    
     /* startup info */
     zuo_t *o_library_path;
     zuo_t *o_current_directory;
@@ -339,6 +343,7 @@ static struct {
 #define Z zuo_roots.runtime
 
 static zuo_int32_t zuo_symbol_count = 0;
+static zuo_int32_t zuo_handle_count = 0;
 
 /*======================================================================*/
 /* sanity checks                                                        */
@@ -945,6 +950,7 @@ static void zuo_fasl_restore(char *dump_in, zuo_int_t len) {
   }
 
   zuo_symbol_count = ((zuo_fasl_header_t *)dump)->symbol_count;
+  zuo_handle_count = 0;
 
   zuo_replace_heap(stream.heap, stream.heap_size * alloc_factor, stream.heap_size);
 }
@@ -1070,6 +1076,7 @@ static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env) {
 
 static zuo_t *zuo_handle(zuo_raw_handle_t handle, zuo_handle_status_t status) {
   zuo_handle_t *obj = (zuo_handle_t *)zuo_new(zuo_handle_tag, sizeof(zuo_handle_t));
+  obj->id = zuo_handle_count++;
   obj->u.h.u.handle = handle;
   obj->u.h.status = status;
   return (zuo_t *)obj;
@@ -1115,7 +1122,7 @@ static zuo_t *zuo_trie_lookup(zuo_t *trie, zuo_t *sym) {
   return trie_lookup(trie, ((zuo_symbol_t *)sym)->id);
 }
 
-/* trie mutation, used only for the inital env, pid table, and fd table */
+/* trie mutation, used only for the inital env */
 static void trie_set(zuo_t *trie, zuo_int_t id, zuo_t *key, zuo_t *val) {
   while (id > 0) {
     zuo_t *next = ((zuo_trie_node_t *)trie)->next[id & ZUO_TRIE_BFACTOR_MASK];
@@ -1629,13 +1636,20 @@ static void zuo_stack_dump() {
   done_dump_name(showed_name, repeats);
 }
 
+static void zuo_clean_all(); /* a neceesary forward reference */
+
+static void zuo_exit(int v) {
+  zuo_clean_all();
+  exit(v);
+}
+
 static void zuo_fail(const char *str) {
   if (str[0] != 0)
     zuo_error_color();
   fprintf(stderr, "%s\n", str);
   zuo_print_terminal(2, ZUO_NORMAL_COLOR);
   zuo_stack_dump();
-  exit(1);
+  zuo_exit(1);
 }
 
 static void zuo_show_err1w(const char *who, const char *str, zuo_t *obj) {
@@ -3521,7 +3535,8 @@ static void check_options_consumed(const char *who, zuo_t *options) {
 static zuo_t *zuo_fd_handle(zuo_raw_handle_t handle, zuo_handle_status_t status)  {
   zuo_t *h = zuo_handle(handle, status);
 #ifdef ZUO_UNIX
-  trie_set(Z.o_fd_table, handle, h, h);
+  int added = 0;
+  Z.o_fd_table = trie_extend(Z.o_fd_table, handle, h, h, &added);
 #endif
   return h;
 }
@@ -3624,7 +3639,7 @@ static void zuo_close(zuo_raw_handle_t handle)
 {
   zuo_close_handle(handle);
 #ifdef ZUO_UNIX
-  trie_set(Z.o_fd_table, handle, z.o_undefined, z.o_undefined);
+  Z.o_fd_table = trie_remove(Z.o_fd_table, handle, 0);
 #endif
 }
 
@@ -3664,15 +3679,21 @@ static zuo_t *zuo_fd_open_input(zuo_t *path) {
   return zuo_handle(zuo_fd_open_input_handle(path), zuo_handle_open_fd_in_status);
 }
 
-static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
+static zuo_t *zuo_fd_open_output(zuo_t *args) {
+  zuo_t *path = _zuo_car(args);
+  zuo_t *options, *fd_h;
   const char *who = "fd-open-output";
   zuo_raw_handle_t fd;
 
+  args = _zuo_cdr(args);
+  options = ((args != z.o_null) ? _zuo_car(args) : z.o_empty_hash);
+
   if (zuo_is_path_string(path)) {
-    zuo_t *exists;
+    zuo_t *exists, *picky;
 
     if (options->tag != zuo_trie_node_tag)
       zuo_fail1w(who, "not a hash table", options);
+
     exists = zuo_consume_option(&options, "exists");
 
     check_options_consumed(who, options);
@@ -3742,7 +3763,9 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
 	SetFilePointer(fd, 0, NULL, FILE_END);
     }
 #endif
-    return zuo_fd_handle(fd, zuo_handle_open_fd_out_status);
+    fd_h = zuo_fd_handle(fd, zuo_handle_open_fd_out_status);
+
+    return fd_h;
   } else if (path == zuo_symbol("stdout")) {
     if ((options->tag != zuo_trie_node_tag) || (((zuo_trie_node_t *)options)->count != 0))
       zuo_fail1w(who, "non-empty options with 'stdout", options);
@@ -4346,6 +4369,149 @@ zuo_t *zuo_current_time() {
 }
 
 /*======================================================================*/
+/* signal handling  and cleanables                                      */
+/*======================================================================*/
+
+#ifdef ZUO_WINDOWS
+static LONG zuo_handler_suspended;
+static BOOL WINAPI zuo_signal_received(DWORD op);
+#endif
+
+static void zuo_suspend_signal() {
+#ifdef ZUO_UNIX
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  sigaddset(&set, SIGHUP);
+  sigprocmask(SIG_BLOCK, &set, NULL);
+#endif
+#ifdef ZUO_WINDOWS
+  LONG old = InterlockedExchange(&zuo_handler_suspended, 1);
+  ASSERT(old == 0);
+#endif
+}
+
+static void zuo_resume_signal() {
+#ifdef ZUO_UNIX
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  sigaddset(&set, SIGHUP);
+  sigprocmask(SIG_UNBLOCK, &set, NULL);
+#endif
+#ifdef ZUO_WINDOWS
+  LONG old = InterlockedExchange(&zuo_handler_suspended, 0);
+  if (old == -1) {
+    zuo_signal_received(0);
+  }
+#endif
+}
+
+static void zuo_clean_all() {
+  zuo_t *keys, *l;
+
+  zuo_suspend_signal();
+
+  keys = zuo_trie_keys(Z.o_cleanable_table, z.o_null);
+
+  /* wait for all processes */
+  for (l = keys; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *k = _zuo_car(l);
+    zuo_t *v = trie_lookup(Z.o_cleanable_table, ((zuo_handle_t *)k)->id);
+    if (v->tag == zuo_handle_tag) {
+#ifdef ZUO_UNIX
+      int stat_loc;
+      (void)waitpid(ZUO_HANDLE_RAW(v), &stat_loc, 0);
+#endif
+#ifdef ZUO_WINDOWS
+      WaitForSingleObject(ZUO_HANDLE_RAW(v), INFINITE);
+#endif
+    }
+  }
+
+  /* delete all cleanable files */
+  for (l = keys; l != z.o_null; l = _zuo_cdr(l)) {
+    zuo_t *k = _zuo_car(l);
+    zuo_t *v = trie_lookup(Z.o_cleanable_table, ((zuo_handle_t *)k)->id);
+    if (v->tag == zuo_string_tag) {
+#ifdef ZUO_UNIX      
+      (void)unlink(ZUO_STRING_PTR(v));
+#endif
+#ifdef ZUO_WINDOWS
+      wchar_t *wp = zuo_to_wide(ZUO_STRING_PTR(v));
+      _wunlink(wp);
+#endif
+    }
+  }
+}
+
+#ifdef ZUO_UNIX
+static void zuo_signal_received() {
+  zuo_clean_all();
+  _exit(1);
+}
+#endif
+#ifdef ZUO_WINDOWS
+static BOOL WINAPI zuo_signal_received(DWORD op) {
+  if (InterlockedExchange(&zuo_handler_suspended, -1) == 0) {
+    zuo_clean_all();
+    _exit(1);
+  }
+}
+#endif
+
+static void zuo_init_signal_handler() {
+#ifdef ZUO_UNIX
+  struct sigaction sa;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sa.sa_handler = zuo_signal_received;
+  sigaction(SIGINT, &sa, NULL);
+#endif
+#if defined(RKTIO_SYSTEM_WINDOWS)
+  SetConsoleCtrlHandler(zuo_signal_received, TRUE);
+#endif
+}
+
+/* signal must be suspended */
+static void zuo_register_cleanable(zuo_t *p, zuo_t *v) {
+  int added = 0;
+  Z.o_cleanable_table = trie_extend(Z.o_cleanable_table, ((zuo_handle_t *)p)->id, p, v, &added);
+}
+
+/* signal must be suspended */
+static void zuo_unregister_cleanable(zuo_t *p) {
+  Z.o_cleanable_table = trie_remove(Z.o_cleanable_table, ((zuo_handle_t *)p)->id, 0);
+}
+
+static zuo_t *zuo_cleanable_file(zuo_t *path) {
+  zuo_t *p;
+  check_path_string("cleanable-file", path);
+
+  p = zuo_handle(0, zuo_handle_cleanable_status);
+
+  zuo_suspend_signal();
+  zuo_register_cleanable(p, path);
+  zuo_resume_signal();
+
+  return p;
+}
+
+static zuo_t *zuo_cleanable_cancel(zuo_t *p) {
+  if ((p->tag != zuo_handle_tag)
+      || (((zuo_handle_t *)p)->u.h.status != zuo_handle_cleanable_status))
+    zuo_fail1w("cleanable-cancel", "not a cleanable handle", p);
+
+  zuo_suspend_signal();
+  zuo_unregister_cleanable(p);
+  zuo_resume_signal();
+
+  return z.o_void;
+}
+
+/*======================================================================*/
 /* processes                                                            */
 /*======================================================================*/
 
@@ -4437,7 +4603,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   zuo_t *args = _zuo_cdr(command_and_args);
   zuo_t *options = z.o_empty_hash, *opt;
   zuo_t *dir, *l, *p_handle, *result;
-  int redirect_in, redirect_out, redirect_err;
+  int redirect_in, redirect_out, redirect_err, no_wait;
   zuo_raw_handle_t pid, in, in_r, out, out_w, err, err_w;
   int argc = 1, i, ok;
   char **argv;
@@ -4534,11 +4700,19 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   } else
     env = NULL;
 
+  opt = zuo_consume_option(&options, "cleanable?");
+  if (opt == z.o_false)
+    no_wait = 1;
+  else
+    no_wait = 0;
+
   check_options_consumed(who, options);
-  
+
 #ifdef ZUO_UNIX
   {
     zuo_t *open_fds = zuo_trie_keys(Z.o_fd_table, z.o_null);
+
+    zuo_suspend_signal();
 
     pid = fork();
 
@@ -4549,6 +4723,8 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     } else if (pid == 0) {
       /* This is the new child process */
       char *msg;
+
+      zuo_resume_signal();
 
       if (in_r != 0) {
         dup2(in_r, 0);
@@ -4654,7 +4830,9 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       wd_w = zuo_to_wide(ZUO_STRING_PTR(dir));
     else
       wd_w = NULL;
-    
+
+    zuo_suspend_signal();
+
     ok = CreateProcessW(command_w, cmdline_w, 
                         NULL, NULL, 1 /*inherit*/,
                         cr_flag, env, wd_w,
@@ -4673,6 +4851,20 @@ zuo_t *zuo_process(zuo_t *command_and_args)
     pid = info.hProcess;
   }
 #endif
+
+  if (ok) {
+    p_handle = zuo_handle(pid, zuo_handle_process_running_status);
+#ifdef ZUO_UNIX
+    {
+      int added = 0;
+      Z.o_pid_table = trie_extend(Z.o_pid_table, pid, p_handle, p_handle, &added);
+    }
+#endif
+    if (!no_wait)
+      zuo_register_cleanable(p_handle, p_handle);
+  }
+
+  zuo_resume_signal();
 
   if (!ok) {
     fprintf(stderr, "attempted command:");
@@ -4694,11 +4886,6 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   for (i = 0; i < argc; i++)
     free(argv[i]);
   free(argv);
-
-  p_handle = zuo_handle(pid, zuo_handle_process_running_status);
-#ifdef ZUO_UNIX
-  trie_set(Z.o_pid_table, pid, p_handle, p_handle);
-#endif
 
   result = z.o_empty_hash;
   result = zuo_hash_set(result, zuo_symbol("process"), p_handle);
@@ -4751,8 +4938,11 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
     
     /* wait for any process to exit, and update the corresponding handle */
     pid = wait(&stat_loc);
-    if (pid < 0)
-      zuo_fail("process wait failed");
+
+    /* there's a race here between having completed a wait() and a SIGINT
+       before we update the cleanables table, but it should be harmless,
+       because we won't start any new children in between, and the OS will
+       error for us on a double wait */
 
     if (pid >= 0) {
       zuo_t *p = trie_lookup(Z.o_pid_table, pid);
@@ -4765,9 +4955,13 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
           if (r == 0) r = 256;
           ((zuo_handle_t *)p)->u.h.u.result = r;
         }
-        trie_set(Z.o_pid_table, pid, z.o_undefined, z.o_undefined);
+        Z.o_pid_table = trie_remove(Z.o_pid_table, pid, 0);
+        zuo_suspend_signal();
+        zuo_unregister_cleanable(p);
+        zuo_resume_signal();
       }
-    }
+    } else
+      zuo_fail("process wait failed");
   }
 #endif
 #ifdef ZUO_WINDOWS
@@ -4785,8 +4979,12 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
 	DWORD w;
 	if (GetExitCodeProcess(sci, &w)) {
 	  if (w != STILL_ACTIVE) {
+            zuo_suspend_signal();
+            CloseHandle(sci);
 	    ((zuo_handle_t *)p)->u.h.status = zuo_handle_process_done_status;
 	    ((zuo_handle_t *)p)->u.h.u.result = w;
+            zuo_unregister_cleanable(p);
+            zuo_resume_signal();
 	    return p;
 	  }
 	} else
@@ -5015,6 +5213,7 @@ int main(int argc, char **argv) {
 
   zuo_configure();
   zuo_init_terminal();
+  zuo_init_signal_handler();
 
   argc--;
   argv++;
@@ -5046,7 +5245,7 @@ int main(int argc, char **argv) {
                        "\n"),
               argv0,
               ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
-      exit(0);
+      zuo_exit(0);
     } else if (!strcmp(argv[0], "-B") || !strcmp(argv[0], "--boot")) {
       if (argc > 1) {
         boot_image = argv[1];
@@ -5170,7 +5369,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-open-input", zuo_fd_open_input);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("fd-open-output", zuo_fd_open_output);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("fd-open-output", zuo_fd_open_output, 6);
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-close", zuo_fd_close);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-read", zuo_fd_read);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
@@ -5189,6 +5388,9 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, -2);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
   ZUO_TOP_ENV_SET_PRIMITIVEN("process-wait", zuo_process_wait, -2);
+
+  ZUO_TOP_ENV_SET_PRIMITIVE1("cleanable-file", zuo_cleanable_file);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("cleanable-cancel", zuo_cleanable_cancel);
 
   ZUO_TOP_ENV_SET_PRIMITIVEN("error", zuo_error, -1);
   ZUO_TOP_ENV_SET_PRIMITIVEN("alert", zuo_alert, -1);
@@ -5251,9 +5453,10 @@ int main(int argc, char **argv) {
   Z.o_stash = z.o_false;
 
 #ifdef ZUO_UNIX
-  Z.o_pid_table = zuo_trie_node();
-  Z.o_fd_table = zuo_trie_node();
+  Z.o_pid_table = z.o_empty_hash;
+  Z.o_fd_table = z.o_empty_hash;
 #endif
+  Z.o_cleanable_table = z.o_empty_hash;
 
   Z.o_current_directory = zuo_current_directory();
 
@@ -5297,5 +5500,6 @@ int main(int argc, char **argv) {
   } else
     (void)zuo_module_to_hash(load_path);
 
+  zuo_exit(0);
   return 0;
 }

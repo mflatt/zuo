@@ -709,7 +709,7 @@ with @racket[fd-read] and closed with @racket[fd-close].}
 
 @deftogether[(
 @defproc[(fd-open-output [filename path-string?]
-                         [options hash?]) handle?]
+                         [options hash? (hash)]) handle?]
 @defthing[:error hash?]
 @defthing[:truncate hash?]
 @defthing[:must-truncate hash?]
@@ -776,6 +776,17 @@ Returns @racket[#t] if the open input or output stream associated with
 A constant representing an end-of-file.}
 
 
+@deftogether[(
+@defproc[(cleanable-file [name path?]) handle?]
+@defproc[(cleanable-cancel [cleanable handle?]) void?]
+)]{
+
+The @racket[cleanable-file] function register @racket[name] as a file
+name to delete on any exit, including errors or termination signals,
+unless @racket[cleanable-cancel] is called on the handle to cancel the
+clean-up action.}
+
+
 @defproc*[([(process [executable path-string?] [arg string?] ...) hash?]
            [(process [executable path-string?] [arg string?] ... [options hash?]) hash?])]{
 
@@ -823,6 +834,13 @@ keys are as follows, and supplying an unrecognized key in
 
 @item{@racket['stderr] mapped to an output stream: supplies (a copy
       of) the output stream as the new process's standard error}
+
+@item{@racket['cleanable?] mapped to boolean (or any value): if
+      @racket[#f], the Zuo process can exit without waiting for the
+      created process to terminate; otherwise, and by default, the Zuo
+      process waits for every processes created with @racket[process]
+      to terminate before exiting itself, whether exiting normally, by
+      an error, or by a received termination signal (such as Ctl-C).}
 
 ]}
 

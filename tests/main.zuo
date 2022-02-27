@@ -18,6 +18,7 @@
 (require "file-handle.zuo")
 (require "process.zuo")
 (require "filesystem.zuo")
+(require "cleanable.zuo")
 (require "image.zuo")
 (require "cycle.zuo")
 (require "form.zuo")

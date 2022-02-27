@@ -1,8 +1,4 @@
-# Lines added above to set configuration
+# `configure` adds lines to set configuration
 
-zuo: here_zuo
-	./here_zuo $(srcdir)/image.zuo --embed="$(EMBED_LIBS)" -o zuo.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DZUO_LIB_PATH='"'"$(LIB_PATH)"'"' -o zuo zuo.c $(LDFLAGS) $(LIBS)
-
-here_zuo: $(srcdir)/zuo.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DZUO_LIB_PATH='"'"$(srcdir)/lib"'"' -o here_zuo $(srcdir)/zuo.c $(LDFLAGS) $(LIBS)
+zuo: $(srcdir)/zuo.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DZUO_LIB_PATH='"'"$(srcdir)/lib"'"' -o zuo $(srcdir)/zuo.c $(LDFLAGS) $(LIBS)
