@@ -86,7 +86,7 @@ static const char *zuo_lib_path = ZUO_LIB_PATH;
 
 #define ALLOC_ALIGN(i) (((i) + (sizeof(zuo_intptr_t) - 1)) & ~(sizeof(zuo_intptr_t) -1))
 
-#define MAX_TRACKED_ARITY 63
+#define MAX_PRIM_ARITY 10
 
 /*======================================================================*/
 /* run-time configuration                                               */
@@ -2146,49 +2146,6 @@ static zuo_t *zuo_reverse(zuo_t *in_l) {
   return r;
 }
 
-static zuo_t *zuo_procedure_arity_mask(zuo_t *obj) {
-  if (obj->tag == zuo_primitive_tag)
-    return zuo_integer(((zuo_primitive_t *)obj)->arity_mask);
-  else if (obj->tag == zuo_closure_tag) {
-    zuo_t *s = ((zuo_closure_t *)obj)->lambda;
-    zuo_int_t count, mask;
-    zuo_t *d = _zuo_cdr(s);
-    s = _zuo_car(d);
-    d = _zuo_cdr(d);
-    if (_zuo_cdr(d) != z.o_null) {
-      zuo_t *a = _zuo_car(d);
-      if (a->tag == zuo_string_tag) /* declared name? */
-        d = _zuo_cdr(d);
-    }
-    if (_zuo_cdr(d) != z.o_null) {
-      zuo_t *a = _zuo_car(d);
-      if (a->tag == zuo_integer_tag) /* declared arity mask? */
-        return a;
-    }
-    count = 0;
-    while (s->tag == zuo_pair_tag) {      
-      s = _zuo_cdr(s);
-      count++;
-      if (count >= MAX_TRACKED_ARITY)
-        return zuo_integer(-1);
-    }
-    mask = (zuo_int_t)1 << count;
-    if (s == z.o_null)
-      return zuo_integer(mask);
-    else
-      return zuo_integer(-mask);
-  } else if (obj->tag == zuo_cont_tag)
-    return zuo_integer(1 << 1);
-  else if (obj == z.o_apply)
-    return zuo_integer(1 << 2);
-  else if (obj == z.o_call_cc)
-    return zuo_integer(1 << 1);
-  else {
-    zuo_fail1w("procedure-arity", "not a procedure", obj);
-    return z.o_undefined;
-  }
-}
-
 static zuo_t *zuo_build_string(zuo_t *chars) {
   zuo_int_t len = 0;
   zuo_t *l, *str;
@@ -2458,28 +2415,6 @@ static zuo_t *zuo_bitwise_not(zuo_t *n) {
   return zuo_integer(~ZUO_UINT_I(n));
 }
 
-static zuo_t *zuo_arithmetic_shift(zuo_t *n, zuo_t *m) {
-  const char *who = "arithmetic-shift";
-  zuo_int_t n_i, m_i;
-  check_integer(who, n);
-  check_integer(who, m);
-  n_i = ZUO_INT_I(n);
-  m_i = ZUO_INT_I(m);
-  if (m_i > 0) {
-    if (m_i > 63)
-      return zuo_integer(0);
-    return zuo_integer(((zuo_uint_t)n_i) << m_i);
-  } else {
-    if (m_i < -63) {
-      if (n_i < 0)
-        return zuo_integer(-1);
-      else
-        return zuo_integer(0);
-    }
-    return zuo_integer(n_i >> (-m_i));
-  }
-}
-
 static zuo_t *zuo_eq(zuo_t *n, zuo_t *m) {
   return (n == m) ? z.o_true : z.o_false;
 }
@@ -2530,6 +2465,47 @@ static zuo_t *zuo_alert(zuo_t *objs) {
   zuo_print_terminal(1, ZUO_NORMAL_COLOR);
   fflush(stdout);
   return z.o_void;
+}
+
+static zuo_t *zuo_arity_error(zuo_t *name, zuo_t *args) {
+  const char *who = "arity-error";
+  zuo_t *msg;
+
+  if ((name != z.o_false) && (name->tag != zuo_string_tag))
+    zuo_fail1w(who, "not a string or #f", name);
+  if (zuo_list_p(args) != z.o_true)
+    zuo_fail1w(who, "not a list", args);
+
+  msg = zuo_tilde_a(zuo_cons((name == z.o_false) ? zuo_string("[procedure]") : name,
+                             zuo_cons(zuo_string(": wrong number of arguments: "),
+                                      zuo_cons((args == z.o_null)
+                                               ?  zuo_string("[no arguments]")
+                                               : zuo_tilde_v(args),
+                                               z.o_null))));
+  
+  zuo_fail(ZUO_STRING_PTR(msg));
+  return z.o_undefined;
+}
+
+static void zuo_fail_arity(zuo_t *rator, zuo_t *args) {
+  zuo_t *name;
+
+  if (rator->tag == zuo_primitive_tag)
+    name = ((zuo_symbol_t *)((zuo_primitive_t *)rator)->name)->str;
+  else if (rator == z.o_apply)
+    name = zuo_string("apply");
+  else if (rator == z.o_call_cc)
+    name = zuo_string("call/cc");
+  else if (rator->tag == zuo_closure_tag) {
+    zuo_t *body = _zuo_cdr(_zuo_cdr(((zuo_closure_t *)rator)->lambda));
+    if (_zuo_cdr(body) != z.o_null)
+      name =  _zuo_car(body);
+    else
+      name = z.o_false;
+  } else
+    name = z.o_false;
+
+  zuo_arity_error(name, args);
 }
 
 static zuo_t *zuo_list(zuo_t *objs) {
@@ -2660,7 +2636,6 @@ static void check_syntax(zuo_t *e) {
         es = zuo_cons(_zuo_car(d), es);
       } else if (rator == z.o_lambda_symbol) {
         zuo_t *d = _zuo_cdr(e), *dd, *ad;
-        zuo_int_t arity_mask = 0, actual_mask, count = 0;
         if (d->tag != zuo_pair_tag)
           bad_form(e);
         ad = _zuo_car(d); /* formals */
@@ -2673,15 +2648,6 @@ static void check_syntax(zuo_t *e) {
             dd = _zuo_cdr(dd);
             if (dd->tag != zuo_pair_tag)
               bad_form(e);
-          }
-        }
-        if (_zuo_cdr(dd) != z.o_null) {
-          if (_zuo_car(dd)->tag == zuo_integer_tag) {
-            /* skip over arity-mask integer */
-            arity_mask = ZUO_INT_I(_zuo_car(dd));
-            dd = _zuo_cdr(dd);
-            if (dd->tag != zuo_pair_tag)
-              bad_form(e);
           } else
             bad_form(e);
         }
@@ -2691,22 +2657,9 @@ static void check_syntax(zuo_t *e) {
           if (_zuo_car(ad)->tag != zuo_symbol_tag)
             bad_form(e);
           ad = _zuo_cdr(ad);
-          count++;
         }
-        if (ad == z.o_null) {
-          if (count >= MAX_TRACKED_ARITY)
-            bad_form(e);
-          actual_mask = (zuo_int_t)1 << count;
-        } else if (ad->tag == zuo_symbol_tag) {
-          if (count >= MAX_TRACKED_ARITY)
-            actual_mask = -1;
-          else
-            actual_mask = -((zuo_int_t)1 << count);
-        } else {
-          bad_form(e);
-          actual_mask = -1;
-        }
-        if ((arity_mask & actual_mask) != arity_mask)
+        if ((ad != z.o_null)
+            && (ad->tag != zuo_symbol_tag))
           bad_form(e);
         es = zuo_cons(_zuo_car(dd), es);
       } else if (rator == z.o_let_symbol) {
@@ -2861,13 +2814,6 @@ static void continue_step() {
                 Z.o_interp_in_proc = z.o_false;
             } else
               Z.o_interp_in_proc = z.o_false;
-            if (body_d != z.o_null) {
-              zuo_t *a = _zuo_car(body);
-              zuo_int_t arity_mask = ZUO_INT_I(a);
-              if (!(arity_mask & ((zuo_uint_t)1 << ((count >= MAX_TRACKED_ARITY) ? MAX_TRACKED_ARITY : count))))
-                zuo_fail1("wrong argument count", zuo_cons(rator, all_args));
-              body = body_d; /* skip over arity mask */
-            }
             while (formals->tag == zuo_pair_tag) {
               if (args == z.o_null)
                 break;
@@ -2878,7 +2824,7 @@ static void continue_step() {
             if (formals->tag == zuo_symbol_tag)
               env = env_extend(env, formals, args);
             else if (formals != z.o_null || args != z.o_null)
-              zuo_fail1("wrong argument count", zuo_cons(rator, all_args));
+              zuo_fail_arity(rator, all_args);
 
             Z.o_interp_e = _zuo_car(body);
             Z.o_interp_env = env;
@@ -2886,30 +2832,30 @@ static void continue_step() {
             break;
           } else if (rator->tag == zuo_primitive_tag) {
             zuo_primitive_t *f = (zuo_primitive_t *)rator;
-            if (f->arity_mask & ((zuo_uint_t)1 << ((count >= MAX_TRACKED_ARITY) ? MAX_TRACKED_ARITY : count))) {
+            if (f->arity_mask & ((zuo_uint_t)1 << ((count >= MAX_PRIM_ARITY) ? MAX_PRIM_ARITY : count)))
               Z.o_interp_v = f->dispatcher(f->proc, args);
-            } else
-              zuo_fail1("wrong argument count", zuo_cons(rator, args));
+            else
+              zuo_fail_arity(rator, args);
             break;
           } else if (rator->tag == zuo_cont_tag) {
             if (count == 1) {
               Z.o_interp_k = rator;
               Z.o_interp_v = _zuo_car(args);
             } else
-              zuo_fail1("wrong argument count", zuo_cons(rator, args));
+              zuo_fail_arity(rator, args);
             break;
           } else if (rator == z.o_apply) {
             if (count != 2)
-              zuo_fail1("wrong argument count", zuo_cons(z.o_apply, args));
+              zuo_fail_arity(z.o_apply, args);
             rator = _zuo_car(args);
             args = _zuo_car(_zuo_cdr(args));
-            if (!zuo_list_p(args))
-              zuo_fail1("not a list", args);
+            if (zuo_list_p(args) != z.o_true)
+              zuo_fail1w("apply", "not a list", args);
             count = zuo_length_int(args);
             /* no break => loop to apply again */
           } else if (rator == z.o_call_cc) {
             if (count != 1)
-              zuo_fail1("wrong argument count", zuo_cons(z.o_call_cc, args));
+              zuo_fail_arity(z.o_call_cc, args);
             rator = _zuo_car(args);
             args = zuo_cons(Z.o_interp_k, z.o_null);
             /* no break => loop to apply again */
@@ -5167,8 +5113,6 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("handle?", zuo_handle_p);
   ZUO_TOP_ENV_SET_PRIMITIVEN("void", zuo_make_void, -1);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE1("procedure-arity-mask", zuo_procedure_arity_mask);
-
   ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
   ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
   ZUO_TOP_ENV_SET_PRIMITIVE1("cdr", zuo_cdr);
@@ -5194,7 +5138,6 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("bitwise-ior", zuo_bitwise_ior);
   ZUO_TOP_ENV_SET_PRIMITIVE2("bitwise-xor", zuo_bitwise_xor);
   ZUO_TOP_ENV_SET_PRIMITIVE1("bitwise-not", zuo_bitwise_not);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("arithmetic-shift", zuo_arithmetic_shift);
 
   ZUO_TOP_ENV_SET_PRIMITIVEN("string", zuo_build_string, -1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("string-length", zuo_string_length);
@@ -5252,6 +5195,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVEN("~v", zuo_tilde_v, -1);
   ZUO_TOP_ENV_SET_PRIMITIVEN("~a", zuo_tilde_a, -1);
   ZUO_TOP_ENV_SET_PRIMITIVEN("~s", zuo_tilde_s, -1);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("arity-error", zuo_arity_error);
 
   ZUO_TOP_ENV_SET_PRIMITIVE2("read-from-string-all", zuo_read_all);
   ZUO_TOP_ENV_SET_PRIMITIVE1("kernel-eval", zuo_kernel_eval);

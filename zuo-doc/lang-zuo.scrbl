@@ -189,17 +189,19 @@ functions.}
            (define-syntax (id . formals) body ...++)]]{
 
 Analogous to @realracket*[define-syntax] from @racketmodname[racket],
-binds @racket[id] as a macro. Although @racket[define-syntax] is not
-syntactically constrained to bind a function, a useful @racket[expr]
-will produce a function of either one or two arguments.
+binds @racket[id] as a macro. The value of @racket[expr] must be
+either a procedure (of one argument) or a value constructed by
+@racket[context-consumer].
 
-If the function accepts two arguments, then when @racket[id] is used
-for a macro invocation, the second argument to the procedure is a
-function that acts like @realracket[free-identifier=?]. (In
-@racketmodname[racket], @realracket[free-identifier=?] is implicitly
-parameterized over the context of a macro invocation. Explicitly
-providing a comparison function to a macro implementation, instead,
-avoids the implicit parameterization.)
+If @racket[expr] produces a @racket[context-consumer] wrapper, then
+when @racket[id] is used for a macro invocation, the wrapped procedure
+receives three arguments: the macro use as syntax, a function that
+acts like @realracket[free-identifier=?], and either @racket[#f] or an
+inferred-name string. (In @racketmodname[racket],
+@realracket[free-identifier=?] and @realracket[syntax-local-name] are
+implicitly parameterized over the context of a macro invocation.
+Explicitly providing a comparison procedure and name string to a macro
+implementation, instead, avoids the implicit parameterization.)
 
 See @racket[quote-syntax] for more information about the
 representation of syntax that a macro function consumes and produces.}
@@ -265,11 +267,10 @@ Returns @racket[#t] if @racket[v] is an integer, @racket[#f] otherwise.}
 @defproc[(bitwise-and [n integer?] [m integer?]) integer?]
 @defproc[(bitwise-xor [n integer?] [m integer?]) integer?]
 @defproc[(bitwise-not [n integer?])  integer?]
-@defproc[(arithmetic-shift [n integer?] [m integer?])  integer?]
 )]{
 
 Analogous to @realracket*[+ - * quotient modulo = < <= > >=
-bitwise-ior bitwise-and bitwise-xor bitwise-not arithmetic-shift] from
+bitwise-ior bitwise-and bitwise-xor bitwise-not] from
 @racketmodname[racket], but on Zuo integers and sometimes constrained
 to two arguments.}
 
@@ -451,11 +452,10 @@ Like @racket[hash-ref], but errors is @racket[key] is not mapped in
 @deftogether[(
 @defproc[(procedure? [v any?]) any?]
 @defproc[(apply [proc procedure?] [lst list?]) any?]
-@defproc[(procedure-arity-mask [proc procedure?]) integer?]
 @defproc[(call/cc [proc procedure?]) any?]
 )]{
 
-Like @realracket*[procedure? apply procedure-arity-mask call/cc] from
+Like @realracket*[procedure? apply call/cc] from
 @racketmodname[racket], but @racket[apply] accepts only two arguments.}
 
 
@@ -620,7 +620,7 @@ symbols format in @realracket[print] and @realracket[write] styles with
 
 @defproc[(error [v any?] ...) void?]{
 
-Exits as an error after printing the @racket[v]s to standard error,
+Errors (and exits) after printing the @racket[v]s to standard error,
 using an error color if standard error is a terminal.
 
 If the first @racket[v] is a string, its character are printed output
@@ -635,6 +635,13 @@ combined using @racket[~v], and that resulting string is written
 Prints to standard output using the same formatting rules as
 @racket[error], but in an alert color for terminals. This function is
 useful for simple logging and debugging tasks.}
+
+
+@defproc[(arity-error [name (or/c string? #f)] [args list?]) void?]{
+
+Errors (and exits) after printing an error about @racket[name]
+receiving the wrong number of arguments, where @racket[args] are the
+arguments that were supplied.}
 
 
 @section{Syntax Objects}
@@ -671,6 +678,17 @@ Exits as an error after printing @racket[message], @litchar{: }, and
 )]{
 
 Calls @racket[syntax-error] with a suitable error message and @racket[stx].}
+
+@deftogether[(
+@defproc[(context-consumer [proc procedure]) context-consumer?]
+@defproc[(context-consumer? [v any/c]) boolean?]
+)]{
+
+The @racket[context-consumer] constructor wraps a procedure to
+indicate that it expects three arguments as a macro transformer; see
+@racket[define-syntax] for more information. The
+@racket[context-consumer?] predicate recognizes values produced by
+@racket[context-consumer].}
 
 
 @section{Files, Streams, and Processes}

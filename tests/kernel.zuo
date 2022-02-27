@@ -13,22 +13,10 @@
 (check-fail (kernel-eval '(cons 1 . 2)) bad-kernel-stx)
 (check-fail (kernel-eval '(cons . 2)) bad-kernel-stx)
 
-(define max-args (let loop ([i 0])
-                   (if (= i 62)
-                       '()
-                       (cons (string->symbol (~a "x" i)) (loop (+ i 1))))))
-
 (check (procedure? (kernel-eval '(lambda (x) x))) #t)
 (check (procedure? (kernel-eval '(lambda (x x) x))) #t)
 (check (procedure? (kernel-eval '(lambda (x . x) x))) #t)
-(check (procedure? (kernel-eval '(lambda (x x) 4 x))) #t) ; correct mask
-(check (procedure? (kernel-eval '(lambda (x x) 0 x))) #t) ; compatible mask
-(check (procedure? (kernel-eval '(lambda (x . x) 32 x))) #t) ; compatible mask
-(check (procedure? (kernel-eval '(lambda (x . x) -32 x))) #t) ; compatible mask
 (check (procedure? (kernel-eval '(lambda (x x) "name" x))) #t)
-(check (procedure? (kernel-eval '(lambda (x x) "name" 4 x))) #t)
-(check (procedure? (kernel-eval `(lambda ,max-args x))) #t)
-(check (procedure? (kernel-eval `(lambda (,@max-args . x) x))) #t)
 (check ((kernel-eval '(lambda (x x) x)) #f 2) 2)
 (check ((kernel-eval '(lambda (x x . x) x)) #f 2 3 4) '(3 4))
 (check-fail (kernel-eval '(lambda)) bad-kernel-stx)
@@ -42,10 +30,6 @@
 (check-fail (kernel-eval '(lambda x #f 2)) bad-kernel-stx)
 (check-fail (kernel-eval '(lambda x #f . 2)) bad-kernel-stx)
 (check-fail (kernel-eval 'lambda) "undefined: 'lambda")
-(check-fail (kernel-eval '(lambda (x x) 1 x)) bad-kernel-stx) ; incorrect mask
-(check-fail (kernel-eval '(lambda (x x . x) -2 x)) bad-kernel-stx) ; incorrect mask
-(check-fail (kernel-eval '(lambda (x x) "name" 1 x)) bad-kernel-stx) ; incorrect mask
-(check-fail (kernel-eval '(lambda (x . ,max-args) x)) bad-kernel-stx) ; incorrect mask
 (check (((kernel-eval '(lambda (lambda) (lambda x x))) 1) 2) '(2))
 
 (check (kernel-eval '(quote cons)) 'cons)

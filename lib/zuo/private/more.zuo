@@ -143,15 +143,16 @@
                (loop (+ i sep-len) (+ i sep-len)))]
         [else (loop start (+ i 1))]))))
 
-(define string-split
-  (case-lambda
-    [(str sep-str)
-     (unless (string? str) (error "string-split: not a string" str))
-     (unless (and (string? sep-str)
-                  (> (string-length sep-str) 0))
-       (error "string-split: not a nonempty string" sep-str))
-     (do-string-split "string-split" str sep-str)]
-    [(str)
-     (unless (string? str) (error "string-split: not a string" str))
+(define (string-split str . args)
+  (unless (or (null? args) (null? (cdr args))) (arity-error 'string-split (cons str args)))
+  (unless (string? str) (error "string-split: not a string" str))
+  (cond
+    [(null? args)
      (filter (lambda (s) (> (string-length s) 0))
-             (do-string-split "string-items" str " "))]))
+             (do-string-split "string-items" str " "))]
+    [else
+     (let ([sep-str (car args)])
+       (unless (and (string? sep-str)
+                    (> (string-length sep-str) 0))
+         (error "string-split: not a nonempty string" sep-str))
+       (do-string-split "string-split" str sep-str))]))

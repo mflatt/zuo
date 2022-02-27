@@ -8,3 +8,9 @@
           (and (not bind1)
                (not bind2)
                (eq? (syntax-e id1) (syntax-e id2)))))))
+
+(define (apply-macro* proc s name free-id=?)
+  (let ([c-proc (context-consumer-procedure proc)])
+    (if c-proc
+        (c-proc s free-id=? (and name (symbol->string (syntax-e name))))
+        (proc s))))

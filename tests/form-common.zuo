@@ -35,26 +35,9 @@
 (check ((lambda (x y [z (+ x y)]) (list z x)) 1 2 30) '(30 1))
 (check ((lambda (x y [z (+ x y)]) (list z x)) 1 2) '(3 1))
 (check ((lambda (x [y (+ x 2)] [z (+ x y)]) (list z x)) 1) '(4 1))
-(check-fail ((lambda (x) x)) "wrong argument count")
-(check-fail ((lambda (x) x) 1 2) "wrong argument count")
-(check-fail ((lambda (x . z) x)) "wrong argument count")
-
-(check (procedure? (case-lambda)) #t)
-(check (procedure? (case-lambda [(x) x])) #t)
-(check (procedure? (case-lambda [(x) x] [(y. z) z])) #t)
-(check-fail (case-lambda . 1) bad-stx)
-(check-fail (case-lambda []) bad-stx)
-(check-fail (case-lambda [x]) bad-stx)
-(check-fail (case-lambda [x . 1]) bad-stx)
-(check-fail (case-lambda [1 1]) bad-stx)
-(check-fail (case-lambda [(1) 1]) bad-stx)
-(check-fail (case-lambda [(x 1) 1]) bad-stx)
-(check-fail (case-lambda [(x) 1] . y) bad-stx)
-(check-fail (case-lambda [([x 0]) 1]) bad-stx)
-
-(check ((case-lambda [(x y z) (list z x)] [(x) (list x)]) 1 2 3) '(3 1))
-(check ((case-lambda [(x y z) (list z x)] [(x) x]) 1) '1)
-(check-fail ((case-lambda [(x y z) (list z x)] [(x) x]) 1 2) "wrong argument count")
+(check-fail ((lambda (x) x)) arity)
+(check-fail ((lambda (x) x) 1 2) arity)
+(check-fail ((lambda (x . z) x)) arity)
 
 (check (procedure? (lambda (x) x)) #t)
 
@@ -226,10 +209,8 @@
 (check-bad-defines 'define)
 (check-bad-defines 'define-syntax)
 
-(define bad-macro "not a procedure of one, two, or three arguments")
+(define bad-macro "not a procedure or context consumer")
 
-(check-fail (define-syntax whatever 19) "not a procedure")
-(check-fail (define-syntax whatever (lambda () 19)) bad-macro)
-(check-fail (define-syntax whatever (lambda (x y z w) 19)) bad-macro)
-(check-fail (define-syntax (whatever) 19) bad-macro)
-(check-fail (define-syntax (whatever x y z w) 19) bad-macro)
+(check-fail (define-syntax whatever 19) "not a procedure or context consumer")
+
+(check-fail (context-consumer 19) "not a procedure")

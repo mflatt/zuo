@@ -148,7 +148,7 @@
   (let ([proc (if (defined-macro? m)
                   (defined-macro-proc m)
                   (macro-implementation m))])
-    (k (proc s (lambda (a b) (free-id=? binds a b)) name)
+    (k (apply-macro* proc s name (lambda (a b) (free-id=? binds a b)))
        binds)))
 
 ;; Convert a local macro to one that can be used as imported elsewhere

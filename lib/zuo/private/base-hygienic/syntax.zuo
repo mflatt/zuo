@@ -208,7 +208,9 @@
           (lambda (proc ctx)
             (let* ([new-scope (make-scope "macro")]
                    [s (add-scope s new-scope)]
-                   [s (proc s (lambda (a b) (free-id=? binds (datum->syntax ctx a) (datum->syntax ctx b))) name)]
+                   [s (apply-macro* proc s name (lambda (a b)
+                                                  (free-id=? binds (datum->syntax ctx a)
+                                                             (datum->syntax ctx b))))]
                    [s (datum->syntax ctx s)]
                    [s (flip-scope s new-scope)])
               (k s binds)))])

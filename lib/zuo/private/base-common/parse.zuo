@@ -49,16 +49,9 @@
       (syntax-error "duplicate definition" id))
     (let* ([e (parse (cadr (cdr s)) id state)]
            [proc (kernel-eval e)])
-      (unless (and (procedure? proc) (not (= 0 (bitwise-and (procedure-arity-mask proc) 14))))
-        (error "define-syntax: not a procedure of one, two, or three arguments" proc))
-      (let ([wrap (lambda (proc)
-                    (let ([mask (procedure-arity-mask proc)])
-                      (cond
-                        [(= (bitwise-and mask 8) 8) (lambda (s free=? name)
-                                                      (proc s free=? (and name (symbol->string (syntax-e name)))))]
-                        [(= (bitwise-and mask 4) 4) (lambda (s free=? name) (proc s free=?))]
-                        [else (lambda (s free=? name) (proc s))])))])
-        (add-binding state id (as-specific (make-defined-macro (wrap proc))))))))
+      (unless (or (procedure? proc) (context-consumer? proc))
+        (error "define-syntax: not a procedure or context consumer" proc))
+      (add-binding state id (as-specific (make-defined-macro proc))))))
 
 (define (expand-require s state mod-path)
   (let* ([check-renames
@@ -299,9 +292,9 @@
                  [else (cons 'begin (map (lambda (s) (parse s #f state)) es))])])
     (nest-bindings vars body)))
 
-(define (parse-lambda-clause s clause state mod-path ctx parse)
-  (unless (>= (length clause) 2) (bad-syntax s))
-  (let* ([formals (car clause)]
+(define (parse-lambda s name state mod-path ctx parse)
+  (unless (>= (length s) 3) (bad-syntax s))
+  (let* ([formals (cadr s)]
          [new-formals (letrec ([reformal (lambda (f seen)
                                            (cond
                                              [(null? f) '()]
@@ -329,40 +322,10 @@
                                                         (car new-formals))]
                                           [else state]))])
                   (add-formals state formals new-formals))])
-    (list new-formals
-          (parse-body s (add-scope (cdr clause) new-scope) #f state mod-path ctx parse))))
-
-(define (parse-lambda s name state mod-path ctx parse)
-  (name-lambda name (cons 'lambda (parse-lambda-clause s (cdr s) state mod-path ctx parse))))
-
-(define (parse-case-lambda s name state mod-path ctx parse)
-  ;; turns into a dispatching `lambda` with a declared arity mask
-  (let* ([lams (map (lambda (clause)
-                      (unless (list? clause) (bad-syntax s))
-                      (cons 'lambda (parse-lambda-clause s clause state mod-path ctx parse)))
-                    (cdr s))]
-         [masks (map (lambda (clause)
-                       (letrec ([clause-mask (lambda (formals mask)
-                                               (cond
-                                                 [(null? formals) mask]
-                                                 [(pair? formals) (clause-mask (cdr formals) (* mask 2))]
-                                                 [else (- mask)]))])
-                         (clause-mask (car clause) 1)))
-                     (cdr s))]
-         [mask (foldl (lambda (one-mask mask) (bitwise-ior one-mask mask)) 0 masks)])
-    (name-lambda
-     name
-     (list 'lambda 'args mask
-           (list 'let (list (list 'bit (list arithmetic-shift 1 (list length 'args))))
-                 (letrec ([build-dispatch
-                           (lambda (lams masks)
-                             (cond
-                               [(null? lams) (list (void))]
-                               [(null? (cdr lams)) (list apply (car lams) 'args)]
-                               [else (list 'if (list = 0 (list bitwise-and 'bit (car masks)))
-                                           (build-dispatch (cdr lams) (cdr masks))
-                                           (list apply (car lams) 'args))]))])
-                   (build-dispatch lams masks)))))))
+    (name-lambda name
+                 (list 'lambda
+                       new-formals
+                       (parse-body s (add-scope (cddr s) new-scope) #f state mod-path ctx parse)))))
 
 (define (parse-let s name state mod-path ctx parse)
   (unless (>= (length s) 3) (bad-syntax s))
@@ -448,8 +411,6 @@
                         (cond
                           [(eq? bind 'lambda)
                            (parse-lambda s name state mod-path ctx parse)]
-                          [(eq? bind 'case-lambda)
-                           (parse-case-lambda s name state mod-path ctx parse)]
                           [(eq? bind 'let)
                            (parse-let s name state mod-path ctx parse)]
                           [(eq? bind 'letrec)

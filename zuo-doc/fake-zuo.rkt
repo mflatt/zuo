@@ -42,8 +42,8 @@
     void
 
     apply
-    procedure-arity-mask
-
+    context-consumer
+    
     cons
     car
     cdr
@@ -136,6 +136,7 @@
     ~v
     ~a
     ~s
+    arity-error
 
     read-from-string-all
     module->hash

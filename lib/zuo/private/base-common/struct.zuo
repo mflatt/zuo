@@ -82,3 +82,10 @@
     (if label
         (make-specific (cons bind label))
         bind)))
+
+(define context-consumer-key (string->uninterned-symbol "ctxer"))
+(define (context-consumer proc)
+  (unless (procedure? proc) (error "context-consumer: not a procedure" proc))
+  (opaque context-consumer-key proc))
+(define (context-consumer? v) (and (opaque-ref context-consumer-key v #f) #t))
+(define (context-consumer-procedure v) (opaque-ref context-consumer-key v #f))

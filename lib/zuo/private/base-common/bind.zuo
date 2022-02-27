@@ -21,7 +21,7 @@
   (foldl (lambda (sym provides)
            (hash-set provides sym (make-core-initial-bind (make-core-form sym))))
          kernel-provides
-         '(lambda case-lambda let letrec quote if begin
+         '(lambda let letrec quote if begin
                   define define-syntax require provide
                   quote-syntax quote-module-path
                   include)))
@@ -34,7 +34,9 @@
          [provides (add provides 'syntax-e checked-syntax-e)]
          [provides (add provides 'syntax->datum checked-syntax->datum)]
          [provides (add provides 'datum->syntax checked-datum->syntax)]
-         [provides (add provides 'bound-identifier=? bound-identifier=?)])
+         [provides (add provides 'bound-identifier=? bound-identifier=?)]
+         [provides (add provides 'context-consumer context-consumer)]
+         [provides (add provides 'context-consumer? context-consumer?)])
     provides))
 
 ;; Used to convert a local binding into one that goes in a provides

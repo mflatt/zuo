@@ -55,3 +55,8 @@
 (check-output (error "hello" 'x) "" "hello: 'x\n")
 (check-output (error 'hello 'x) "" "'hello 'x\n")
 (check-output (error 'hello 'x 3 4) "" "'hello 'x 3 4\n")
+
+(check-fail (arity-error 'hello '()) not-string)
+(check-fail (arity-error "hello" 'oops) "not a list")
+(check-output (arity-error "hello" '(1 () "apple")) "" "hello: wrong number of arguments: 1 '() \"apple\"\n")
+

@@ -109,7 +109,7 @@
 
 ;; Some common error messages
 (define bad-stx "bad syntax")
-(define arity "wrong argument count")
+(define arity "wrong number of arguments")
 (define not-integer "not an integer")
 (define not-string "not a string")
 

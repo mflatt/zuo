@@ -457,6 +457,8 @@
        [bad-syntax (lambda (s) (syntax-error "bad syntax" s))]
        [duplicate-identifier (lambda (id s) (error "duplicate identifier:" (identifier-e id) (syntax->datum s)))]
 
+       [procedure-arity-mask (lambda (p) -1)]
+
        [apply-macro (lambda (m s ctx state k)
                       (let* ([apply-macro
                               (lambda (proc ctx state)

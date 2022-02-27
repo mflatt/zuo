@@ -9,40 +9,59 @@
 (provide (rename-out [opt-lambda lambda]))
 
 (define-syntax opt-lambda
-  (lambda (stx free=? name)
-    (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
-    (let* ([args (cadr stx)]
-           [plain? (let loop ([args args])
-                    (cond
-                      [(null? args) #t]
-                      [(identifier? args) #t]
-                      [else (and (pair? args)
-                                 (identifier? (car args))
-                                 (loop (cdr args)))]))])
-      (cond
-        [plain?
-         (cons (quote-syntax lambda) (cdr stx))]
-        [else
-         (let* ([arg-names (check-args stx args)]
-                [main-id (datum->syntax (quote-syntax here)
-                                        (string->uninterned-symbol (or name "proc")))])
-           (list (quote-syntax letrec)
-                 (list
-                  (list main-id
-                        (cons
-                         (quote-syntax case-lambda)
-                         (let loop ([args args] [pre-args '()])
+  (context-consumer
+   (lambda (stx free=? name)
+     (unless (and (list? stx) (>= (length stx) 3)) (bad-syntax stx))
+     (let* ([args (cadr stx)]
+            [plain? (let loop ([args args])
+                      (cond
+                        [(null? args) #t]
+                        [(identifier? args) #t]
+                        [else (and (pair? args)
+                                   (identifier? (car args))
+                                   (loop (cdr args)))]))])
+       (cond
+         [plain?
+          (cons (quote-syntax lambda) (cdr stx))]
+         [else
+          (let ([all-args (check-args stx args)])
+            (let loop ([args args] [rev-plain-args '()])
+              (cond
+                [(identifier? (car args))
+                 (loop (cdr args) (cons (car args) rev-plain-args))]
+                [else
+                 (let* ([args-id (string->uninterned-symbol "args")])
+                   (list (quote-syntax lambda)
+                         (append (reverse rev-plain-args) args-id)
+                         (let loop ([args args])
                            (cond
-                             [(null? args) (list (cons arg-names (cddr stx)))]
-                             [(identifier? args) (let ([new-args (reverse pre-args)])
-                                                   (list (cons (append new-args args) (cddr stx))))]
-                             [(identifier? (car args)) (loop (cdr args) (cons (car args) pre-args))]
+                             [(null? args)
+                              (list (quote-syntax if) (list (quote-syntax null?) args-id)
+                                    (cons (quote-syntax begin) (cddr stx))
+                                    (list (quote-syntax opt-arity-error)
+                                          (list (quote-syntax quote) name)
+                                          (cons (quote-syntax list)
+                                                all-args)
+                                          args-id))]
+                             [(identifier? args)
+                              (cons (quote-syntax let)
+                                    (cons (list (list args args-id))
+                                          (cddr stx)))]
                              [else
-                              (let* ([arg (car args)]
-                                     [arg-id (car arg)]
-                                     [default (cadr arg)]
-                                     [new-args (reverse pre-args)])
-                                (cons (list new-args (cons main-id
-                                                           (append new-args (list default))))
-                                      (loop (cdr args) (cons arg-id pre-args))))])))))
-                 main-id))]))))
+                              (list (quote-syntax let)
+                                    (list (list (caar args)
+                                                (list (quote-syntax if)
+                                                      (list (quote-syntax null?) args-id)
+                                                      (car (cdar args))
+                                                      (list (quote-syntax car) args-id))))
+                                    (list (quote-syntax let)
+                                          (list (list args-id
+                                                      (list (quote-syntax if)
+                                                            (list (quote-syntax null?) args-id)
+                                                            (quote-syntax '())
+                                                            (list (quote-syntax cdr) args-id))))
+                                          (loop (cdr args))))]))))])))])))))
+
+(define opt-arity-error
+  (lambda (name base-args extra-args)
+    (arity-error name (append base-args extra-args))))
