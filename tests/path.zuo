@@ -9,7 +9,7 @@
 (check (path-string? "xy\x00z") #f)
 (check (path-string? 'apple) #f)
 
-(define unix? (eq? (ref (runtime-env) 'system-type) 'unix))
+(define unix? (eq? (hash-ref (runtime-env) 'system-type) 'unix))
 
 (check (build-path "x" "y") (if unix? "x/y" "x\\y"))
 (check (build-path "." "y") (if unix? "./y" ".\\y"))

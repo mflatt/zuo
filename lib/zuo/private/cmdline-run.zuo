@@ -50,7 +50,7 @@
                  (or (= (string-ref arg 0) (char "-"))
                      (= (string-ref arg 0) (char "+"))))
             (error (~a program ": unrecognized flag " arg))]
-           [else (finish cmd args)]))])))
+           [else (finish cmd (cons arg args))]))])))
 
 (define (split-flags s)
   (let loop ([i 1])

@@ -118,13 +118,12 @@
     eof
 
     stat
-    ls rm mv mkdir rmdir ln readlink
+    ls rm mv mkdir rmdir ln readlink cp
     current-time
     file-exists?
     directory-exists?
     link-exists?
-    rm*
-    mkdir*
+    rm* cp* mkdir*
     :error :truncate :must-truncate :append :update :can-update
     cleanable-file
     cleanable-cancel

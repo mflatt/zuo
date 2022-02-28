@@ -2562,7 +2562,7 @@ static zuo_t *zuo_arg_error(zuo_t *name, zuo_t *what, zuo_t *arg) {
   const char *who = "arg-error";
   check_symbol(who, name);
   check_string(who, what);
-  zuo_fail_arg(ZUO_STRING_PTR(((zuo_symbol_t *)name)->str), ZUO_STRING_PTR(name), arg);
+  zuo_fail_arg(ZUO_STRING_PTR(((zuo_symbol_t *)name)->str), ZUO_STRING_PTR(what), arg);
   return z.o_undefined;
 }
 
@@ -4451,6 +4451,67 @@ static zuo_t *zuo_ln(zuo_t *target_path, zuo_t *link_path) {
   return z.o_undefined;
 }
 
+static zuo_t *zuo_cp(zuo_t *src_path, zuo_t *dest_path) {
+  const char *who = "cp";
+  check_path_string(who, src_path);
+  check_path_string(who, dest_path);
+#ifdef ZUO_UNIX
+  int src_fd, dest_fd;
+  struct stat st_buf;
+  zuo_int_t buf_size = 4096, len, amt;
+  char *buf;
+
+  src_fd = open(ZUO_STRING_PTR(src_path), O_RDONLY);
+  if (src_fd == -1)
+    zuo_fail1w_errno(who, "source open failed", src_path);
+
+  if (fstat(src_fd, &st_buf) != 0)
+    zuo_fail1w_errno(who, "source stat failed", src_path);
+
+  /* Permissions may be reduced by umask, but the intent here is to
+     make sure the file doesn't have more permissions than it will end
+     up with: */
+  dest_fd = open(ZUO_STRING_PTR(dest_path), O_WRONLY | O_CREAT, st_buf.st_mode);
+  
+  if (dest_fd == -1)
+    zuo_fail1w_errno(who, "destination open failed", dest_path);
+
+  buf = malloc(4096);
+  
+  while (1) {
+    amt = read(src_fd, buf, 4096);
+    if (amt == 0)
+      break;
+    if (amt < 0)
+      zuo_fail1w_errno(who, "source read failed", src_path);
+    while (amt > 0) {
+      len = write(dest_fd, buf, amt);
+      if (len < 0)
+        zuo_fail1w_errno(who, "destination write failed", dest_path);
+      amt -= len;
+    }
+  }
+
+  close(src_fd);
+
+  if (fchmod(dest_fd, st_buf.st_mode) != 0)
+    zuo_fail1w_errno(who, "destination permissions update failed", dest_path);
+
+  close(dest_fd);
+#endif
+#ifdef ZUO_WINDOWS
+  {
+    wchar_t *src_w = zuo_to_wide(ZUO_STRING_PTR(src_path));
+    wchar_t *dest_w = zuo_to_wide(ZUO_STRING_PTR(dest_path));
+    if (!CopyFileW(src_w, dest_w, 0))
+      zuo_fail1w(who, "copy failed to destination", dest_path);
+    free(src_w);
+    free(dest_w);
+  }
+#endif
+  return z.o_void;
+}
+
 zuo_t *zuo_current_time() {
 #ifdef ZUO_UNIX
   struct timespec t;
@@ -5509,6 +5570,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("ls", zuo_ls);
   ZUO_TOP_ENV_SET_PRIMITIVE2("ln", zuo_ln);
   ZUO_TOP_ENV_SET_PRIMITIVE1("readlink", zuo_readlink);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("cp", zuo_cp);
   ZUO_TOP_ENV_SET_PRIMITIVE0("current-time", zuo_current_time);
   
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, -2);

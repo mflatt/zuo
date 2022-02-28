@@ -10,7 +10,7 @@
 (define (try-dump lang)
   (define out (fd-open-output dump.zuo :truncate))
   (fd-write out (~a "#lang " lang "\n"
-                    "(dump-image-and-exit (fd-open-output (car (ref (runtime-env) 'args)) :truncate))\n"))
+                    "(dump-image-and-exit (fd-open-output (car (hash-ref (runtime-env) 'args)) :truncate))\n"))
   (fd-close out)
 
   (check (run-zuo* (list dump.zuo image-file)

@@ -1,0 +1,83 @@
+#lang zuo/base
+
+(provide makefile->variables)
+
+(define (makefile->variables path vars)
+  (unless (path-string? path) (arg-error 'makefile->variables "path string" path))
+  (define content (file->string path))
+  (define lines (string-split content "\n"))
+  (foldl (lambda (line accum)
+           (define positions ; (list var-start var-end =-pos) or #f
+             (let loop ([i 0] [start #f] [end #f])
+               (cond
+                 [(= i (string-length line)) #f]
+                 [else
+                  (let ([c (string-ref line i)])
+                    (cond
+                      [(= (char "=") c) (and start (list start (or end i) i))]
+                      [(or (= (char "_") c)
+                           (and (<= (char "a") c)
+                                (<= c (char "z")))
+                           (and (<= (char "A") c)
+                                (<= c (char "Z")))
+                           (and (<= (char "0") c)
+                                (<= c (char "9"))))
+                       (and (not end)
+                            (loop (+ i 1) (or start i) #f))]
+                      [(= (char " ") c)
+                       (if start
+                           (loop (+ i 1) start (or end i))
+                           (loop (+ i 1) #f #f))]
+                      [else #f]))])))
+           (cond
+             [positions
+              (define var (string->symbol (substring line (car positions) (cadr positions))))
+              (cond
+                [(member var vars)
+                 (define rhs (substring line (+ (list-ref positions 2) 1) (string-length line)))
+                 (hash-set accum var (extract rhs))]
+                [else accum])]
+             [else accum]))
+         (hash)
+         lines))
+
+(define (extract rhs)
+  (define pi
+    (process "/bin/sh"
+             "-c"
+             (~a (protect (hash-ref (runtime-env) 'exe))
+                 " '' "
+                 rhs)
+             (hash 'stdin 'pipe 'stdout 'pipe)))
+  (define p (hash-ref pi 'process))
+  (define to (hash-ref pi 'stdin))
+  (define from (hash-ref pi 'stdout))
+  (fd-write to (~a "#lang zuo/kernel\n"
+                   (~s '(begin
+                          (alert (~s (hash-ref (runtime-env) 'args)))
+                          (hash)))))
+  (fd-close to)
+  (define args-str (fd-read from eof))
+  (process-wait p)
+  (unless (= 0 (process-status p))
+    (error "tokenization via sh failed"))
+  (car (read-from-string-all args-str)))
+
+(define (protect str)
+  (let loop ([i 0] [start 0])
+    (cond
+      [(= i (string-length str)) (substring str start i)]
+      [else
+       (let ([c (string-ref str i)])
+         (cond
+           [(or (= (char " ") c)
+                (= (char "\"") c)
+                (= (char "\\") c))
+            (~a (substring str start i)
+                "'" (string c) "'"
+                (loop (+ i 1) (+ i 1)))]
+           [(= (char "'") c)
+            (~a (substring str start i)
+                "\"'\""
+                (loop (+ i 1) (+ i 1)))]
+           [else (loop (+ i 1) start)]))])))

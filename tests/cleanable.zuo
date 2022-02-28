@@ -44,7 +44,7 @@
   (define inner.zuo (build-path tmp-dir "inner.zuo"))
   (let ([o (fd-open-output sub.zuo :truncate)])
     (fd-write o (~a "#lang zuo\n"
-                    (~s `(void (process (ref (runtime-env) 'exe)
+                    (~s `(void (process (hash-ref (runtime-env) 'exe)
                                         ,inner.zuo
                                         ,(if no-wait?
                                              '(hash 'cleanable? #f)
@@ -58,21 +58,21 @@
                            (fd-write out s)
                            (fd-read in 1)))))
     (fd-close o))
-  (define p (process (ref (runtime-env) 'exe)
+  (define p (process (hash-ref (runtime-env) 'exe)
                      sub.zuo
                      (hash 'stdin 'pipe 'stdout 'pipe)))
-  (define to (ref p 'stdin))
-  (define from (ref p 'stdout))
+  (define to (hash-ref p 'stdin))
+  (define from (hash-ref p 'stdout))
   (cond
-    [no-wait? (process-wait (ref p 'process))]
-    [else (check (process-status (ref p 'process)) 'running)])
+    [no-wait? (process-wait (hash-ref p 'process))]
+    [else (check (process-status (hash-ref p 'process)) 'running)])
   (fd-write to "x")
   (check (fd-read from 1) "x")
   (unless no-wait?
-    (check (process-status (ref p 'process)) 'running))
+    (check (process-status (hash-ref p 'process)) 'running))
   (fd-write to "y")
-  (process-wait (ref p 'process))
-  (check (process-status (ref p 'process)) 0))
+  (process-wait (hash-ref p 'process))
+  (check (process-status (hash-ref p 'process)) 0))
 
 (check-sub #f)
 (check-sub #f)

@@ -942,6 +942,19 @@ function is not supported on Windows.}
 Gets the content of a link @racket[name]. This function is not
 supported on Windows.}
 
+@defproc[(cp [source path-string?] [destination path-string?]) void?]{
+
+Copies the file at @racket[source] to @filepath[destination],
+preserving permissions and replacing (or attempting to replace)
+@filepath[destination] if it exists.}
+
+@defproc[(cp* [source path-string?] [destination path-string?]) void?]{
+
+Copies the file, directory, or link @racket[source] to a corresponding
+new file, directory, or link @racet[destination], including the
+directory content if @racket[source] refers to a directory (and not to
+a link to a directory),.}
+
 @deftogether[(
 @defproc[(file-exists? [name path-string?]) booelan?]
 @defproc[(directory-exists? [name path-string?]) booelan?]

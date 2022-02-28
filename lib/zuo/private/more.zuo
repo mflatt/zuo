@@ -19,6 +19,7 @@
          
          mkdir*
          rm*
+         cp*
 
          :error :truncate :must-truncate :append :update :can-update
 
@@ -86,12 +87,12 @@
 
 (define (file-exists? p)
   (unless (path-string? p) (arg-error 'file-exists? "path string" p))
-  (let ([s (stat p #t)])
+  (let ([s (stat p)])
     (and s (eq? (hash-ref s 'type) 'file))))
 
 (define (directory-exists? p)
   (unless (path-string? p) (arg-error 'directory-exists?: "path string" p))
-  (let ([s (stat p #t)])
+  (let ([s (stat p)])
     (and s (eq? (hash-ref s 'type) 'dir))))
 
 (define (link-exists? p)
@@ -119,6 +120,23 @@
                    (rm* (build-path p e)))
                  (ls p))
        (rmdir p)])))
+
+(define (cp* src dest)
+  (unless (path-string? src) (arg-error 'cp* "path string" src))
+  (unless (path-string? dest) (arg-error 'cp* "path string" dest))
+  (define info (stat src #f))
+  (when info
+    (define type (hash-ref info 'type))
+    (cond
+      [(eq? type 'file) (cp src dest)]
+      [(eq? type 'link)
+       (when (stat dest #f) (rm dest))
+       (ln (readlink src) dest)]
+      [else
+       (unless (directory-exists? dest) (mkdir dest))
+       (for-each (lambda (e)
+                   (cp* (build-path src e) (build-path dest e)))
+                 (ls src))])))
 
 (define :error (hash 'exists 'error))
 (define :truncate (hash 'exists 'truncate))
@@ -195,13 +213,13 @@
   (cond
     [(and (relative-path? exe)
           (not (car (split-path exe))))
-     (define PATH-a (ormap (lambda (p)
-                             (and ((if windows? string-ci=? string=?) (car p) "PATH")
-                                  (cdr p)))
-                           (hash-ref (runtime-env) 'env '())))
-     (and PATH-a
+     (define PATH (ormap (lambda (p)
+                           (and ((if windows? string-ci=? string=?) (car p) "PATH")
+                                (cdr p)))
+                         (hash-ref (runtime-env) 'env '())))
+     (and PATH
           (ormap (lambda (dir)
                    (and (path-string? dir)
                         (try-exe (build-path dir exe))))
-                 (string-split (cdr PATH-a) (if windows? ";" ":"))))]
+                 (string-split PATH (if windows? ";" ":"))))]
     [else (try-exe exe)]))

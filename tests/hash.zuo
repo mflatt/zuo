@@ -50,6 +50,3 @@
 (check (hash-keys-subset? (hash 'a 1 'b 2) (hash 'b 1)) #f)
 (check-fail (hash-keys-subset? 0 (hash)) "not a hash table")
 (check-fail (hash-keys-subset? (hash) 0) "not a hash table")
-
-(check (ref (hash 'a 1 'b 2) 'a) 1)
-(check-fail (ref (hash 'a 1 'b 2) 'c) "key is not present")

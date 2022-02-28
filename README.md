@@ -21,7 +21,9 @@ Building and Running Zuo
 
 Compile `zuo.c` with a C compiler. No additional are files needed,
 other than system and C-library headers. No compiler flags should be
-needed, although flags like `-o zuo` or `-O2` are a good idea.
+needed, although flags like `-o zuo` or `-O2` are a good idea. You can
+also use `configure`, `make`, and `make install`, where `make` targets
+mostly invoke a Zuo script.
 
 The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads `main.zuo`. Otherwise, the first
@@ -53,6 +55,11 @@ dependencies are included, but you can specify others with `++lib`. In
 addition, the default collection-root path is disabled in the
 generated copy, unless you supply `--keep-collects` to
 `embed-heap.zo`.
+
+When you use `configure` and `make`, the default `make` target creates
+a `to-run/zuo` that embeds the `zuo` library, as well as a
+`to-install/zuo` that has the right internal path to find other
+libraries are `make install`.
 
 You can use heap images without embedding. The `dump-heap-and-exit`
 Zuo kernel permitive creates a heap image, and a `-B` or `--boot`

@@ -9,14 +9,11 @@ LIB_PATH=lib
 
 while [ $# != 0 ] ; do
   case $1 in
-    -m=*)
-      m=`echo $1 | sed -e 's/^-m=//'`
-      ;;
     --embed=*)
       embed=`echo $1 | sed -e 's/^--embed=//'`
       ;;
     --prefix=*)
-      installprefix=`echo $1 | sed -e 's/^--installprefix=//'`
+      installprefix=`echo $1 | sed -e 's/^--prefix=//'`
       LIB_PATH=${installprefix}/share/zuo
       ;;
     --help)
@@ -61,11 +58,15 @@ if [ "$help" = "yes" ]; then
   exit 0
 fi
 
-echo "srcdir=${srcdir}" > Makefile
-echo "EMBED_LIBS=${embed}" >> Makefile
-echo "CC=${CC}" >> Makefile
-echo "CPPFLAGS=${CPPFLAGS}" >> Makefile
-echo "CFLAGS=${CFLAGS}" >> Makefile
-echo "LDFLAGS=${LDFLAGS}" >> Makefile
-echo "LIBS=${LIBS}" >> Makefile
+echo "srcdir = ${srcdir}" > Makefile
+echo "EMBED_LIBS = ${embed}" >> Makefile
+echo "CC = ${CC}" >> Makefile
+echo "CPPFLAGS = ${CPPFLAGS}" >> Makefile
+echo "CFLAGS = ${CFLAGS}" >> Makefile
+echo "LDFLAGS = ${LDFLAGS}" >> Makefile
+echo "LIBS = ${LIBS}" >> Makefile
+echo "INSTALL_PREFIX = ${installprefix}" >> Makefile
 cat ${srcdir}/Makefile.in >> Makefile
+
+echo "#lang zuo" > main.zuo
+echo "(require "'"'"${srcdir}/local/main.zuo"'"'")" >> main.zuo

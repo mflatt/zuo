@@ -4,7 +4,7 @@
 (provide fib)
 
 (define input
-  (let ([args (ref (runtime-env) 'args)])
+  (let ([args (hash-ref (runtime-env) 'args)])
     (if (null? args)
         30
         (car (read-from-string-all (car args) 0)))))
