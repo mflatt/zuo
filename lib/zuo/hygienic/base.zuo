@@ -1,4 +1,4 @@
 #lang zuo/kernel
 
 (let ([maker (hash-ref (module->hash 'zuo/private/base-hygienic) 'make-language #f)])
-  (maker 'zuo/private/main-hygienic))
+  (maker 'zuo/private/base-hygienic/main))

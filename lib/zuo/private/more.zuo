@@ -13,8 +13,6 @@
          assoc
          member
 
-         ref
-
          file-exists?
          directory-exists?
          link-exists?
@@ -24,7 +22,15 @@
 
          :error :truncate :must-truncate :append :update :can-update
 
-         string-split)
+         display
+         displayln
+         file->string
+         display-to-file
+
+         string-split
+         string-join
+
+         find-executable-path)
 
 
 ;; mainly for contracts in the docs:
@@ -54,7 +60,7 @@
         [else #f])))
 
 (define (assoc k lst)
-  (unless (list? lst) (error "assoc: not a list" lst))
+  (unless (list? lst) (arg-error 'assoc "list" lst))
   (letrec ([assoc (lambda (lst)
                     (cond
                       [(null? lst) #f]
@@ -68,7 +74,7 @@
     (assoc lst)))
 
 (define (member k lst)
-  (unless (list? lst) (error "member: not a list" lst))
+  (unless (list? lst) (arg-error 'member "list" lst))
   (letrec ([member (lambda (lst)
                      (cond
                        [(null? lst) #f]
@@ -78,42 +84,33 @@
                             (member (cdr lst)))]))])
     (member lst)))
 
-(define ref
-  (let ([not-there (string->uninterned-symbol "no")])
-    (lambda (ht k)
-      (unless (hash? ht) (error "ref: not a hash table" ht))
-      (let ([v (hash-ref ht k not-there)])
-        (if (eq? v not-there)
-            (error "ref: key is not present" k)
-            v)))))
-
 (define (file-exists? p)
-  (unless (path-string? p) (error "file-exists?: not a path string" p))
+  (unless (path-string? p) (arg-error 'file-exists? "path string" p))
   (let ([s (stat p #t)])
-    (and s (eq? (ref s 'type) 'file))))
+    (and s (eq? (hash-ref s 'type) 'file))))
 
 (define (directory-exists? p)
-  (unless (path-string? p) (error "directory-exists?: not a path string" p))
+  (unless (path-string? p) (arg-error 'directory-exists?: "path string" p))
   (let ([s (stat p #t)])
-    (and s (eq? (ref s 'type) 'dir))))
+    (and s (eq? (hash-ref s 'type) 'dir))))
 
 (define (link-exists? p)
-  (unless (path-string? p) (error "link-exists?: not a path string" p))
+  (unless (path-string? p) (arg-error 'link-exists? "path string" p))
   (let ([s (stat p #f)])
-    (and s (eq? (ref s 'type) 'link))))
+    (and s (eq? (hash-ref s 'type) 'link))))
 
 (define (mkdir* p)
-  (unless (path-string? p) (error "mkdir*: not a path string" p))
+  (unless (path-string? p) (arg-error 'mkdir* "path string" p))
   (unless (directory-exists? p)
     (let ([l (split-path p)])
       (when (car l) (mkdir* (car l)))
       (mkdir p))))
 
 (define (rm* p)
-  (unless (path-string? p) (error "rm*: not a path string" p))
+  (unless (path-string? p) (arg-error 'rm* "path string" p))
   (define info (stat p #f))
   (when info
-    (define type (ref info 'type))
+    (define type (hash-ref info 'type))
     (cond
       [(eq? type 'file) (rm p)]
       [(eq? type 'link) (rm p)]
@@ -130,6 +127,26 @@
 (define :update (hash 'exists 'update))
 (define :can-update (hash 'exists 'can-update))
 
+(define (display v)
+  (fd-write (fd-open-output 'stdout) (~a v)))
+
+(define (displayln v)
+  (fd-write (fd-open-output 'stdout) (~a v "\n")))
+
+(define (file->string path)
+  (unless (path-string? path) (arg-error 'file->string "path string" path))
+  (define fd (fd-open-input path))
+  (define content (fd-read fd eof))
+  (fd-close fd)
+  content)
+
+(define (display-to-file str path [options (hash)])
+  (unless (string? str) (arg-error 'display-to-file "string" str))
+  (unless (path-string? path) (arg-error 'display-to-file "path string" path))
+  (define fd (fd-open-output path options))
+  (fd-write fd str)
+  (fd-close fd))
+
 (define (do-string-split who str sep-str)
   (let* ([sep-len (string-length sep-str)]
          [end (- (string-length str) (string-length sep-str))])
@@ -145,7 +162,7 @@
 
 (define (string-split str . args)
   (unless (or (null? args) (null? (cdr args))) (arity-error 'string-split (cons str args)))
-  (unless (string? str) (error "string-split: not a string" str))
+  (unless (string? str) (arg-error 'string-split "string" str))
   (cond
     [(null? args)
      (filter (lambda (s) (> (string-length s) 0))
@@ -154,5 +171,37 @@
      (let ([sep-str (car args)])
        (unless (and (string? sep-str)
                     (> (string-length sep-str) 0))
-         (error "string-split: not a nonempty string" sep-str))
+         (arg-error 'string-split "nonempty string" sep-str))
        (do-string-split "string-split" str sep-str))]))
+
+(define (string-join strs [sep " "])
+  (unless (and (list? strs) (andmap string? strs))
+    (arg-error 'string-join "list of strings" strs))
+  (unless (string? sep) (arg-error 'string-join "string" strs))
+  (apply ~a (let loop ([strs strs])
+              (cond
+                [(null? strs) '()]
+                [(null? (cdr strs)) strs]
+                [else (list* (car strs) sep (loop (cdr strs)))]))))
+
+(define (find-executable-path exe)
+  (unless (path-string? exe) (arg-error 'find-executable-path "path string" exe))
+  (define windows? (eq? (hash-ref (runtime-env) 'system-type) 'windows))
+  (define (try-exe p)
+    (or (and (file-exists? p) p)
+        (and windows?
+             (let ([p (~a p ".exe")])
+               (and (file-exists? p) p)))))
+  (cond
+    [(and (relative-path? exe)
+          (not (car (split-path exe))))
+     (define PATH-a (ormap (lambda (p)
+                             (and ((if windows? string-ci=? string=?) (car p) "PATH")
+                                  (cdr p)))
+                           (hash-ref (runtime-env) 'env '())))
+     (and PATH-a
+          (ormap (lambda (dir)
+                   (and (path-string? dir)
+                        (try-exe (build-path dir exe))))
+                 (string-split (cdr PATH-a) (if windows? ";" ":"))))]
+    [else (try-exe exe)]))

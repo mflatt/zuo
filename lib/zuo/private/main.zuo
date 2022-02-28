@@ -1,0 +1,6 @@
+#lang zuo/base
+
+(require zuo/cmdline)
+
+(provide (all-from-out zuo/private/base/main
+                       zuo/cmdline))

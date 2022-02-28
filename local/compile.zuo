@@ -1,0 +1,32 @@
+#lang zuo/datum
+
+;; Not ready, yet
+
+(define (exe-up-to-date?)
+  (define exe-s (stat exe-file))
+  (and exe-s
+       (<= (ref (stat c-file) 'modify-time-seconds)
+           (ref exe-s 'modify-time-seconds))))
+
+(define (build-exe-file)
+  (define (lookup key) (reverse (hash-ref cmd key '())))
+  (define exe-h (cleanable-file exe-file))
+  (define call (append (lookup 'CC)
+                       (list "-o" exe-file c-file)
+                       (lookup 'LDFLAGS)))
+  (fd-write (fd-open-output 'stdout) (~a (string-join call) "\n"))
+  (define p (apply process (cons (find-executable-path (car call))
+                                 (cdr call))))
+  (process-wait (ref p 'process))
+  (when (= 0 (process-status (ref p 'process)))
+    (cleanable-cancel exe-h)))
+
+(if (c-up-to-date?)
+    (unless exe-file
+      (alert (~a c-file " is up-to-date")))
+    (build-c))
+
+(when exe-file
+  (if (exe-up-to-date?)
+      (alert (~a exe-file " is up-to-date"))
+      (build-exe-file)))

@@ -15,6 +15,8 @@
 
 (check (string=? "apple" "apple"))
 (check (not (string=? "apple" "banana")))
+(check (string-ci=? "apple" "aPPle"))
+(check (not (string-ci=? "apple" "banana")))
 
 (check (= 1 1))
 (check (not (= 1 -1)))
@@ -41,8 +43,10 @@
 
 (check-fail (= 1 'apple) not-integer)
 (check-fail (= 'apple 1) not-integer)
-(check-fail (string=? 1 'apple) "not a string")
-(check-fail (string=? 'apple 1) "not a string")
+(check-fail (string=? 1 "apple") "not a string")
+(check-fail (string=? "apple" 1) "not a string")
+(check-fail (string-ci=? 1 "apple") "not a string")
+(check-fail (string-ci=? "apple" 1) "not a string")
 
 (check (eq? (void) (void)))
 (check (void? (void)))

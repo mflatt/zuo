@@ -2,6 +2,7 @@
 
 (require "and-or.zuo"
          "../pair.zuo"
+         "../list.zuo"
          "define.zuo"
          "syntax-error.zuo")
 
@@ -16,15 +17,15 @@
       (string-ref (cadr stx) 0)
       (bad-syntax stx)))
 
-(define (combine-path base path)
-  (build-path (car (split-path base)) path))
+(define (combine-path base . paths)
+  (apply build-path (cons (car (split-path base)) paths)))
 
 (define-syntax (quote-path stx)
   (if (and (list? stx)
-           (= 2 (length stx))
-           (path-string? (cadr stx))
-           (relative-path? (cadr stx)))
-      (list (quote-syntax combine-path)
-            (quote-syntax (quote-module-path))
-            (cadr stx))
+           (>= (length stx) 2)
+           (andmap path-string? (cdr stx))
+           (andmap relative-path? (cdr stx)))
+      (list* (quote-syntax combine-path)
+             (quote-syntax (quote-module-path))
+             (cdr stx))
       (bad-syntax stx)))

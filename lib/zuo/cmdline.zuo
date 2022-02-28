@@ -1,0 +1,6 @@
+#lang zuo/base
+(require "private/cmdline-run.zuo"
+         (only-in "private/base/define-help.zuo"
+                  check-args))
+
+(include "private/cmdline-common.zuo")

@@ -1,0 +1,6 @@
+#lang zuo/hygienic/base
+(require "../private/cmdline-run.zuo"
+         (only-in "../private/base-hygienic/define-help.zuo"
+                  check-args))
+
+(include "../private/cmdline-common.zuo")

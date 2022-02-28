@@ -1,36 +1,61 @@
 #lang zuo
 
-(define (current-program) (hash-ref (runtime-env) 'script "image.zuo"))
-
-(define (need-arg args)
-  (when (null? (cdr args))
-    (error (~a (current-program) ": flag " (car args) " needs an argument"))))
-
 (define cmd
-  (let loop ([args (hash-ref (runtime-env) 'args #f)] [cmd (hash)])
-    (cond
-      [(null? args) cmd]
-      [(string=? (car args) "-o")
-       (need-arg args)
-       (loop (cddr args) (hash-set cmd 'output (cadr args)))]
-      [(string=? (car args) "--libs")
-       (need-arg args)
-       (loop (cddr args) (hash-set cmd 'libs (map string->symbol (string-split (cadr args)))))]
-      [(string=? (car args) "--keep-collects")
-       (loop (cdr args) (hash-set cmd 'keep-collects? #t))]
-      [else
-       (error (~a (current-program) ": unrecognized argument " (car args)))])))
+  (command-line
+   :once-each
+   [cmd "-o" file "Output to <file> instead of stdout"
+        (hash-set cmd 'output file)]
+   :multi
+   [cmd "++lib" module-path "Embed <module-path> and its dependencies"
+        (hash-set cmd 'libs (cons (string->symbol module-path)
+                                  (hash-ref cmd 'libs '())))]
+   :once-each
+   [cmd "--deps" file "Write dependencies to <file>"
+        (hash-set cmd 'deps file)]
+   [cmd "--keep-collects" "Keep library collection path enabled"
+        (hash-set cmd 'keep-collects? #t)]))
 
 (define given-libs (hash-ref cmd 'libs '()))
 (define libs (if (null? given-libs)
                  '(zuo)
                  given-libs))
 
+(define deps-file (hash-ref cmd 'deps #f))
+(define c-file (hash-ref cmd 'output #f))
+
+(when (and deps-file
+           c-file
+           (let ([c-s (stat c-file)])
+             (and c-s
+                  (file-exists? deps-file)
+                  (let ([deps (read-from-string-all (file->string deps-file))])
+                    (and (list? deps)
+                         (pair? deps)
+                         (equal? (car deps) libs)
+                         (andmap (lambda (file)
+                                   (define s (stat file))
+                                   (and s
+                                        (<= (hash-ref s 'modify-time-seconds)
+                                            (hash-ref c-s 'modify-time-seconds))))
+                                 (cons (quote-module-path) ; this file, too
+                                       (cdr deps))))))))
+  (exit 0))
+
+(define deps-h (and deps-file (cleanable-file deps-file)))
+(when deps-file
+  (display-to-file (~a (~s libs) "\n") deps-file :truncate))
+
 (define image
-  (let ([ht (process (hash-ref (runtime-env) 'exe #f) "" (hash 'stdin 'pipe 'stdout 'pipe))])
-    (define p (hash-ref ht 'process #f))
-    (define in (hash-ref ht 'stdin #f))
-    (define out (hash-ref ht 'stdout #f))
+  (let ([ht (apply process
+                   (append
+                    (list (hash-ref (runtime-env) 'exe))
+                    (if deps-file
+                        (list "-M" deps-file)
+                        (list))
+                    (list "" (hash 'stdin 'pipe 'stdout 'pipe))))])
+    (define p (hash-ref ht 'process))
+    (define in (hash-ref ht 'stdin))
+    (define out (hash-ref ht 'stdout))
     (fd-write in "#lang zuo/kernel\n")
     (fd-write in "(begin\n")
     (for-each (lambda (lib)
@@ -45,11 +70,9 @@
         (error "image dump failed"))
       image)))
 
-(define out-file (hash-ref cmd 'output #f))
-
-(define zuo.c (fd-read (fd-open-input (quote-path "zuo.c")) eof))
-(define out (if out-file
-                (fd-open-output out-file (hash 'exists 'truncate))
+(define zuo.c (fd-read (fd-open-input (quote-path ".." "zuo.c")) eof))
+(define out (if c-file
+                (fd-open-output c-file (hash 'exists 'truncate))
                 (fd-open-output 'stdout (hash))))
 
 (define lines (string-split zuo.c "\n"))
@@ -72,7 +95,7 @@
  (lambda (line)
    (cond
      [(or (string=? line embedded-image-line)
-	  (string=? line embedded-image-line/cr))
+          (string=? line embedded-image-line/cr))
       (define nl (if (string=? line embedded-image-line/cr) "\r\n" "\n"))
       (unless (hash-ref cmd 'keep-collects? #f)
         (fd-write out (~a "#define ZUO_LIB_PATH NULL" nl)))
@@ -98,3 +121,6 @@
      [else
       (fd-write out (~a line "\n"))]))
  lines)
+
+(when deps-h
+  (cleanable-cancel deps-h))

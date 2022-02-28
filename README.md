@@ -47,7 +47,7 @@ embedded as a heap image. Embedding a heap image has two advantages:
  * Zuo can start especially quickly, competitive with the fastest
    command-line programs.
 
-The `embed-heap.zuo` script generates a `.c` file that is a copy of
+The `local/image.zuo` script generates a `.c` file that is a copy of
 `zuo.c` plus embedded modules. By default, the `zuo` module and its
 dependencies are included, but you can specify others with `++lib`. In
 addition, the default collection-root path is disabled in the

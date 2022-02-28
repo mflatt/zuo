@@ -37,7 +37,7 @@
                            (cond
                              [(null? args)
                               (list (quote-syntax if) (list (quote-syntax null?) args-id)
-                                    (cons (quote-syntax begin) (cddr stx))
+                                    (cons (quote-syntax let) (cons (list) (cddr stx)))
                                     (list (quote-syntax opt-arity-error)
                                           (list (quote-syntax quote) name)
                                           (cons (quote-syntax list)

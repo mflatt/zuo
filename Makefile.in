@@ -2,3 +2,9 @@
 
 zuo: $(srcdir)/zuo.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DZUO_LIB_PATH='"'"$(srcdir)/lib"'"' -o zuo $(srcdir)/zuo.c $(LDFLAGS) $(LIBS)
+
+CC_PARTS = CC= $(CC) $(CPPFLAGS) $(CFLAGS) LDFLAGS= $(LDFLAGS) $(LIBS)
+
+.PHONY: ezuo
+ezuo: zuo
+	./zuo ../image.zuo -o ezuo.c --libs "$(EMBED_LIBS)" --deps ezuo.dep --exe ezuo $(CC_PARTS)

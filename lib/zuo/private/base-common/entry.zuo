@@ -41,6 +41,7 @@
      (hash 'read-and-eval
            (make-read-and-eval
             (lambda (ctx)
-              (make-state (merge-binds* (binds-create provides ctx) m-binds)
-                          (initial-nominals mod-path provides))))
+              (merge-binds (make-state (binds-create provides ctx)
+                                       (initial-nominals mod-path provides))
+                           m-binds)))
            'macromode-provides (hash-ref (module->hash mod-path) 'macromod-provides #f)))))
