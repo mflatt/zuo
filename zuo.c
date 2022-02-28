@@ -4459,6 +4459,7 @@ static BOOL WINAPI zuo_signal_received(DWORD op) {
     zuo_clean_all();
     _exit(1);
   }
+  return TRUE;
 }
 #endif
 
@@ -4470,7 +4471,7 @@ static void zuo_init_signal_handler() {
   sa.sa_handler = zuo_signal_received;
   sigaction(SIGINT, &sa, NULL);
 #endif
-#if defined(RKTIO_SYSTEM_WINDOWS)
+#ifdef ZUO_WINDOWS
   SetConsoleCtrlHandler(zuo_signal_received, TRUE);
 #endif
 }
