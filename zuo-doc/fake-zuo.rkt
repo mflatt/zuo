@@ -26,6 +26,7 @@
     
     define
     define-syntax
+    include
     
     pair?
     null?
@@ -39,10 +40,13 @@
     module-path?
     relative-path?
     handle?
+    boolean?
     void
 
     apply
+    call/cc
     context-consumer
+    context-consumer?
     
     cons
     car
@@ -78,9 +82,11 @@
     string-u32-ref
     substring
     string=?
+    string-ci=?
     string->symbol
     string->uninterned-symbol
     symbol->string
+    string
     char
 
     hash
@@ -100,6 +106,7 @@
     path->complete-path
     quote-path
 
+    variable?
     variable
     variable-ref
     variable-set!
@@ -109,6 +116,10 @@
     syntax->datum
     datum->syntax
     bound-identifier=?
+    syntax-error
+    bad-syntax
+    misplaced-syntax
+    duplicate-identifier
 
     fd-open-input
     fd-open-output
@@ -116,6 +127,9 @@
     fd-read
     fd-write
     eof
+    fd-ansi-terminal?
+    file->string
+    display-to-file
 
     stat
     ls rm mv mkdir rmdir ln readlink cp
@@ -131,6 +145,7 @@
     process
     process-status
     process-wait
+    find-executable-path
 
     error
     alert
@@ -138,6 +153,8 @@
     ~a
     ~s
     arity-error
+    arg-error
+    display displayln
 
     read-from-string-all
     module->hash
@@ -146,7 +163,9 @@
     kernel-eval
 
     runtime-env
-    dump-image-and-exit))
+    dump-image-and-exit
+    exit
+    suspend-signal resume-signal))
 
 (intro-define-fake)
 

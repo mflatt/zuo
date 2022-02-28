@@ -17,7 +17,10 @@ The name ``Zuo'' is derived from the Chinese word for ``make.''
 Compile @filepath{zuo.c} from the Zuo sources with a C compiler. No
 additional are files needed for compilation, other than system and
 C-library headers. No compiler flags should be needed, although flags
-like @exec{-o zuo} or @exec{-O2} are a good idea.
+like @exec{-o zuo} or @exec{-O2} are a good idea. You can also use
+@exec{configure}, @exec{make}, and @exec{make install}, where
+@exec{make} targets mostly invoke a Zuo script after compiling
+@filepath{zuo.c}.
 
 The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads @filepath{main.zuo} in the
@@ -63,6 +66,12 @@ dependencies are included, but you can specify others with
 disabled in the generated copy, unless you supply
 @DFlag{keep-collects} when running @filepath{image.zo}.
 
+When you use @exec{configure} and @exec{make} to build Zuo, the
+default @exec{make} target creates a @filepath{to-run/zuo} that embeds
+the @racketmodname[zuo] library, as well as a
+@filepath{to-install/zuo} that has the right internal path to find
+other libraries after @exec{make install}.
+
 You can use images without embedding. The @racket[dump-image-and-exit]
 Zuo kernel permitive creates an image containing all loaded modules,
 and a @Flag{B} or @DFlag{boot} command-line flag for Zuo uses the
@@ -74,7 +83,7 @@ embedded in @filepath{.c} source.
 
 @section{Zuo Datatypes}
 
-Zuo's kernel supports the kind kinds of data:
+Zuo's kernel supports the following kinds of data:
 
 @itemlist[
 
@@ -115,22 +124,21 @@ an implied UTF-8 encoding for Windows wide-character paths).
 @section{Zuo Implementation and Macros}
 
 The @filepath{zuo.c} source implements @racketmodname[zuo/kernel],
-which is a syntactically tiny language plus fewer than 100 primitive
+which is a syntactically tiny language plus around 100 primitive
 procedures. Since Zuo is intended for scripting, it's heavy on
-filesystem, I/O, and process primitives: about 1/4 are for those
-tasks, about 1/4 are for numbers, and the rest cover things like
-strings, symbols, lists, and hash tables.
+filesystem, I/O, and process primitives, and almost half of the
+primitives are for those tasks (while another 1/3 of the primitives are
+just for numbers, strings, and @tech{hash tables}).
 
 Zuo data structures are immutable except for @tech{variable} values,
-and even a variable is set-once, and attempting to get a value of the
+and even a variable is set-once; attempting to get a value of the
 variable before it has been set is an error. (Variables are used to
 implement @racket[letrec], for example.) Zuo is not purely functional,
 because it includes imperative I/O and errors, but it actively
-discourages gratuitous state by confining imperative actions to
+discourages in-process state by confining imperative actions to
 external interactions. Along those lines, an error in Zuo always
-terminates the program; there is no exception system, and along those
-lines, there's no way within Zuo to detect early use of an unset
-variable.
+terminates the program; there is no exception system (and therefore no
+way within Zuo to detect early use of an unset variable).
 
 The @racketmodname[zuo] language is built on top of
 @racketmodname[zuo/kernel], but not directly. There's an internal
@@ -156,7 +164,7 @@ implemented through a combination of @racketmodname[zuo/datum] and the
 ``stitcher'' layer's @racket[include].
 
 Naturally, you can mix and match @racketmodname[zuo] and
-@racketmodname[zuo/hygienic] modules in a program, you can't use
+@racketmodname[zuo/hygienic] modules in a program, but you can't use
 macros from one language within the other language. More generally,
 Zuo defines a @hash-lang[] protocol that lets you build arbitrary new
 languages (from the character/byte level), as long as they ultimately

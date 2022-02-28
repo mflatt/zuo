@@ -221,5 +221,6 @@
           (ormap (lambda (dir)
                    (and (path-string? dir)
                         (try-exe (build-path dir exe))))
-                 (string-split PATH (if windows? ";" ":"))))]
+                 (cons (hash-ref (runtime-env) 'dir)
+                       (string-split PATH (if windows? ";" ":"))))]
     [else (try-exe exe)]))

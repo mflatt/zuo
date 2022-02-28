@@ -75,14 +75,15 @@ in @racketmodname[zuo/kernel] (and the values originate there):
   integer? + - * quotient modulo < <= = >= >
   bitwise-and bitwise-ior bitwise-xor bitwise-not
 
-  string? string-length string-ref string-u32-ref substring string=?
+  string? string-length string-ref string-u32-ref substring string
+  string=? string-ci=?
 
   symbol? symbol->string string->symbol string->uninterned-symbol
   
   hash? hash hash-ref hash-set hash-remove
   hash-keys hash-count hash-keys-subset?
 
-  procedure? procedure-arity-mask apply
+  procedure? apply call/cc
 
   eq? not void
 
@@ -91,16 +92,18 @@ in @racketmodname[zuo/kernel] (and the values originate there):
   path-string? build-path split-path relative-path?
   module-path? module-path-join
 
-  variable variable-ref variable-set!
+  variable? variable variable-ref variable-set!
 
-  fd-open-input fd-open-output fd-close fd-read fd-write eof
+  handle? fd-open-input fd-open-output fd-close fd-read fd-write eof
+  fd-ansi-terminal? cleanable-file cleanable-cancel
 
-  stat ls rm mv mkdir rmdir ln readlink runtime-env current-time
+  stat ls rm mv mkdir rmdir ln readlink cp runtime-env current-time
 
   process process-status process-wait
 
-  read-from-string-all ~v ~a ~s alert error 
+  read-from-string-all ~v ~a ~s alert error arity-error arg-error 
 
-  kernel-env kernel-eval module->hash dump-image-and-exit
+  kernel-env kernel-eval module->hash dump-image-and-exit exit
+  suspend-signal resume-signal
 
 ]
