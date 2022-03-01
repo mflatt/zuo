@@ -88,6 +88,7 @@
     symbol->string
     string
     char
+    string-split string-join string-trim
 
     hash
     hash-ref
@@ -146,7 +147,10 @@
     process-status
     process-wait
     find-executable-path
-
+    shell->strings
+    string->shell
+    shell
+    
     error
     alert
     ~v

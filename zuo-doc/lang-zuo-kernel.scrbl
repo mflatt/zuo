@@ -99,7 +99,7 @@ in @racketmodname[zuo/kernel] (and the values originate there):
 
   stat ls rm mv mkdir rmdir ln readlink cp runtime-env current-time
 
-  process process-status process-wait
+  process process-status process-wait string->shell shell->strings
 
   read-from-string-all ~v ~a ~s alert error arity-error arg-error 
 

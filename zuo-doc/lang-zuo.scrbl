@@ -387,14 +387,18 @@ string of length 1.}
 Breaks @racket[str] into a sequence of substrings that have a
 non-empty separator string in between. When @racket[sep] is not
 provided, @racket[" "] is used as the separator, and empty strings are
-filtered from the result list. When @racket[sep] is provided, every
-instance of @racket[sep] is reflected by including every substring
-(possibly empty) that is not an instance of @racket[sep].}
+filtered from the result list. When @racket[sep] is provided, empty
+strings are @emph{not} filtered from the result list.}
 
-@defproc[(string-join [strs list?] [sep string? ""]) string?]{
+@defproc[(string-join [strs list?] [sep string? " "]) string?]{
 
 Concatenates the strings in @racket[strs] with @racket[sep] between
 each pair of strings.}
+
+@defproc[(string-trim [str string?] [edge-str string? " "]) string?]{
+
+Removes any number of repetitions of @racket[edge-str] from the start
+and end of @racket[str].}
 
 
 @section{Symbols}
@@ -886,6 +890,10 @@ keys are as follows, and supplying an unrecognized key in
       to terminate before exiting itself, whether exiting normally, by
       an error, or by a received termination signal (such as Ctl-C).}
 
+@item{@racket['exact?] mapped to boolean (or any value), Windows only:
+      if not @racket[#f], a single @racket[arg] must be provided, and
+      it is provided as-is for the created process's command line.}
+
 ]}
 
 @defproc[(process-wait [process handle?]) void?]{
@@ -900,6 +908,11 @@ Returns @racket['running] if the process represented by
 @racket[process] is still running, the exit value if the process has
 exited (@racket[0] normally means succes), erroring for any other kind
 of handle.}
+
+@defproc[(shell [command path-string?] [options hash? (hash)]) hash?]{
+
+Like @racket[process], but runs @racket[command] as a shell command
+(via @exec{/bin/sh} on Unix or @exec{cmd.exe} on Windows).}
 
 
 @defproc[(find-executable-path [name path-string?]) (or/c path-string? #f)]{
@@ -917,6 +930,20 @@ The @envvar{PATH} environment variable is treated as a list of
 @litchar{:}-separated paths on Unix and @litchar{;}-separated paths on
 Windows. On Windows, the current directory is automatically added to
 the start of @envvar{PATH}.}
+
+@deftogether[(
+@defproc[(string->shell [str string?]) string?]
+@defproc[(shell->strings [str string?] [starts-exe? any/c #f]) list?]
+)]{
+
+The @racket[string->shell] function converts a string to a
+command-line fragment that encodes the same string. The
+@racket[shell->strings] function takes a command-line fragment and
+parses it into a list of strings in the same way the shell would. On
+Windows, the shell parses an executable name differently than
+arguments in a command, so provide a true value as
+@racket[starts-exe?] if the command-line fragment @racket[str] starts
+with an executable name.}
 
 
 @section{Filesystem}
@@ -1049,6 +1076,8 @@ Zuo process. The hash table includes the following keys:
 @item{@racket['exe]: an absolute path for the running Zuo executable}
 
 @item{@racket['system-type]: @racket['unix] or @racket['windows]}
+
+@item{@racket['sys-dir] (Windows only): the path to the system directory}
 
 ]}
 

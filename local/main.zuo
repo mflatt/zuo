@@ -6,8 +6,8 @@
   (makefile->variables "Makefile"
                        '(srcdir EMBED_LIBS CC CPPFLAGS CFLAGS LDFLAGS LIBS INSTALL_PREFIX)))
 
-(define srcdir (car (hash-ref config 'srcdir)))
-(define install-prefix (car (hash-ref config 'INSTALL_PREFIX)))
+(define srcdir (string-trim (hash-ref config 'srcdir)))
+(define install-prefix (string-trim (hash-ref config 'INSTALL_PREFIX)))
 
 (define (target name noisy? deps pre timestamp build)
   (hash 'name name 'noisy? noisy? 'deps deps 'pre pre 'timestamp timestamp 'build build))
@@ -34,7 +34,7 @@
           (lambda (name)
             (embed-image (hash 'output name
                                'deps "image_zuo.dep"
-                               'libs (map string->symbol (hash-ref config 'EMBED_LIBS '("zuo")))
+                               'libs (string-split (hash-ref config 'EMBED_LIBS "zuo"))
                                'keep-collects? #t)))
           (lambda (name)
             (file-time name))
@@ -49,12 +49,10 @@
           (lambda (name)
             (file-time name))
           (lambda (name)
-            (compile-kernel name
-                            (target-name image_zuo.c)
-                            (hash-set config 'CPPFLAGS
-                                      (cons
-                                       (~a "-DZUO_LIB_PATH=\"" lib-path "\"")
-                                       (hash-ref config 'CPPFLAGS)))))))
+            (compile-c name
+                       (target-name image_zuo.c)
+                       (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
+                       config))))
 
 (define zuo-to-run (exe-target "to-run/zuo" (build-path srcdir ".." "lib")))
 (define zuo-to-install (exe-target "to-install/zuo" (~a install-prefix "/lib")))

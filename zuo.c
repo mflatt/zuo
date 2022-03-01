@@ -3602,6 +3602,21 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int a
     ht = zuo_hash_set(ht, zuo_symbol("system-type"), type);
   }
 
+#ifdef ZUO_WINDOWS
+  {
+    int size;
+    wchar_t *wa;
+    char *a;
+    size = GetSystemDirectoryW(NULL, 0);
+    wa = (wchar_t *)malloc((size + 1) * sizeof(wchar_t));
+    GetSystemDirectoryW(wa, size + 1);
+    a = zuo_from_wide(wa);
+    ht = zuo_hash_set(ht, zuo_symbol("sys-dir"), zuo_string(a));
+    free(a);
+    free(wa);
+  }
+#endif
+
   return ht;
 }
 
@@ -4680,33 +4695,139 @@ static zuo_t *zuo_cleanable_cancel(zuo_t *p) {
 }
 
 /*======================================================================*/
-/* processes                                                            */
+/* shell command-line parsing                                           */
 /*======================================================================*/
 
-static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
-{
 #ifdef ZUO_UNIX
-  {
-    int fd[2];
-    if (pipe(fd) != 0)
-      zuo_fail("pipe creation failed");
-    *_r = fd[0];
-    *_w = fd[1];
-  }
-#endif
-#ifdef ZUO_WINDOWS
-  {
-    HANDLE rh, wh;
+static char *zuo_string_to_shell_c(const char *s) {
+  zuo_intptr_t sz = 32, i = 0;
+  int quoting = 0;
+  unsigned char *p = malloc(sz);
 
-    if (!CreatePipe(_r, _w, NULL, 0))
-      zuo_fail("pipe creation failed");
+  if (*s == 0) {
+    p[i++] = '"';
+    quoting = 1;
   }
-#endif  
+
+  while (*s) {
+    int c = *(unsigned char *)s;
+    s++;
+
+    if (i + 6 >= sz) {
+      unsigned char *p2 = malloc(sz * 2);
+      memcpy(p2, p, i);
+      free(p);
+      p = p2;
+      sz *= 2;
+    }
+
+    /* We can afford to be conservative about the characters that a shell
+       may find special */
+    if ((c == '"') || (c == '$') || (c == '`') || (c == '\\') || (c == '!')
+        || (c == '*') || (c == '@') || (c == '^')) {
+      if (quoting) {
+        p[i++] = '"';
+        quoting = 0;
+      }
+      p[i++] = '\'';
+      p[i++] = c;
+      p[i++] = '\'';
+    } else if (isspace(c) || (c == '\'') || (c == '|') || (c == '&') || (c == ';')
+               || (c == '(') || (c == ')') || (c == '<') || (c == '>')
+               || !isprint(c)) {
+      if (!quoting) {
+        p[i++] = '"';
+        quoting = 1;
+      }
+      p[i++] = c;
+    } else {
+      if (quoting) {
+        p[i++] = '"';
+        quoting = 0;
+      }
+      p[i++] = c;
+    }
+  }
+  if (quoting)
+    p[i++] = '"';
+
+  p[i] = 0;
+
+  return (char *)p;
 }
 
+static char **zuo_shell_to_strings_c(char *buf, int skip_exe, zuo_intptr_t *_len) {
+  zuo_intptr_t i = 0, j = 0, arg_start = 0, cmd = 0;
+  int in_quote = 0, in_squote = 0, did_create = 0;
+  int maxargs = 32;
+  char **command = (char **)malloc((maxargs + 1) * sizeof(char *));
+
+  while (1) {
+    int c = ((unsigned char *)buf)[i];
+    if (c == 0)
+      in_quote = in_squote = 0;
+    if (in_quote) {
+      if (c == '"') {
+        in_quote = 0; i++;
+      } else if (c == '\\') {
+        /* a backslash only escapes when before certain characters: */
+        int next_c = ((unsigned char *)buf)[i+1];
+        if ((next_c == '$') || (next_c == '`') || (next_c == '\\') || (next_c == '\n')) {
+          buf[j++] = buf[i+1];
+          i += 2;
+        } else {
+          buf[j++] = buf[i++];
+        }
+      } else {
+        buf[j++] = buf[i++];
+      }
+    } else if (in_squote) {
+      if (c == '\'') {
+        in_squote = 0; i++;
+      } else {
+        buf[j++] = buf[i++];
+      }
+    } else if (c == '"') {
+      in_quote = 1; i++;
+      did_create = 1;
+    } else if (c == '\'') {
+      in_squote = 1; i++;
+      did_create = 1;
+    } else if (c == '\\') {
+      int next_c = ((unsigned char *)buf)[i+1];
+      if (next_c != '\n')
+        buf[j++] = c;
+      i += 2;
+    } else if (isspace(c) || (c == 0)) {
+      if ((j > arg_start) || did_create) {
+        buf[j++] = 0;
+        if (cmd == maxargs) {
+          char **new_command = (char **)malloc((2*maxargs + 1) * sizeof(char *));
+          memcpy(new_command, command, cmd * sizeof(char *));
+          free(command);
+          new_command = command;
+          maxargs *= 2;
+        }
+        command[cmd++] = buf+arg_start;
+      }
+      i++;
+      arg_start = j;
+      did_create = 0;
+      if (c == 0)
+        break;
+    } else
+      buf[j++] = buf[i++];
+  }
+  
+  command[cmd] = NULL;
+  *_len = cmd;
+
+  return command;
+}
+#endif
+
 #ifdef ZUO_WINDOWS
-static char *zuo_cmdline_protect(const char *s)
-{
+static char *zuo_string_to_shell_c(const char *s) {
   char *naya;
   int ds;
   int has_space = 0, has_quote = 0, was_slash = 0;
@@ -4761,8 +4882,137 @@ static char *zuo_cmdline_protect(const char *s)
 
   return _strdup(s);
 }
+
+/* This command-line parser is meant to be consistent with the MSVC
+   library for MSVC 2008 and later. The parser was is based on
+   Microsoft documentation plus the missing parsing rule reported at
+    http://daviddeley.com/autohotkey/parameters/parameters.htm#WINCRULES 
+   The `skip_exe` flag is needed because an executble name is
+   is parsed differently(!). */
+
+static char **zuo_shell_to_strings_c(char *buf, int skip_exe, zuo_intptr_t *_len) {
+  int pos = 0;
+  int maxargs = 32;
+  char **command = (char **)malloc((maxargs + 1) * sizeof(char *));
+  unsigned char *parse, *created, *write;
+  int findquote = 0; /* i.e., inside a quoted block? */
+
+  parse = created = write = (unsigned char *)buf;
+  while (*parse) {
+    int did_create = 0;
+    while (*parse && isspace(*parse)) parse++;
+    while (*parse && (!isspace(*parse) || findquote)) {
+      if (*parse== '"') {
+        if (!skip_exe && findquote && (parse[1] == '"')) {
+          parse++;
+          *(write++) = '"';
+        } else {
+          findquote = !findquote;
+          did_create = 1;
+        }
+      } else if (!skip_exe && *parse== '\\') {
+	unsigned char *next;
+	for (next = parse; *next == '\\'; next++) { }
+	if (*next == '"') {
+	  /* Special handling: */
+	  int count = (next - parse), i;
+	  for (i = 1; i < count; i += 2) {
+	    *(write++) = '\\';
+	  }
+	  parse += (count - 1);
+	  if (count & 0x1) {
+	    *(write++) = '\"';
+	    parse++;
+	  }
+	} else
+	  *(write++) = *parse;
+      } else
+	*(write++) = *parse;
+      parse++;
+    }
+    if (*parse)
+      parse++;
+    *(write++) = 0;
+
+    if (*created || did_create) {
+      if (skip_exe > 0) {
+        --skip_exe;
+      } else {
+        command[pos++] = (char *)created;
+        if (pos == maxargs) {
+          char **c2;
+          c2 = (char **)malloc(((2 * maxargs) + 1) * sizeof(char *));
+          memcpy(c2, command, maxargs * sizeof(char *));
+          maxargs *= 2;
+        }
+      }
+    }
+    created = write;
+  }
+
+  command[pos] = NULL;
+  *_len = pos;
+
+  return command;
+}
 #endif
 
+static zuo_t *zuo_string_to_shell(zuo_t *str) {
+  char *s;
+  
+  check_string("string->shell", str);
+
+  s = zuo_string_to_shell_c(ZUO_STRING_PTR(str));
+  str = zuo_string(s);
+  free(s);
+  
+  return str;
+}
+
+static zuo_t *zuo_shell_to_strings(zuo_t *str, zuo_t *starts_exe) {
+  char *s, **argv;
+  zuo_t *lst;
+  zuo_intptr_t len;
+  
+  check_string("shell->strings", str);
+  if (starts_exe == z.o_undefined) starts_exe = z.o_false;
+
+  s = zuo_string_to_c(str);
+  argv = zuo_shell_to_strings_c(s, starts_exe != z.o_false, &len);
+
+  for (lst = z.o_null; len--; )
+    lst = zuo_cons(zuo_string(argv[len]), lst);
+
+  free(argv);
+  free(s);
+  
+  return lst;
+}
+
+/*======================================================================*/
+/* processes                                                            */
+/*======================================================================*/
+
+static void zuo_pipe(zuo_raw_handle_t *_r, zuo_raw_handle_t *_w)
+{
+#ifdef ZUO_UNIX
+  {
+    int fd[2];
+    if (pipe(fd) != 0)
+      zuo_fail("pipe creation failed");
+    *_r = fd[0];
+    *_w = fd[1];
+  }
+#endif
+#ifdef ZUO_WINDOWS
+  {
+    HANDLE rh, wh;
+
+    if (!CreatePipe(_r, _w, NULL, 0))
+      zuo_fail("pipe creation failed");
+  }
+#endif  
+}
 
 zuo_t *zuo_process(zuo_t *command_and_args)
 {
@@ -4776,6 +5026,9 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   int argc = 1, i, ok;
   char **argv;
   void *env;
+#ifdef ZUO_WINDOWS
+  int exact_cmdline;
+#endif
 
   check_path_string(who, command);
   for (l = args; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
@@ -4874,6 +5127,17 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   else
     no_wait = 0;
 
+#ifdef ZUO_WINDOWS
+  opt = zuo_consume_option(&options, "exact?");
+  if ((opt == z.o_false) || (opt == z.o_undefined))
+    exact_cmdline = 0;
+  else {
+    exact_cmdline = 1;
+    if (argc != 2)
+      zuo_fail1w(who, "too many arguments for exact mode", command_and_args);
+  }
+#endif
+
   check_options_consumed(who, options);
 
 #ifdef ZUO_UNIX
@@ -4937,8 +5201,6 @@ zuo_t *zuo_process(zuo_t *command_and_args)
 #ifdef ZUO_WINDOWS
   {
     wchar_t *command_w, *cmdline_w, *wd_w;
-    char *cmdline;
-    int len = 9;
     STARTUPINFOW startup;
     PROCESS_INFORMATION info;
     DWORD cr_flag;
@@ -4947,26 +5209,33 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       command = zuo_build_path2(dir, command);
     command_w = zuo_to_wide(ZUO_STRING_PTR(command));
     
-    for (i = 0; i < argc; i++) {
-      char *s = argv[i];
-      argv[i] = zuo_cmdline_protect(s);
-      free(s);
-      len += strlen(argv[i]) + 1;
+    if (exact_cmdline) {
+      cmdline_w = zuo_to_wide(argv[1]);
+    } else {
+      char *cmdline;
+      int len = 9;
+
+      for (i = 0; i < argc; i++) {
+        char *s = argv[i];
+        argv[i] = zuo_string_to_shell_c(s);
+        free(s);
+        len += strlen(argv[i]) + 1;
+      }
+
+      cmdline = malloc(len);
+
+      len = 0;
+      for (i = 0; i < argc; i++) {
+        int alen = strlen(argv[i]);
+        memcpy(cmdline + len, argv[i], alen);
+        cmdline[len + alen] = ' ';
+        len += alen + 1;
+      }
+      cmdline[len-1] = 0;
+
+      cmdline_w = zuo_to_wide(cmdline);
+      free(cmdline);
     }
-
-    cmdline = malloc(len);
-
-    len = 0;
-    for (i = 0; i < argc; i++) {
-      int alen = strlen(argv[i]);
-      memcpy(cmdline + len, argv[i], alen);
-      cmdline[len + alen] = ' ';
-      len += alen + 1;
-    }
-    cmdline[len-1] = 0;
-
-    cmdline_w = zuo_to_wide(cmdline);
-    free(cmdline);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
@@ -5578,6 +5847,8 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVEN("process-wait", zuo_process_wait, -2);
   ZUO_TOP_ENV_SET_PRIMITIVE0("suspend-signal", zuo_suspend_signal);
   ZUO_TOP_ENV_SET_PRIMITIVE0("resume-signal", zuo_resume_signal);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("string->shell", zuo_string_to_shell);
+  ZUO_TOP_ENV_SET_PRIMITIVEb("shell->strings", zuo_shell_to_strings);
   
   ZUO_TOP_ENV_SET_PRIMITIVE1("cleanable-file", zuo_cleanable_file);
   ZUO_TOP_ENV_SET_PRIMITIVE1("cleanable-cancel", zuo_cleanable_cancel);

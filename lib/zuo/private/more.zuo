@@ -30,9 +30,10 @@
 
          string-split
          string-join
+         string-trim
 
-         find-executable-path)
-
+         find-executable-path
+         shell)
 
 ;; mainly for contracts in the docs:
 (define (any? v) #t)
@@ -167,7 +168,7 @@
 
 (define (do-string-split who str sep-str)
   (let* ([sep-len (string-length sep-str)]
-         [end (- (string-length str) (string-length sep-str))])
+         [end (- (string-length str) sep-len)])
     (let loop ([start 0] [i 0])
       (cond
         [(> i end)
@@ -202,6 +203,35 @@
                 [(null? (cdr strs)) strs]
                 [else (list* (car strs) sep (loop (cdr strs)))]))))
 
+(define (string-trim str [sep-str " "])
+  (unless (string? str) (arg-error 'string-split "string" str))
+  (unless (and (string? sep-str) (> (string-length sep-str) 0))
+    (arg-error 'string-split "nonempty string" sep-str))
+  (let* ([sep-len (string-length sep-str)]
+         [len (string-length str)])
+    (if (< len sep-len)
+        str
+        (let ([start
+               (let loop ([i 0])
+                 (cond
+                   [(= i len) len]
+                   [(and (<= i (- len sep-len))
+                         (= (string-ref str i) (string-ref sep-str 0))
+                         (string=? (substring str i (+ i sep-len)) sep-str))
+                    (loop (+ i sep-len))]
+                   [else i]))]
+              [end
+               (let loop ([i len])
+                 (cond
+                   [(< i sep-len) i]
+                   [(and (= (string-ref str (- i sep-len)) (string-ref sep-str 0))
+                         (string=? (substring str (- i sep-len) i) sep-str))
+                    (loop (- i sep-len))]
+                   [else i]))])
+          (if (<= end start)
+              ""
+              (substring str start end))))))
+
 (define (find-executable-path exe)
   (unless (path-string? exe) (arg-error 'find-executable-path "path string" exe))
   (define windows? (eq? (hash-ref (runtime-env) 'system-type) 'windows))
@@ -222,5 +252,13 @@
                    (and (path-string? dir)
                         (try-exe (build-path dir exe))))
                  (cons (hash-ref (runtime-env) 'dir)
-                       (string-split PATH (if windows? ";" ":"))))]
+                       (string-split PATH (if windows? ";" ":")))))]
     [else (try-exe exe)]))
+
+(define (shell command [options (hash)])
+  (cond
+    [(eq? (hash-ref (runtime-env) 'system-type) 'unix)
+     (apply process (append '("/bin/sh" "-c") (list command options)))]
+    [else
+     (let ([cmd (build-path (hash-ref (runtime-env) 'sys-dir) "cmd.exe")])
+       (apply process cmd (~a cmd " /c \"" command "\"") (hash-set options 'exact? #t)))]))

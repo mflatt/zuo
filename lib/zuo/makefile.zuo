@@ -35,49 +35,8 @@
               (cond
                 [(member var vars)
                  (define rhs (substring line (+ (list-ref positions 2) 1) (string-length line)))
-                 (hash-set accum var (extract rhs))]
+                 (hash-set accum var rhs)]
                 [else accum])]
              [else accum]))
          (hash)
          lines))
-
-(define (extract rhs)
-  (define pi
-    (process "/bin/sh"
-             "-c"
-             (~a (protect (hash-ref (runtime-env) 'exe))
-                 " '' "
-                 rhs)
-             (hash 'stdin 'pipe 'stdout 'pipe)))
-  (define p (hash-ref pi 'process))
-  (define to (hash-ref pi 'stdin))
-  (define from (hash-ref pi 'stdout))
-  (fd-write to (~a "#lang zuo/kernel\n"
-                   (~s '(begin
-                          (alert (~s (hash-ref (runtime-env) 'args)))
-                          (hash)))))
-  (fd-close to)
-  (define args-str (fd-read from eof))
-  (process-wait p)
-  (unless (= 0 (process-status p))
-    (error "tokenization via sh failed"))
-  (car (read-from-string-all args-str)))
-
-(define (protect str)
-  (let loop ([i 0] [start 0])
-    (cond
-      [(= i (string-length str)) (substring str start i)]
-      [else
-       (let ([c (string-ref str i)])
-         (cond
-           [(or (= (char " ") c)
-                (= (char "\"") c)
-                (= (char "\\") c))
-            (~a (substring str start i)
-                "'" (string c) "'"
-                (loop (+ i 1) (+ i 1)))]
-           [(= (char "'") c)
-            (~a (substring str start i)
-                "\"'\""
-                (loop (+ i 1) (+ i 1)))]
-           [else (loop (+ i 1) start)]))])))
