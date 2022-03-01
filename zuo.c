@@ -5623,7 +5623,14 @@ static zuo_t *zuo_self_path(char *exec_file) {
 /* main                                                                 */
 /*======================================================================*/
 
-#define TRIE_SET_TOP_ENV(name, make_prim)        \
+#if EMBEDDED_IMAGE
+# define TRIE_SET_TOP_ENV(name, make_prim)       \
+  do {                                           \
+    zuo_t *sym = z.o_undefined;                  \
+    (void)make_prim;                             \
+  } while (0)
+#else
+# define TRIE_SET_TOP_ENV(name, make_prim)       \
   do {                                           \
     if (boot_image == NULL) {                    \
       zuo_t *sym = zuo_symbol(name);             \
@@ -5633,6 +5640,7 @@ static zuo_t *zuo_self_path(char *exec_file) {
       (void)make_prim;                           \
     }                                            \
   } while (0)
+#endif
 
 #define ZUO_TOP_ENV_SET_PRIMITIVE0(name, proc) \
   TRIE_SET_TOP_ENV(name, zuo_primitive0(proc, sym))
