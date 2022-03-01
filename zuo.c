@@ -89,6 +89,10 @@ static const char *zuo_lib_path = ZUO_LIB_PATH;
 
 #define MAX_PRIM_ARITY 10
 
+#ifdef ZUO_EMBEDDED
+# include "zuo.h"
+#endif
+
 /*======================================================================*/
 /* run-time configuration                                               */
 /*======================================================================*/
@@ -332,7 +336,6 @@ static struct {
     
     /* startup info */
     zuo_t *o_library_path;
-    zuo_t *o_current_directory;
     zuo_t *o_runtime_env;
   
     /* data to save across a GC that's possibly triggered by interp */
@@ -973,7 +976,7 @@ static zuo_t *zuo_cons(zuo_t *car, zuo_t *cdr) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_sized_string(const char *str, zuo_int_t len) {
+static zuo_t *zuo_sized_string(const char *str, zuo_intptr_t len) {
   zuo_string_t *obj = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
   obj->len = len;
   memcpy(&obj->s, str, len);
@@ -3439,7 +3442,7 @@ static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
   if (zuo_path_is_absolute(ZUO_STRING_PTR(path)))
     return path;
   else
-    return zuo_build_path2(Z.o_current_directory, path);
+    return zuo_build_path2(zuo_current_directory(), path);
 }
 
 zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
@@ -3571,6 +3574,7 @@ static zuo_t *zuo_runtime_env() {
   return Z.o_runtime_env;
 }
 
+#ifndef ZUO_EMBEDDED
 static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int argc, char **argv) {
   zuo_t *ht = z.o_empty_hash;
 
@@ -3583,9 +3587,14 @@ static zuo_t *zuo_make_runtime_env(zuo_t *exe_path, const char *load_file, int a
     ht = zuo_hash_set(ht, zuo_symbol("args"), l);
   }
 
-  ht = zuo_hash_set(ht, zuo_symbol("dir"), Z.o_current_directory);
   ht = zuo_hash_set(ht, zuo_symbol("script"), zuo_string(load_file));
+  
+  return ht;
+}
+#endif
 
+static zuo_t *zuo_finish_runtime_env(zuo_t *ht) {
+  ht = zuo_hash_set(ht, zuo_symbol("dir"), zuo_current_directory());
   ht = zuo_hash_set(ht, zuo_symbol("env"), zuo_get_envvars());
 
   {
@@ -5450,7 +5459,7 @@ zuo_t *zuo_process_wait(zuo_t *pids_i) {
 # include <errno.h>
 # include <unistd.h>
 
-static char *zuo_self_path_c(char *exec_file)
+static char *zuo_self_path_c(const char *exec_file)
 {
   ssize_t len, blen = 256;
   char *s = malloc(blen);
@@ -5476,7 +5485,7 @@ static char *zuo_self_path_c(char *exec_file)
 # include <sys/sysctl.h>
 # include <errno.h>
 
-static char *zuo_self_path_c(char *exec_file)
+static char *zuo_self_path_c(const char *exec_file)
 {
   int mib[4];
   char *s;
@@ -5510,7 +5519,7 @@ static char *zuo_self_path_c(char *exec_file)
 # include <mach-o/getsect.h>
 # include <mach-o/dyld.h>
 
-static char *zuo_self_path_c(char *exec_file)
+static char *zuo_self_path_c(const char *exec_file)
 {
   uint32_t size = 1024;
   char *s = malloc(size);
@@ -5533,7 +5542,7 @@ static char *zuo_self_path_c(char *exec_file)
 #elif defined(ZUO_WINDOWS)
 
 /* used outside this file: */
-static char *zuo_self_path_c(char *exec_file)
+static char *zuo_self_path_c(const char *exec_file)
 {
   wchar_t *path;
   DWORD r, sz = 1024;
@@ -5556,7 +5565,7 @@ static char *zuo_self_path_c(char *exec_file)
 
 /* Generic Unix: get executable path via argv[0] and the `PATH` environment variable */
 
-static int has_slash(char *s) {
+static int has_slash(const char *s) {
   while (*s) {
     if (s[0] == '/')
       return 1;
@@ -5565,7 +5574,7 @@ static int has_slash(char *s) {
   return 0;
 }
 
-static char *zuo_self_path_c(char *exec_file)
+static char *zuo_self_path_c(const char *exec_file)
 {
   if (zuo_path_is_absolute(exec_file)) {
     /* Absolute path */
@@ -5612,7 +5621,7 @@ static char *zuo_self_path_c(char *exec_file)
 
 #endif
 
-static zuo_t *zuo_self_path(char *exec_file) {
+static zuo_t *zuo_self_path(const char *exec_file) {
   char *s = zuo_self_path_c(exec_file);
   zuo_t *str = zuo_string(s);
   free(s);
@@ -5620,19 +5629,12 @@ static zuo_t *zuo_self_path(char *exec_file) {
 }
   
 /*======================================================================*/
-/* main                                                                 */
+/* initialization                                                       */
 /*======================================================================*/
 
-#if EMBEDDED_IMAGE
-# define TRIE_SET_TOP_ENV(name, make_prim)       \
+#define TRIE_SET_TOP_ENV(name, make_prim)        \
   do {                                           \
-    zuo_t *sym = z.o_undefined;                  \
-    (void)make_prim;                             \
-  } while (0)
-#else
-# define TRIE_SET_TOP_ENV(name, make_prim)       \
-  do {                                           \
-    if (boot_image == NULL) {                    \
+    if (!will_load_image) {                      \
       zuo_t *sym = zuo_symbol(name);             \
       zuo_trie_set(z.o_top_env, sym, make_prim); \
     } else {                                     \
@@ -5640,7 +5642,6 @@ static zuo_t *zuo_self_path(char *exec_file) {
       (void)make_prim;                           \
     }                                            \
   } while (0)
-#endif
 
 #define ZUO_TOP_ENV_SET_PRIMITIVE0(name, proc) \
   TRIE_SET_TOP_ENV(name, zuo_primitive0(proc, sym))
@@ -5661,100 +5662,12 @@ static zuo_t *zuo_self_path(char *exec_file) {
 #define ZUO_TOP_ENV_SET_VALUE(name, val)  \
   zuo_trie_set(z.o_top_env, zuo_symbol(name), val)
 
-int main(int argc, char **argv) {
-  char *load_file = NULL, *library_path = NULL, *boot_image = NULL;
-  char *argv0 = argv[0];
-  zuo_t *exe_path, *load_path;
-
+static void zuo_primitive_init(int will_load_image) {
   zuo_check_sanity();
 
   zuo_configure();
   zuo_init_terminal();
   zuo_init_signal_handler();
-
-  argc--;
-  argv++;
-
-  while (argc > 0) {
-    if (!strcmp(argv[0], "-h") || !strcmp(argv[0], "--help")) {
-      fprintf(stdout, ("\n"
-                       "usage: %s [<option> ...] [<file-or-dir> <argument> ...]\n"
-                       "\n"
-                       "If <file-or-dir> is a file, it is used as a module path to load.\n"
-                       "If <file-or-dir> is a directory, \"main.zuo\" is loded.\n"
-                       "If <file-or-dir> is \"\", a module is read from stdin.\n"
-                       "The <argument>s are made available via the `system-env` procedure.\n"
-                       "\n"
-                       "Supported <option>s:\n"
-                       "\n"
-                       "  -B <file>, --boot <file>\n"
-                       "     Load dump from <file> as the initial image\n"
-                       "  -X <dir>, --collects <dir>\n"
-                       "     Use <dir> as the library-collection root, overriding `ZUO_LIB`;\n"
-                       "     the default is \"%s\" relative to the executable\n"
-                       "  -M <file>\n"
-                       "     Log the path of each opened file to <file>\n"
-                       "  --\n"
-                       "     No argument following this switch is used as a switch\n"
-                       "  -h, --help\n"
-                       "     Show this information and exit, ignoring other options\n"
-                       "\n"
-                       "If an <option> switch is provided multiple times, the last\n"
-                       "instance takes precedence.\n"
-                       "\n"),
-              argv0,
-              ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
-      exit(0);
-    } else if (!strcmp(argv[0], "-B") || !strcmp(argv[0], "--boot")) {
-      if (argc > 1) {
-        boot_image = argv[1];
-        argc -= 2;
-        argv += 2;
-      } else {
-        zuo_error_color();
-        fprintf(stderr, "%s: expected a path after -B", argv0);
-        zuo_fail("");
-      }
-    } else if (!strcmp(argv[0], "-X") || !strcmp(argv[0], "--collects")) {
-      if (argc > 1) {
-        if (argv[1][0] == 0)
-          zuo_lib_path = NULL;
-        else
-          library_path = argv[1];
-        argc -= 2;
-        argv += 2;
-      } else {
-        zuo_error_color();
-        fprintf(stderr, "%s: expected a path after -X", argv0);
-        zuo_fail("");
-      }
-    } else if (!strcmp(argv[0], "-M")) {
-      if (argc > 1) {
-        zuo_file_logging = argv[1];
-        argc -= 2;
-        argv += 2;
-      } else {
-        zuo_error_color();
-        fprintf(stderr, "%s: expected a path after -M", argv0);
-        zuo_fail("");
-      }
-    } else if (!strcmp(argv[0], "--")) {
-      argc--;
-      argv++;
-      break;
-    } else if (argv[0][0] == '-') {
-      zuo_error_color();
-      fprintf(stderr, "%s: unrecognized flag: %s", argv0, argv[0]);
-      zuo_fail("");
-    } else
-      break;
-  }
-
-  if (argc > 0) {
-    load_file = argv[0];
-    argc--;
-    argv++;
-  }
 
   /* these initial constants and tables might get replaced by loading
      an image, but we need them to register primitives: */
@@ -5767,6 +5680,10 @@ int main(int argc, char **argv) {
   z.o_top_env = zuo_trie_node();
 
   Z.o_interp_k = z.o_done_k; /* in case of a failure that triggers a stack trace */
+
+# if EMBEDDED_IMAGE
+  will_load_image = 1;
+# endif
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("pair?", zuo_pair_p);
   ZUO_TOP_ENV_SET_PRIMITIVE1("null?", zuo_null_p);
@@ -5885,14 +5802,16 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE0("runtime-env", zuo_runtime_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("dump-image-and-exit", zuo_dump_image_and_exit);
+}
 
+static void zuo_image_init(char *boot_image) {
 # if EMBEDDED_IMAGE
   if (!boot_image)
     zuo_fasl_restore((char *)emedded_boot_image, emedded_boot_image_len * sizeof(zuo_int32_t));
   else {
 # endif
-
     if (boot_image) {
+      /* The image supplies constants and tables */
       zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_string(boot_image));
       zuo_int_t len;
       char *dump = zuo_drain(in, -1, &len);
@@ -5900,7 +5819,7 @@ int main(int argc, char **argv) {
       zuo_fasl_restore(dump, len);
       free(dump);
     } else {
-      /* Create remaining costants and tables */
+      /* Create remaining constants and tables */
       z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
@@ -5919,11 +5838,12 @@ int main(int argc, char **argv) {
       ZUO_TOP_ENV_SET_VALUE("call/cc", z.o_call_cc);
       ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
     }
-
 # if EMBEDDED_IMAGE
   }
 # endif
-        
+}
+
+static void zuo_runtime_init(zuo_t *lib_path, zuo_t *runtime_env) {
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
   Z.o_pending_modules = z.o_null;
@@ -5935,19 +5855,121 @@ int main(int argc, char **argv) {
 #endif
   Z.o_cleanable_table = z.o_empty_hash;
 
-  Z.o_current_directory = zuo_current_directory();
+  Z.o_library_path = lib_path; /* should be absolute or #f */
+
+  Z.o_runtime_env = zuo_finish_runtime_env(runtime_env);
+}
+
+/*======================================================================*/
+/* main                                                                 */
+/*======================================================================*/
+
+#ifndef ZUO_EMBEDDED
+
+int main(int argc, char **argv) {
+  char *load_file = NULL, *library_path = NULL, *boot_image = NULL;
+  char *argv0 = argv[0];
+  zuo_t *exe_path, *load_path, *lib_path;
+
+  argc--;
+  argv++;
+
+  while (argc > 0) {
+    if (!strcmp(argv[0], "-h") || !strcmp(argv[0], "--help")) {
+      fprintf(stdout, ("\n"
+                       "usage: %s [<option> ...] [<file-or-dir> <argument> ...]\n"
+                       "\n"
+                       "If <file-or-dir> is a file, it is used as a module path to load.\n"
+                       "If <file-or-dir> is a directory, \"main.zuo\" is loded.\n"
+                       "If <file-or-dir> is \"\", a module is read from stdin.\n"
+                       "The <argument>s are made available via the `system-env` procedure.\n"
+                       "\n"
+                       "Supported <option>s:\n"
+                       "\n"
+                       "  -B <file>, --boot <file>\n"
+                       "     Load dump from <file> as the initial image\n"
+                       "  -X <dir>, --collects <dir>\n"
+                       "     Use <dir> as the library-collection root, overriding `ZUO_LIB`;\n"
+                       "     the default is \"%s\" relative to the executable\n"
+                       "  -M <file>\n"
+                       "     Log the path of each opened file to <file>\n"
+                       "  --\n"
+                       "     No argument following this switch is used as a switch\n"
+                       "  -h, --help\n"
+                       "     Show this information and exit, ignoring other options\n"
+                       "\n"
+                       "If an <option> switch is provided multiple times, the last\n"
+                       "instance takes precedence.\n"
+                       "\n"),
+              argv0,
+              ((ZUO_LIB_PATH == NULL) ? "[disabled]" : ZUO_LIB_PATH));
+      exit(0);
+    } else if (!strcmp(argv[0], "-B") || !strcmp(argv[0], "--boot")) {
+      if (argc > 1) {
+        boot_image = argv[1];
+        argc -= 2;
+        argv += 2;
+      } else {
+        zuo_error_color();
+        fprintf(stderr, "%s: expected a path after -B", argv0);
+        zuo_fail("");
+      }
+    } else if (!strcmp(argv[0], "-X") || !strcmp(argv[0], "--collects")) {
+      if (argc > 1) {
+        if (argv[1][0] == 0)
+          zuo_lib_path = NULL;
+        else
+          library_path = argv[1];
+        argc -= 2;
+        argv += 2;
+      } else {
+        zuo_error_color();
+        fprintf(stderr, "%s: expected a path after -X", argv0);
+        zuo_fail("");
+      }
+    } else if (!strcmp(argv[0], "-M")) {
+      if (argc > 1) {
+        zuo_file_logging = argv[1];
+        argc -= 2;
+        argv += 2;
+      } else {
+        zuo_error_color();
+        fprintf(stderr, "%s: expected a path after -M", argv0);
+        zuo_fail("");
+      }
+    } else if (!strcmp(argv[0], "--")) {
+      argc--;
+      argv++;
+      break;
+    } else if (argv[0][0] == '-') {
+      zuo_error_color();
+      fprintf(stderr, "%s: unrecognized flag: %s", argv0, argv[0]);
+      zuo_fail("");
+    } else
+      break;
+  }
+
+  if (argc > 0) {
+    load_file = argv[0];
+    argc--;
+    argv++;
+  }
+
+  /* Primitives must be registered before restoring an image */
+  zuo_primitive_init(boot_image != NULL);
+  zuo_image_init(boot_image);
 
   exe_path = zuo_self_path(argv0);
 
   if (library_path) {
-    Z.o_library_path = zuo_path_to_complete_path(zuo_string(library_path));
+    lib_path = zuo_path_to_complete_path(zuo_string(library_path));
   } else if (zuo_lib_path != NULL) {
-    Z.o_library_path = zuo_string(zuo_lib_path);
-    if (zuo_relative_path_p(Z.o_library_path) == z.o_true)
-      Z.o_library_path = zuo_build_path2(_zuo_car(zuo_split_path(exe_path)),
-                                         Z.o_library_path);
+    lib_path = zuo_string(zuo_lib_path);
+    if (zuo_relative_path_p(lib_path) == z.o_true)
+      lib_path = zuo_build_path2(_zuo_car(zuo_split_path(exe_path)),
+                                         lib_path);
   } else
-    Z.o_library_path = z.o_false;
+    lib_path = z.o_false;
 
   if (load_file == NULL) {
     load_file = "main.zuo";
@@ -5967,7 +5989,8 @@ int main(int argc, char **argv) {
   } else
     load_path = zuo_path_to_complete_path(zuo_string("stdin"));
 
-  Z.o_runtime_env = zuo_make_runtime_env(exe_path, load_file, argc, argv);
+  /* Finish initialization */
+  zuo_runtime_init(lib_path, zuo_make_runtime_env(exe_path, load_file, argc, argv));
 
   if (load_file[0] == 0) {
     zuo_int_t in_len;
@@ -5980,3 +6003,62 @@ int main(int argc, char **argv) {
   zuo_exit_int(0);
   return 0;
 }
+
+#endif
+
+/*======================================================================*/
+/* embedded API                                                         */
+/*======================================================================*/
+
+#ifdef ZUO_EMBEDDED
+
+void zuo_ext_primitive_init() {  zuo_primitive_init(0); }
+void zuo_ext_add_primitive(zuo_ext_primitive_t proc, int arity_mask, const char *name) {
+  int will_load_image = 0;
+  ZUO_TOP_ENV_SET_PRIMITIVEN(name, proc, arity_mask);
+}
+
+void zuo_ext_image_init(char *boot_image) { zuo_image_init(boot_image); }
+
+zuo_ext_t *zuo_ext_false() { return z.o_false; }
+zuo_ext_t *zuo_ext_true() { return z.o_true; }
+zuo_ext_t *zuo_ext_null() { return z.o_null; }
+zuo_ext_t *zuo_ext_void() { return z.o_void; }
+zuo_ext_t *zuo_ext_eof() { return z.o_eof; }
+zuo_ext_t *zuo_ext_empty_hash() { return z.o_empty_hash; }
+zuo_ext_t *zuo_ext_integer(long long i) { return zuo_integer((zuo_int_t)i); }
+long long zuo_ext_integer_value(zuo_ext_t *v) { return (long long)ZUO_INT_I(v); }
+zuo_ext_t *zuo_ext_cons(zuo_ext_t *car, zuo_ext_t *cdr) { return zuo_cons(car, cdr); }
+zuo_ext_t *zuo_ext_car(zuo_ext_t *obj) { return _zuo_car(obj); }
+zuo_ext_t *zuo_ext_cdr(zuo_ext_t *obj) { return _zuo_cdr(obj); }
+zuo_ext_t *zuo_ext_string(const char *str, long long len) { return zuo_sized_string(str, (zuo_intptr_t)len); }
+long long zuo_ext_string_length(zuo_ext_t *str) { return (long long)ZUO_STRING_LEN(str); }
+char *zuo_ext_string_ptr(zuo_ext_t *str) { return ZUO_STRING_PTR(str); }
+zuo_ext_t *zuo_ext_symbol(const char *str) { return zuo_symbol(str); }
+zuo_ext_t *zuo_ext_hash_ref(zuo_ext_t *ht, zuo_ext_t *key, zuo_ext_t *fail) { return zuo_hash_ref(ht, key, fail); }
+zuo_ext_t *zuo_ext_hash_set(zuo_ext_t *ht, zuo_ext_t *key, zuo_ext_t *val) { return zuo_hash_set(ht, key, val); }
+
+zuo_ext_t *zuo_ext_kernel_env() { return z.o_top_env; }
+zuo_ext_t *zuo_ext_apply(zuo_ext_t *proc, zuo_ext_t *args) {
+  /* special-case primtives, so this cna be used to perform primitive
+     operations without triggering a GC */
+  if (proc->tag == zuo_primitive_tag) {
+    zuo_primitive_t *f = (zuo_primitive_t *)proc;
+    return f->dispatcher(f->proc, args);
+  } else
+    return zuo_kernel_eval(zuo_cons(proc, args));
+}
+
+void zuo_ext_runtime_init(zuo_ext_t *lib_path, zuo_ext_t *runtime_env) { zuo_runtime_init(lib_path, runtime_env); }
+
+zuo_ext_t *zuo_ext_eval_module(zuo_ext_t *as_module_path, const char *content, long long len) {
+  char *str = malloc(len+1);
+  memcpy(str, content, len);
+  str[len] = 0;
+  return zuo_eval_module(as_module_path, str, (zuo_int_t)len);
+}
+
+void zuo_ext_stash_push(zuo_ext_t *v) { Z.o_stash = zuo_cons(v, Z.o_stash); }
+zuo_ext_t *zuo_ext_stash_pop() { zuo_t *v = _zuo_car(Z.o_stash); Z.o_stash = _zuo_cdr(Z.o_stash); return v; }
+
+#endif

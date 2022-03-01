@@ -17,10 +17,15 @@ The name ``Zuo'' is derived from the Chinese word for ``make.''
 Compile @filepath{zuo.c} from the Zuo sources with a C compiler. No
 additional are files needed for compilation, other than system and
 C-library headers. No compiler flags should be needed, although flags
-like @exec{-o zuo} or @exec{-O2} are a good idea. You can also use
-@exec{configure}, @exec{make}, and @exec{make install}, where
-@exec{make} targets mostly invoke a Zuo script after compiling
-@filepath{zuo.c}.
+like @exec{-o zuo} or @exec{-O2} are a good idea.
+
+You can also use @exec{configure}, @exec{make}, and @exec{make
+install}, where @exec{make} targets mostly invoke a Zuo script after
+compiling @filepath{zuo.c}. If you don't use @exec{configure} but
+compile to @exec{zuo} in the current directory, then @exec{./zuo
+local} and @exec{./zuo local install} (omit the !exec{./} on Windows)
+will do the same thing as @exec{make} and @exec{make install} with
+a default configuration.
 
 The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads @filepath{main.zuo} in the
@@ -66,11 +71,12 @@ dependencies are included, but you can specify others with
 disabled in the generated copy, unless you supply
 @DFlag{keep-collects} when running @filepath{image.zuo}.
 
-When you use @exec{configure} and @exec{make} to build Zuo, the
-default @exec{make} target creates a @filepath{to-run/zuo} that embeds
-the @racketmodname[zuo] library, as well as a
+When you use @exec{configure} and @exec{make} @exec{./zuo local} to
+build Zuo, the default build target creates a @filepath{to-run/zuo}
+that embeds the @racketmodname[zuo] library, as well as a
 @filepath{to-install/zuo} that has the right internal path to find
-other libraries after @exec{make install}.
+other libraries after @exec{make install} or @exec{./zuo local
+install}.
 
 You can use images without embedding. The @racket[dump-image-and-exit]
 Zuo kernel permitive creates an image containing all loaded modules,
@@ -79,6 +85,17 @@ given boot image on startup.
 
 A boot image is machine-independent, whether in a stand-alone file or
 embedded in @filepath{.c} source.
+
+
+@section{Embedding Zuo in Another Application}
+
+Zuo can be embedded in a larger application, with or without an
+embedded boot image. To support embedding, compile @filepath{zuo.c} or
+the output of @filepath{local/image.zuo} with the @tt{ZUO_EMBEDDED}
+preprocessor macro defined (to anything); the @filepath{zuo.h} header
+will be used in that case, and @filepath{zuo.h} should also be used by
+the embedding application. Documentation for the embedding API is
+provided as comments within @filepath{zuo.h}.
 
 
 @section{Zuo Datatypes}

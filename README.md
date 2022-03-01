@@ -21,15 +21,22 @@ Building and Running Zuo
 
 Compile `zuo.c` with a C compiler. No additional are files needed,
 other than system and C-library headers. No compiler flags should be
-needed, although flags like `-o zuo` or `-O2` are a good idea. You can
-also use `configure`, `make`, and `make install`, where `make` targets
-mostly invoke a Zuo script after compiling `zuo.c`.
+needed, although flags like `-o zuo` or `-O2` are a good idea.
+
+You can also use `configure`, `make`, and `make install`, where `make`
+targets mostly invoke a Zuo script after compiling `zuo.c`. If you
+don't use `configure` but compile to `zuo` in the current directory,
+then `./zuo local` and `./zuo local install` (omit the `./` on Windows)
+will do the same thing as `make` and `make install` with a default
+configuration.
 
 The Zuo executable runs only modules. If you run Zuo with no
 command-line arguments, then it loads `main.zuo`. Otherwise, the first
 argument to Zuo is a file to run or a directory containing a
-`main.zuo` to run, and additional arguments are delivered to the Zuo
-program via the `runtime-env` procedure.
+`main.zuo` to run, and additional arguments are delivered to that Zuo
+program via the `runtime-env` procedure. Running the command
+`./zuo local install`, for example, runs the `local/main.zuo` program
+with the argument `install`.
 
 
 Library Modules and Startup Performance
@@ -56,10 +63,10 @@ addition, the default collection-root path is disabled in the
 generated copy, unless you supply `--keep-collects` to
 `local/image.zuo`.
 
-When you use `configure` and `make`, the default `make` target creates
-a `to-run/zuo` that embeds the `zuo` library, as well as a
-`to-install/zuo` that has the right internal path to find other
-libraries after `make install`.
+When you use `configure` and `make` or `./zuo local`, the default
+build target creates a `to-run/zuo` that embeds the `zuo` library, as
+well as a `to-install/zuo` that has the right internal path to find
+other libraries after `make install` or `./zuo local install`.
 
 You can use heap images without embedding. The `dump-heap-and-exit`
 Zuo kernel permitive creates a heap image, and a `-B` or `--boot`
@@ -67,6 +74,18 @@ command-line flag for Zuo uses the given boot image on startup.
 
 A boot image is machine-independent, whether in a stand-alone file or
 embedded in `.c` source.
+
+
+Embedding Zuo in Another Application
+------------------------------------
+
+Zuo can be embedded in a larger application, with or without an
+embedded boot image. To support embedding, compile `zuo.c` or the
+output of `local/image.zuo` with the `ZUO_EMBEDDED` preprocessor macro
+defined (to anything); the `zuo.h` header will be used in that case,
+and `zuo.h` should also be used by the embedding application.
+Documentation for the embedding API is provided as comments within
+`zuo.h`.
 
 
 More Information
