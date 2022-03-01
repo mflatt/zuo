@@ -64,7 +64,7 @@ embedded modules. By default, the @racketmodname[zuo] module and its
 dependencies are included, but you can specify others with
 @DPFlag{lib}. In addition, the default collection-root path is
 disabled in the generated copy, unless you supply
-@DFlag{keep-collects} when running @filepath{image.zo}.
+@DFlag{keep-collects} when running @filepath{image.zuo}.
 
 When you use @exec{configure} and @exec{make} to build Zuo, the
 default @exec{make} target creates a @filepath{to-run/zuo} that embeds

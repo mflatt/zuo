@@ -2,7 +2,19 @@
 (require "image-lib.zuo"
          "compile.zuo")
 
-(define config (makefile->variables "Makefile"))
+(define config (cond
+                 [(file-exists? "Makefile") (makefile->variables "Makefile")]
+                 ;; no `configure`-generated `Makefile`, so use defaults
+                 [(eq? (hash-ref (runtime-env) 'system-type) 'unix)
+                  (hash 'srcdir "."
+                        'INSTALL_PREFIX "/usr/local"
+                        'CC "cc"
+                        'CFLAGS "-O2")]
+                 [else
+                  (hash 'srcdir "."
+                        'INSTALL_PREFIX "C:\\Program Files\\Zuo"
+                        'CC "cl.exe"
+                        'CFLAGS "/O2")]))
 
 (define srcdir (hash-ref config 'srcdir))
 (define install-prefix (hash-ref config 'INSTALL_PREFIX))
@@ -52,8 +64,13 @@
                        (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
                        config))))
 
-(define zuo-to-run (exe-target "to-run/zuo" (build-path srcdir ".." "lib")))
-(define zuo-to-install (exe-target "to-install/zuo" (~a install-prefix "/lib")))
+(define (add-exe name)
+  (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)
+      (~a name ".exe")
+      name))
+
+(define zuo-to-run (exe-target (add-exe "to-run/zuo") (build-path srcdir ".." "lib")))
+(define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
 
 (define zuos-to-run-and-install
   (target "zuos-to-run-and-install" #f

@@ -54,7 +54,7 @@ The `local/image.zuo` script generates a `.c` file that is a copy of
 dependencies are included, but you can specify others with `++lib`. In
 addition, the default collection-root path is disabled in the
 generated copy, unless you supply `--keep-collects` to
-`image.zo`.
+`local/image.zuo`.
 
 When you use `configure` and `make`, the default `make` target creates
 a `to-run/zuo` that embeds the `zuo` library, as well as a
