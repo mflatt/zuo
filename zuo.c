@@ -4897,7 +4897,7 @@ static char *zuo_string_to_shell_c(const char *s) {
    The `skip_exe` flag is needed because an executble name is
    is parsed differently(!). */
 
-static char **zuo_shell_to_strings_c(char *buf, int skip_exe, zuo_intptr_t *_len) {
+static char **zuo_shell_to_strings_c(char *buf, int starts_exe, zuo_intptr_t *_len) {
   int pos = 0;
   int maxargs = 32;
   char **command = (char **)malloc((maxargs + 1) * sizeof(char *));
@@ -4910,14 +4910,14 @@ static char **zuo_shell_to_strings_c(char *buf, int skip_exe, zuo_intptr_t *_len
     while (*parse && isspace(*parse)) parse++;
     while (*parse && (!isspace(*parse) || findquote)) {
       if (*parse== '"') {
-        if (!skip_exe && findquote && (parse[1] == '"')) {
+        if (!starts_exe && findquote && (parse[1] == '"')) {
           parse++;
           *(write++) = '"';
         } else {
           findquote = !findquote;
           did_create = 1;
         }
-      } else if (!skip_exe && *parse== '\\') {
+      } else if (!starts_exe && *parse== '\\') {
 	unsigned char *next;
 	for (next = parse; *next == '\\'; next++) { }
 	if (*next == '"') {
@@ -4942,16 +4942,14 @@ static char **zuo_shell_to_strings_c(char *buf, int skip_exe, zuo_intptr_t *_len
     *(write++) = 0;
 
     if (*created || did_create) {
-      if (skip_exe > 0) {
-        --skip_exe;
-      } else {
-        command[pos++] = (char *)created;
-        if (pos == maxargs) {
-          char **c2;
-          c2 = (char **)malloc(((2 * maxargs) + 1) * sizeof(char *));
-          memcpy(c2, command, maxargs * sizeof(char *));
-          maxargs *= 2;
-        }
+      if (starts_exe > 0)
+        --starts_exe;
+      command[pos++] = (char *)created;
+      if (pos == maxargs) {
+	char **c2;
+	c2 = (char **)malloc(((2 * maxargs) + 1) * sizeof(char *));
+	memcpy(c2, command, maxargs * sizeof(char *));
+	maxargs *= 2;
       }
     }
     created = write;
@@ -5866,7 +5864,7 @@ static void zuo_runtime_init(zuo_t *lib_path, zuo_t *runtime_env) {
 
 #ifndef ZUO_EMBEDDED
 
-int main(int argc, char **argv) {
+int zuo_main(int argc, char **argv) {
   char *load_file = NULL, *library_path = NULL, *boot_image = NULL;
   char *argv0 = argv[0];
   zuo_t *exe_path, *load_path, *lib_path;
@@ -6003,6 +6001,31 @@ int main(int argc, char **argv) {
   zuo_exit_int(0);
   return 0;
 }
+
+# ifdef ZUO_UNIX
+int main(int argc, char **argv) {
+  return zuo_main(argc, argv);
+}
+# endif
+# ifdef ZUO_WINDOWS
+#  if defined(__MINGW32__)
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
+		     LPSTR m_lpCmdLine, int nCmdShow) {
+  zuo_intptr_t argc;
+  char **argv;
+  argv = zuo_shell_to_strings_c(zuo_from_wide(GetCommandLineW()), 1, &argc);
+  return zuo_main((int)argc, argv);
+}
+#  else
+int wmain(int argc, wchar_t **w_argv) {
+  char **argv = (char **)malloc(argc * sizeof(char *));
+  int i;
+  for (i = 0; i < argc; i++)
+    argv[i] = zuo_from_wide(w_argv[i]);
+  return zuo_main(argc, argv);
+}
+#  endif
+# endif
 
 #endif
 

@@ -122,3 +122,23 @@
   (fd-close in2)
   (process-wait (hash-ref ht2 'process))
   (void))
+
+;; check transfer of UTF-8 arguments and related
+(define (check-process-arg arg)
+  (define p (process (hash-ref (runtime-env) 'exe)
+		     ""
+		     arg
+		     (hash 'stdin 'pipe 'stdout 'pipe)))
+  (define to (hash-ref p 'stdin))
+  (fd-write to "#lang zuo (displayln (hash-ref (runtime-env) 'args))")
+  (fd-close to)
+  (define from (hash-ref p 'stdout))
+  (define s (fd-read from eof))
+  (process-wait (hash-ref p 'process))
+  (check s (~a"(" arg ")\n")))
+
+(check-process-arg "\xCE\xBB")
+(check-process-arg "a b c")
+(check-process-arg "a \"b\" c")
+(check-process-arg "a \"b c")
+(check-process-arg "a \\b c")
