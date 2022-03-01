@@ -95,7 +95,7 @@ in @racketmodname[zuo/kernel] (and the values originate there):
   variable? variable variable-ref variable-set!
 
   handle? fd-open-input fd-open-output fd-close fd-read fd-write eof
-  fd-ansi-terminal? cleanable-file cleanable-cancel
+  fd-terminal? cleanable-file cleanable-cancel
 
   stat ls rm mv mkdir rmdir ln readlink cp runtime-env current-time
 

@@ -1268,6 +1268,7 @@ static zuo_t *zuo_trie_keys(zuo_t *trie_in, zuo_t *accum) {
 
 static zuo_t *zuo_resume_signal();
 static zuo_t *zuo_suspend_signal();
+static int zuo_ansi_ok = 1;
 
 static void zuo_init_terminal() {
 #ifdef ZUO_WINDOWS
@@ -1287,7 +1288,7 @@ static void zuo_init_terminal() {
 # ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
 #  define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
 # endif
-        SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        zuo_ansi_ok = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
       }
     }
   }
@@ -3955,8 +3956,10 @@ static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
   return str;
 }
 
-static zuo_t *zuo_fd_ansi_terminal_p(zuo_t *fd_h) {
+static zuo_t *zuo_fd_terminal_p(zuo_t *fd_h, zuo_t *ansi) {
   zuo_check_input_output_fd("fd-ansi-terminal?", fd_h);
+  if ((ansi != z.o_undefined) && (ansi != z.o_false) && !zuo_ansi_ok)
+    return z.o_false;
   return zuo_is_terminal(ZUO_HANDLE_RAW(fd_h)) ? z.o_true : z.o_false;
 }
 
@@ -5832,7 +5835,7 @@ int main(int argc, char **argv) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("fd-close", zuo_fd_close);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-read", zuo_fd_read);
   ZUO_TOP_ENV_SET_PRIMITIVE2("fd-write", zuo_fd_write);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("fd-ansi-terminal?", zuo_fd_ansi_terminal_p);
+  ZUO_TOP_ENV_SET_PRIMITIVEb("fd-terminal?", zuo_fd_terminal_p);
 
   ZUO_TOP_ENV_SET_PRIMITIVEb("stat", zuo_stat);
   ZUO_TOP_ENV_SET_PRIMITIVE1("rm", zuo_rm);

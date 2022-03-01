@@ -128,7 +128,7 @@
     fd-read
     fd-write
     eof
-    fd-ansi-terminal?
+    fd-terminal?
     file->string
     display-to-file
 

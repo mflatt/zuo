@@ -2,7 +2,7 @@
 
 (provide makefile->variables)
 
-(define (makefile->variables path vars)
+(define (makefile->variables path)
   (unless (path-string? path) (arg-error 'makefile->variables "path string" path))
   (define content (file->string path))
   (define lines (string-split content "\n"))
@@ -32,11 +32,8 @@
            (cond
              [positions
               (define var (string->symbol (substring line (car positions) (cadr positions))))
-              (cond
-                [(member var vars)
-                 (define rhs (substring line (+ (list-ref positions 2) 1) (string-length line)))
-                 (hash-set accum var rhs)]
-                [else accum])]
+              (define rhs (substring line (+ (list-ref positions 2) 1) (string-length line)))
+              (hash-set accum var (string-trim rhs))]
              [else accum]))
          (hash)
          lines))

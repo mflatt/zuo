@@ -207,30 +207,26 @@
   (unless (string? str) (arg-error 'string-split "string" str))
   (unless (and (string? sep-str) (> (string-length sep-str) 0))
     (arg-error 'string-split "nonempty string" sep-str))
-  (let* ([sep-len (string-length sep-str)]
-         [len (string-length str)])
+  (let* ([len (string-length str)]
+         [sep-len (string-length sep-str)]
+         [match-at? (lambda (i)
+                      (and (= (string-ref str i) (string-ref sep-str 0))
+                           (string=? (substring str i (+ i sep-len)) sep-str)))])
     (if (< len sep-len)
         str
-        (let ([start
-               (let loop ([i 0])
-                 (cond
-                   [(= i len) len]
-                   [(and (<= i (- len sep-len))
-                         (= (string-ref str i) (string-ref sep-str 0))
-                         (string=? (substring str i (+ i sep-len)) sep-str))
-                    (loop (+ i sep-len))]
-                   [else i]))]
-              [end
-               (let loop ([i len])
-                 (cond
-                   [(< i sep-len) i]
-                   [(and (= (string-ref str (- i sep-len)) (string-ref sep-str 0))
-                         (string=? (substring str (- i sep-len) i) sep-str))
-                    (loop (- i sep-len))]
-                   [else i]))])
-          (if (<= end start)
-              ""
-              (substring str start end))))))
+        (let ([start (let loop ([i 0])
+                       (cond
+                         [(> i (- len sep-len)) i]
+                         [(match-at? i) (loop (+ i sep-len))]
+                         [else i]))]
+              [end (let loop ([i len])
+                     (cond
+                       [(< i sep-len) i]
+                       [(match-at? (- i sep-len)) (loop (- i sep-len))]
+                       [else i]))])
+          (if (> end start)
+              (substring str start end)
+              "")))))
 
 (define (find-executable-path exe)
   (unless (path-string? exe) (arg-error 'find-executable-path "path string" exe))

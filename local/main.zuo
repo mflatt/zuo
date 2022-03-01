@@ -2,12 +2,10 @@
 (require "image-lib.zuo"
          "compile.zuo")
 
-(define config
-  (makefile->variables "Makefile"
-                       '(srcdir EMBED_LIBS CC CPPFLAGS CFLAGS LDFLAGS LIBS INSTALL_PREFIX)))
+(define config (makefile->variables "Makefile"))
 
-(define srcdir (string-trim (hash-ref config 'srcdir)))
-(define install-prefix (string-trim (hash-ref config 'INSTALL_PREFIX)))
+(define srcdir (hash-ref config 'srcdir))
+(define install-prefix (hash-ref config 'INSTALL_PREFIX))
 
 (define (target name noisy? deps pre timestamp build)
   (hash 'name name 'noisy? noisy? 'deps deps 'pre pre 'timestamp timestamp 'build build))
@@ -34,7 +32,7 @@
           (lambda (name)
             (embed-image (hash 'output name
                                'deps "image_zuo.dep"
-                               'libs (string-split (hash-ref config 'EMBED_LIBS "zuo"))
+                               'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
                                'keep-collects? #t)))
           (lambda (name)
             (file-time name))

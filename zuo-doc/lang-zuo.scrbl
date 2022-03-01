@@ -801,11 +801,12 @@ Writes the bytes of @racket[str] to the output file or output stream
 associated with @racket[handle], erroring for any other kind of
 @racket[handle].}
 
-@defproc[(fd-ansi-terminal? [handle handle?]) boolean?]{
+@defproc[(fd-terminal? [handle handle?] [check-ansi? any? #f]) boolean?]{
 
 Returns @racket[#t] if the open input or output stream associated with
-@racket[handle] is a terminal and likely to support ANSI escape codes,
-@racket[#f] otherwise.
+@racket[handle] is a terminal, @racket[#f] otherwise. If
+@racket[check-ansi?] is true, the result is @racket[#t] only if the
+terminal is likely to support ANSI escape codes.
 
 When using ANSI escapes that change the character style, consider
 bracketing a change and restore with @racket[suspend-signal] and
