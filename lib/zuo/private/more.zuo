@@ -261,4 +261,4 @@
      (apply process (append '("/bin/sh" "-c") (list command options)))]
     [else
      (let ([cmd (build-path (hash-ref (runtime-env) 'sys-dir) "cmd.exe")])
-       (apply process cmd (~a cmd " /c \"" command "\"") (hash-set options 'exact? #t)))]))
+       (process cmd (~a cmd " /c \"" command "\"") (hash-set options 'exact? #t)))]))

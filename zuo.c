@@ -1269,10 +1269,6 @@ static zuo_t *zuo_trie_keys(zuo_t *trie_in, zuo_t *accum) {
 static zuo_t *zuo_resume_signal();
 static zuo_t *zuo_suspend_signal();
 
-#ifdef ZUO_WINDOWS
-static int zuo_ansi_ok = 0;
-#endif
-
 static void zuo_init_terminal() {
 #ifdef ZUO_WINDOWS
   int i;
@@ -1291,7 +1287,7 @@ static void zuo_init_terminal() {
 # ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
 #  define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
 # endif
-        zuo_ansi_ok = SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
       }
     }
   }
@@ -1321,9 +1317,8 @@ static zuo_raw_handle_t zuo_get_std_handle(int which) {
 #endif
 }
 
-int zuo_is_ansi_terminal(zuo_raw_handle_t fd) {
+int zuo_is_terminal(zuo_raw_handle_t fd) {
 #ifdef ZUO_UNIX
-  /* assuming that all terminals support ANSI escapes... */
   return isatty(fd);
 #endif
 #ifdef ZUO_WINDOWS
@@ -1337,7 +1332,7 @@ int zuo_is_ansi_terminal(zuo_raw_handle_t fd) {
 }
 
 static void zuo_print_terminal(int which, const char *str) {
-  if (zuo_is_ansi_terminal(zuo_get_std_handle(which))) {
+  if (zuo_is_terminal(zuo_get_std_handle(which))) {
     fprintf((which == 1) ? stdout : stderr, "%s", str);
   }
 }
@@ -3962,7 +3957,7 @@ static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
 
 static zuo_t *zuo_fd_ansi_terminal_p(zuo_t *fd_h) {
   zuo_check_input_output_fd("fd-ansi-terminal?", fd_h);
-  return zuo_is_ansi_terminal(ZUO_HANDLE_RAW(fd_h)) ? z.o_true : z.o_false;
+  return zuo_is_terminal(ZUO_HANDLE_RAW(fd_h)) ? z.o_true : z.o_false;
 }
 
 static char *zuo_string_to_c(zuo_t *obj) {
@@ -5134,7 +5129,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   else {
     exact_cmdline = 1;
     if (argc != 2)
-      zuo_fail1w(who, "too many arguments for exact mode", command_and_args);
+      zuo_fail1w(who, "too many arguments for mode", opt);
   }
 #endif
 
@@ -5209,9 +5204,9 @@ zuo_t *zuo_process(zuo_t *command_and_args)
       command = zuo_build_path2(dir, command);
     command_w = zuo_to_wide(ZUO_STRING_PTR(command));
     
-    if (exact_cmdline) {
+    if (exact_cmdline)
       cmdline_w = zuo_to_wide(argv[1]);
-    } else {
+    else {
       char *cmdline;
       int len = 9;
 
@@ -5261,7 +5256,15 @@ zuo_t *zuo_process(zuo_t *command_and_args)
 			 DUPLICATE_SAME_ACCESS))
       zuo_fail1w(who, "input handle dup failed", command);
 
-    cr_flag = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
+    /* If none of the stdio handles are consoles, specifically
+       create the subprocess without a console: */
+    if (!zuo_is_terminal(startup.hStdInput)
+	&& !zuo_is_terminal(startup.hStdOutput)
+	&& !zuo_is_terminal(startup.hStdError))
+      cr_flag = CREATE_NO_WINDOW;
+    else
+      cr_flag = 0;
+    cr_flag |= CREATE_UNICODE_ENVIRONMENT;
 
     if (dir != z.o_undefined)
       wd_w = zuo_to_wide(ZUO_STRING_PTR(dir));
