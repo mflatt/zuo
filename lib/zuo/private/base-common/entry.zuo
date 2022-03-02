@@ -9,18 +9,16 @@
            [es (map (lambda (e) (datum->syntax ctx e)) es)]
            [parse (make-parse ctx mod-path)]
            [initial-state (make-initial-state ctx)]
-           [initial-provides '()]
-           [es+state+provides (expand-sequence es initial-state initial-provides mod-path ctx parse)]
-           [es (car es+state+provides)]
-           [state (cadr es+state+provides)]
-           [provides (cadr (cdr es+state+provides))]
-           [outs (resolve-provides provides state ctx mod-path)]
-           [print-result (lambda (v)
-                           (unless (eq? v (void))
-                             (alert (~v v))))]
-           [add-print (lambda (s) (list print-result s))])
-      (kernel-eval (cons 'begin (cons '(void) (map (lambda (e) (add-print (parse e #f state))) es))))
+           [es+state+modtop (expand-sequence es initial-state empty-modtop mod-path ctx parse)]
+           [es (car es+state+modtop)]
+           [state (cadr es+state+modtop)]
+           [modtop (cadr (cdr es+state+modtop))]
+           [outs (resolve-provides (modtop-provides modtop) state ctx mod-path)]
+           [body (map (lambda (e) (add-print (parse e #f state))) es)]
+           [submods (parse-submodules (modtop-modules modtop) state mod-path ctx parse)])
+      (kernel-eval (cons 'begin (cons '(void) body)))
       (hash 'macromod-provides outs
+            'submodules submods
             merge-bindings-export-key (make-export-merge-binds ctx (state-binds state))))))
 
 (hash

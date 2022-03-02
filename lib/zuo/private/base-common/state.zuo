@@ -50,3 +50,10 @@
 ;; adds all the current ids in `binds` as nominally imported
 (define (initial-nominals mod-path sym+bs)
   (list (cons mod-path sym+bs)))
+
+;; Module top-level state contains provides and submodules
+(define empty-modtop (cons '() '()))
+(define modtop-provides car)
+(define modtop-modules cdr)
+(define (modtop-set-provides modtop provides) (cons provides (cdr modtop)))
+(define (modtop-set-modules modtop modules) (cons (car modtop) modules))

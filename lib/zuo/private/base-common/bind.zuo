@@ -22,7 +22,7 @@
            (hash-set provides sym (make-core-initial-bind (make-core-form sym))))
          kernel-provides
          '(lambda let letrec quote if begin
-                  define define-syntax require provide
+                  define define-syntax require provide module+
                   quote-syntax quote-module-path
                   include)))
 

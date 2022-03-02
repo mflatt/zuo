@@ -27,6 +27,9 @@
     define
     define-syntax
     include
+    require
+    provide
+    module+
     
     pair?
     null?

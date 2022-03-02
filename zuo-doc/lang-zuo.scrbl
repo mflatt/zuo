@@ -213,7 +213,46 @@ Splices the content of the module identified by @racket[module-path],
 assuming that @racket[module-path] is implemented in a language like
 @racketmodname[zuo/datum].}
 
+@deftogether[(
+@defform[#:literals (only-in rename-in)
+         (require spec ...)
+         #:grammar ([spec module-path
+                          (only-in module-path
+                                   maybe-renamed-id ...)
+                          (rename-in module-path
+                                     renamed-id ...)]
+                    [maybe-renamed-id id
+                                      renamed-id]
+                    [renamed-id [provided-id id]])]
+@defform[#:literals (all-from-out)
+         (provide spec ...)
+         #:grammar ([spec id
+                          (rename-out renamed-id ...)
+                          (all-from-out module-path)]
+                    [maybe-renamed-id id
+                                      renamed-id]
+                    [renamed-id [id provided-id]])]
+)]{
 
+Like @realracket*[require provide] from @racketmodname[racket], but a
+@racket[require] can appear in any definition context, while
+@racket[provide] is not allowed in @tech{submodules}.}
+
+@defform[(module+ id defn-or-expr ...)]{
+
+Declares a kind of @deftech{submodule}, roughly analogous to
+@realracket[module+] from @racketmodname[racket], but without allowing
+submodules nested in submodules.
+
+A submodule becomes a procedure of zero arguments that is a mapped
+from the symbol form of @racket[id] in the encloding module's
+representation as a hash table (see @secref["module-protocol"]).
+Calling the procedure evaluates the @racket[defn-or-expr] content of
+the submodule, where expression results are printed and the procedure
+result is @racket[(void)].
+
+When Zuo loads a starting module (see @secref["running"]), it checks
+for a @racketidfont{main} submodule and runs it if one is found.}
 
 @; ----------------------------------------
 

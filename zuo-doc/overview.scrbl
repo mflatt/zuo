@@ -12,7 +12,7 @@ with @hash-lang[], Zuo programs are not meant to be run via Racket.
 The name ``Zuo'' is derived from the Chinese word for ``make.''
 
 
-@section{Building and Running Zuo}
+@section[#:tag "running"]{Building and Running Zuo}
 
 Compile @filepath{zuo.c} from the Zuo sources with a C compiler. No
 additional are files needed for compilation, other than system and
@@ -32,7 +32,8 @@ command-line arguments, then it loads @filepath{main.zuo} in the
 current directory. Otherwise, the first argument to Zuo is a file to
 run or a directory containing a @filepath{main.zuo} to run, and
 additional arguments are delivered to that program via the
-@racket[runtime-env] procedure.
+@racket[runtime-env] procedure. Either way, if this initial script has
+a @racketidfont{main} submodule, the submodule is run.
 
 Note that starting Zuo with the argument @filepath{.} equivalent to
 the argument @filepath{./main.zuo}, which is a convenient shorthand
@@ -236,3 +237,9 @@ procedure is applied to the source of @racket[_M] to get @racket[_M]'s
 representation as a hash. That representation is both recorded for
 future use and returned from the original @racket[(module->hash _M)]
 call.
+
+The Zuo startup sequence assigns a meaning to a second key:
+@racket['submodules]. The value of @racket['submodules] should be a
+hash table that maps keys to thunks, each representing a submodule.
+When Zuo runs an initial script, it looks for a @racket['main]
+submodules and runs it (i.e., calls the thunk) if present.

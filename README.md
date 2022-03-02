@@ -36,7 +36,8 @@ argument to Zuo is a file to run or a directory containing a
 `main.zuo` to run, and additional arguments are delivered to that Zuo
 program via the `runtime-env` procedure. Running the command
 `./zuo local install`, for example, runs the `local/main.zuo` program
-with the argument `install`.
+with the argument `install`. Whatever initial script is run, if it has
+a `main` submodule, that submodule is also run.
 
 
 Library Modules and Startup Performance

@@ -5990,13 +5990,28 @@ int zuo_main(int argc, char **argv) {
   /* Finish initialization */
   zuo_runtime_init(lib_path, zuo_make_runtime_env(exe_path, load_file, argc, argv));
 
-  if (load_file[0] == 0) {
-    zuo_int_t in_len;
-    zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_symbol("stdin"));
-    char *input = zuo_drain(in, -1, &in_len);
-    (void)zuo_eval_module(load_path, input, in_len);
-  } else
-    (void)zuo_module_to_hash(load_path);
+  /* Run script */
+  {
+    zuo_t *mod_ht, *submods, *main_proc;
+    
+    if (load_file[0] == 0) {
+      zuo_int_t in_len;
+      zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_symbol("stdin"));
+      char *input = zuo_drain(in, -1, &in_len);
+      mod_ht = zuo_eval_module(load_path, input, in_len);
+    } else
+      mod_ht = zuo_module_to_hash(load_path);
+
+    submods = zuo_trie_lookup(mod_ht, zuo_symbol("submodules"));
+    if (submods->tag == zuo_trie_node_tag) {
+      main_proc = zuo_trie_lookup(submods, zuo_symbol("main"));
+      if (main_proc != z.o_undefined) {
+        if (zuo_procedure_p(main_proc) != z.o_true)
+          zuo_fail1("main is not a procedure", main_proc);
+        (void)zuo_kernel_eval(zuo_cons(main_proc, z.o_null));
+      }
+    }
+  }
 
   zuo_exit_int(0);
   return 0;
