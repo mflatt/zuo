@@ -13,6 +13,8 @@
          assoc
          member
 
+         call/comp
+
          file-exists?
          directory-exists?
          link-exists?
@@ -85,6 +87,14 @@
                             lst
                             (member (cdr lst)))]))])
     (member lst)))
+
+(define (call/comp proc)
+  (unless (procedure? proc) (arg-error 'call/comp "procedure" proc))
+  (call/cc (lambda (k)
+             (proc (lambda (v)
+                     (call/prompt
+                      (lambda ()
+                        (k v))))))))
 
 (define (file-exists? p)
   (unless (path-string? p) (arg-error 'file-exists? "path string" p))

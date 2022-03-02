@@ -301,6 +301,7 @@ static struct {
     /* intrinsic functions that manipulate interpreter state */
     zuo_t *o_apply;
     zuo_t *o_call_cc;
+    zuo_t *o_call_prompt;
 
     /* symbol table, root environment, and modules */
     zuo_t *o_intern_table;
@@ -323,6 +324,8 @@ static struct {
     zuo_t *o_interp_env;
     zuo_t *o_interp_k;
     zuo_t *o_interp_in_proc; /* used for a stack trace on error */
+
+    zuo_t *o_interp_meta_k;
 
     /* for cycle detection */
     zuo_t *o_pending_modules;
@@ -1532,6 +1535,8 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode
     out_string(out, "#<procedure:apply>");
   } else if (obj == z.o_call_cc) {
     out_string(out, "#<procedure:call/cc>");
+  } else if (obj == z.o_call_prompt) {
+    out_string(out, "#<procedure:call/prompt>");
   } else if (obj->tag == zuo_opaque_tag) {
     out_string(out, "#<");
     zuo_out(out, ((zuo_opaque_t *)obj)->tag, depth+1, zuo_display_mode);
@@ -1626,24 +1631,30 @@ static void done_dump_name(zuo_t *showed_name, int repeats) {
 }
 
 static void zuo_stack_dump() {
-  zuo_t *k = Z.o_interp_k;
+  zuo_t *k = Z.o_interp_k, *meta_k = Z.o_interp_meta_k;
   zuo_t *showed_name  = z.o_false;
   int repeats = 0;
-  
-  while (k != z.o_done_k) {
-    zuo_t *name = ((zuo_cont_t *)k)->in_proc;
-    if (name->tag == zuo_string_tag) {
-      if (name == showed_name)
-        repeats++;
-      else {
-        done_dump_name(showed_name, repeats);
-        repeats = 0;
-        showed_name = name;
-        fprintf(stderr, " in %s", ZUO_STRING_PTR(name));
+
+  do {
+    while (k != z.o_done_k) {
+      zuo_t *name = ((zuo_cont_t *)k)->in_proc;
+      if (name->tag == zuo_string_tag) {
+        if (name == showed_name)
+          repeats++;
+        else {
+          done_dump_name(showed_name, repeats);
+          repeats = 0;
+          showed_name = name;
+          fprintf(stderr, " in %s", ZUO_STRING_PTR(name));
+        }
       }
+      k = ((zuo_cont_t *)k)->next;
     }
-    k = ((zuo_cont_t *)k)->next;
-  }
+    if (meta_k != z.o_null) {
+      k = _zuo_car(meta_k);
+      meta_k = _zuo_cdr(meta_k);
+    }
+  } while (k != z.o_done_k);
   done_dump_name(showed_name, repeats);
 }
 
@@ -2163,7 +2174,8 @@ static zuo_t *zuo_procedure_p(zuo_t *obj) {
            || (obj->tag == zuo_closure_tag)
            || (obj->tag == zuo_cont_tag)
            || (obj == z.o_apply)
-           || (obj == z.o_call_cc))
+           || (obj == z.o_call_cc)
+           || (obj == z.o_call_prompt))
           ? z.o_true
           : z.o_false);
 }
@@ -2595,6 +2607,8 @@ static void zuo_fail_arity(zuo_t *rator, zuo_t *args) {
     name = zuo_string("apply");
   else if (rator == z.o_call_cc)
     name = zuo_string("call/cc");
+  else if (rator == z.o_call_prompt)
+    name = zuo_string("call/prompt");
   else if (rator->tag == zuo_closure_tag) {
     zuo_t *body = _zuo_cdr(_zuo_cdr(((zuo_closure_t *)rator)->lambda));
     if (_zuo_cdr(body) != z.o_null)
@@ -2695,7 +2709,7 @@ static zuo_t *zuo_kernel_env() {
 static zuo_t *zuo_dump() {
   return zuo_cons(Z.o_interp_e,
                   zuo_cons(Z.o_interp_env,
-                           zuo_cons(Z.o_interp_k,
+                           zuo_cons(zuo_cons(Z.o_interp_k, Z.o_interp_meta_k),
                                     zuo_cons(Z.o_interp_v,
                                              Z.o_interp_in_proc))));
 }
@@ -2705,7 +2719,8 @@ static void zuo_undump(zuo_t *d) {
   d = _zuo_cdr(d);
   Z.o_interp_env = _zuo_car(d);
   d = _zuo_cdr(d);
-  Z.o_interp_k = _zuo_car(d);
+  Z.o_interp_k = _zuo_car(_zuo_car(d));
+  Z.o_interp_meta_k = _zuo_cdr(_zuo_car(d));
   d = _zuo_cdr(d);
   Z.o_interp_v = _zuo_car(d);
   Z.o_interp_in_proc = _zuo_cdr(d);
@@ -2970,8 +2985,18 @@ static void continue_step() {
             rator = _zuo_car(args);
             args = zuo_cons(Z.o_interp_k, z.o_null);
             /* no break => loop to apply again */
+          } else if (rator == z.o_call_prompt) {
+            if (count != 1)
+              zuo_fail_arity(z.o_call_prompt, args);
+            rator = _zuo_car(args);
+            args = z.o_null;
+            if (Z.o_interp_k != z.o_done_k) {
+              Z.o_interp_meta_k = zuo_cons(Z.o_interp_k, Z.o_interp_meta_k);
+              Z.o_interp_k = z.o_done_k;
+            }
+            /* no break => loop to apply again */
           } else
-            zuo_fail1("not a function for call", rator);
+            zuo_fail1("not a procedure for application", rator);
         }
       } else {
         Z.o_interp_e = _zuo_car(exps);
@@ -3026,19 +3051,25 @@ zuo_t *zuo_kernel_eval(zuo_t *e) {
   Z.o_interp_v = z.o_undefined;
   Z.o_interp_env = z.o_top_env;
   Z.o_interp_k = z.o_done_k;
+  Z.o_interp_meta_k = z.o_null;
 
   while (1) {
     zuo_check_collect();
     if (Z.o_interp_v == z.o_undefined) {
       interp_step();
     } else if (Z.o_interp_k == z.o_done_k) {
-      zuo_t *v = Z.o_interp_v;
-      Z.o_interp_e = Z.o_interp_v = Z.o_interp_env = Z.o_interp_k = z.o_false;
-      
-      zuo_undump(_zuo_car(Z.o_stash));
-      Z.o_stash = _zuo_cdr(Z.o_stash);
-      
-      return v;
+      if (Z.o_interp_meta_k == z.o_null) {
+        zuo_t *v = Z.o_interp_v;
+        Z.o_interp_e = Z.o_interp_v = Z.o_interp_env = z.o_false;
+
+        zuo_undump(_zuo_car(Z.o_stash));
+        Z.o_stash = _zuo_cdr(Z.o_stash);
+
+        return v;
+      } else {
+        Z.o_interp_k = _zuo_car(Z.o_interp_meta_k);
+        Z.o_interp_meta_k = zuo_cdr(Z.o_interp_meta_k);
+      }
     } else {
       continue_step();
     }
@@ -4005,6 +4036,7 @@ static zuo_t *zuo_dump_image_and_exit(zuo_t *fd_obj) {
     for (i = 0; i < len; i++)
       p[i] = z.o_undefined;
     Z.o_interp_k = z.o_done_k; /* in case of a failure that might try to show a stack trace */
+    Z.o_interp_meta_k = z.o_null;
   }
 
   dump = zuo_fasl_dump(&len);
@@ -5670,15 +5702,18 @@ static void zuo_primitive_init(int will_load_image) {
   /* these initial constants and tables might get replaced by loading
      an image, but we need them to register primitives: */
   z.o_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+  z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_call_cc = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+  z.o_call_prompt = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_done_k = zuo_cont(zuo_done_cont, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined);
   z.o_intern_table = zuo_trie_node();
   z.o_top_env = zuo_trie_node();
 
   Z.o_interp_k = z.o_done_k; /* in case of a failure that triggers a stack trace */
-
+  Z.o_interp_meta_k = z.o_null;
+  
 # if EMBEDDED_IMAGE
   will_load_image = 1;
 # endif
@@ -5820,7 +5855,6 @@ static void zuo_image_init(char *boot_image) {
       /* Create remaining constants and tables */
       z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-      z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_empty_hash = zuo_trie_node();
     
@@ -5834,6 +5868,7 @@ static void zuo_image_init(char *boot_image) {
 
       ZUO_TOP_ENV_SET_VALUE("apply", z.o_apply);
       ZUO_TOP_ENV_SET_VALUE("call/cc", z.o_call_cc);
+      ZUO_TOP_ENV_SET_VALUE("call/prompt", z.o_call_prompt);
       ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
     }
 # if EMBEDDED_IMAGE
@@ -5844,6 +5879,7 @@ static void zuo_image_init(char *boot_image) {
 static void zuo_runtime_init(zuo_t *lib_path, zuo_t *runtime_env) {
   Z.o_interp_e = Z.o_interp_env = Z.o_interp_v = Z.o_interp_in_proc = z.o_false;
   Z.o_interp_k = z.o_done_k;
+  Z.o_interp_meta_k = z.o_null;
   Z.o_pending_modules = z.o_null;
   Z.o_stash = z.o_false;
 

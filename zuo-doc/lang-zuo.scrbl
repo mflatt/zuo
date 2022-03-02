@@ -512,10 +512,15 @@ opposed to a failure thunk.}
 @defproc[(procedure? [v any?]) any?]
 @defproc[(apply [proc procedure?] [lst list?]) any?]
 @defproc[(call/cc [proc procedure?]) any?]
+@defproc[(call/prompt [proc procedure?]) any?]
+@defproc[(call/comp [proc procedure?]) any?]
 )]{
 
-Like @realracket*[procedure? apply call/cc] from
-@racketmodname[racket], but @racket[apply] accepts only two arguments.}
+Like @realracket*[procedure? apply call/cc
+call-with-continuation-prompt call-with-composable-continuation] from
+@racketmodname[racket], but @racket[apply] accepts only two arguments,
+and @racket[call/cc], @racket[call/prompt], @racket[call/comp] have no
+tag or abort handler.}
 
 
 @section{Paths}

@@ -28,6 +28,35 @@
              (f 10)
              f))
        10)
+(check-fail (call/cc 1) "not a procedure")
 
+(check (call/prompt (lambda () 10)) 10)
+(check (let ([k (call/prompt
+                 (lambda ()
+                   (call/cc (lambda (k) k))))])
+         (+ 1 (call/prompt (lambda () (k 11)))))
+       12)
+(check (let ([k (call/prompt
+                 (lambda ()
+                   (call/cc
+                    (lambda (esc)
+                      (+ 1
+                         (* 2
+                            (call/cc
+                             (lambda (k) (esc k)))))))))])
+         (list (call/prompt (lambda () (k 3)))
+               (call/prompt (lambda () (k 4)))))
+       (list 7 9))
+(check-fail (call/prompt 1) "not a procedure")
 
-
+(check (let ([k (call/prompt
+                 (lambda ()
+                   (call/cc
+                    (lambda (esc)
+                      (+ 1
+                         (* 2
+                            (call/comp esc)))))))])
+         (list (k 30)
+               (k 40)))
+       (list 61 81))
+(check-fail (call/comp 1) "not a procedure")
