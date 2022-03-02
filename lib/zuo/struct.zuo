@@ -1,0 +1,59 @@
+#lang zuo/base
+
+(provide struct)
+
+(define-syntax (struct stx)
+  (unless (and (list? stx)
+               (= (length stx) 3)
+               (identifier? (cadr stx)))
+    (bad-syntax stx))
+  (define name (cadr stx))
+  (define fields (cadr (cdr stx)))
+  (unless (and (list? fields)
+               (andmap identifier? fields))
+    (bad-syntax stx))
+  (define indexes (let loop ([fields fields] [i 0])
+                    (if (null? fields)
+                        '()
+                        (cons i (loop (cdr fields) (+ i 1))))))
+  (define key `(,(quote-syntax quote)
+                ,(string->uninterned-symbol (symbol->string (syntax-e name)))))
+  (define name? (string->symbol (datum->syntax name (~a (syntax-e name) "?"))))
+  `(,(quote-syntax begin)
+    (,(quote-syntax define) ,name
+                            (,(quote-syntax lambda)
+                             ,fields
+                             (,(quote-syntax opaque) ,key
+                                                     (,(quote-syntax list) ,@fields))))
+    (,(quote-syntax define) (,name? v) (,(quote-syntax and)
+                                        (,(quote-syntax opaque-ref) ,key v #f)
+                                        #t))
+    ,@(map (lambda (field index)
+             (let ([ref (datum->syntax field (string->symbol (~a (syntax-e name)
+                                                                 "-"
+                                                                 (syntax-e field))))]
+                   [set (datum->syntax field (string->symbol (~a (syntax-e name)
+                                                                 "-set-"
+                                                                 (syntax-e field))))])
+               (define (mk head res)
+                 `(,(quote-syntax define) ,head
+                                          (,(quote-syntax let)
+                                           ([c (,(quote-syntax opaque-ref) ,key v #f)])
+                                           (,(quote-syntax if)
+                                            c
+                                            ,res
+                                            (,(quote-syntax arg-error)
+                                             (,(quote-syntax quote) ,(car head))
+                                             ,(symbol->string (syntax-e name))
+                                             v)))))
+               `(,(quote-syntax begin)
+                 ,(mk `(,ref v) `(,(quote-syntax list-ref) c ,index))
+                 ,(mk `(,set v a) `(,(quote-syntax replace) c ,index a ,key)))))
+           fields
+           indexes)))
+
+(define (replace l pos v key)
+  (opaque key (let loop ([l l] [pos pos])
+                (if (= pos 0)
+                    (cons v (cdr l))
+                    (cons (car l) (loop (cdr l) (- pos 1)))))))

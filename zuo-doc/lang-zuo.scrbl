@@ -383,9 +383,11 @@ argument in tail position.}
          (or/c pair? #f)]
 @defproc[(assoc [v any?] [lst list?])
          (or/c pair? #f)]
+@defproc[(remove [v any?] [lst list?])
+         (or/c pair? #f)]
 )]{
 
-Like @realracket*[member assoc] from @racketmodname[racket].}
+Like @realracket*[member assoc remove] from @racketmodname[racket].}
 
 
 @section{Strings}

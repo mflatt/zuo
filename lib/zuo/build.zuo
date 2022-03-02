@@ -1,12 +1,15 @@
 #lang zuo/base
-(require "cmdline.zuo")
+(require "struct.zuo"
+         "cmdline.zuo")
 
 ;; A target is
-;;    (list name (-> (list deps timestamp (-> new-timestamp))))
+;;    (list name )
 
 (provide target?
-         target
+         (rename-out [make-target target]
+                     [make-rule rule])
          target-name
+         target-path
          timestamp?
          timestamp-later?
          file-target
@@ -14,23 +17,45 @@
          build
          build-command-line)
 
-(define target-key (string->uninterned-symbol "target"))
+(struct build-state (dest-dir target-state suspend-k))
 
-(define (target name get-deps [options (hash)])
-  (unless (path-string? name) (arg-error 'target "path string" name))
-  (unless (procedure? get-deps) (arg-error 'target "procedure" get-deps))
-  (opaque target-key (list name get-deps options)))
+(struct target (key
+                name
+                get-deps ; (build-state -> rule)
+                options))
 
-(define (target? v) (and (opaque-ref target-key v #f) #t))
-(define (target-name t)
-  (let ([l (opaque-ref target-key t #f)])
-    (if (not l)
-        (arg-error 'target-name "target" t)
-        (car l))))
-(define (target-get-deps t)
-  (cadr (opaque-ref target-key t #f)))
-(define (target-options t)
-  (cadr (cdr (opaque-ref target-key t #f))))
+(struct rule (deps
+              timestamp
+              build)) ; (build-state -> new-timestamp)
+
+(define make-target
+  (let ([target
+         (lambda (name get-deps [options (hash)])
+           (unless (path-string? name) (arg-error 'target "path string" name))
+           (unless (procedure? get-deps) (arg-error 'target "procedure" get-deps))
+           (unless (hash? options) (arg-error 'target "hash table" options))
+           (target (string->uninterned-symbol name) name get-deps options))])
+    target))
+
+(define make-rule
+  (let ([rule
+         (lambda (deps timestamp [build #f])
+           (unless (and (list? deps)
+                        (andmap target? deps))
+             (arg-error 'rule "list of targets" deps))
+           (unless (timestamp? timestamp)
+             (arg-error 'rule "timestamp" timestamp))
+           (unless (or (not build)
+                       (procedure? build))
+             (arg-error 'rule "procedure or #f" build))
+           (rule deps timestamp build))])
+    rule))
+
+(define (target-path t state)
+  (define name (target-name t))
+  (if (relative-path? name)
+      (build-path (build-state-dest-dir state) name)
+      name))
 
 (define (timestamp? v)
   (or (eq? v 'before)
@@ -50,12 +75,12 @@
     [else (> (cdr a) (cdr b))]))
 
 (define (file-target path)
-  (target path
-          (lambda ()
-            (let ([ts (file-timestamp path)])
-              (if (eq? ts 'before)
-                  (error "missing input file" path)
-                  (list '() ts #f))))))
+  (make-target path
+               (lambda (state)
+                 (let ([ts (file-timestamp path)])
+                   (if (eq? ts 'before)
+                       (error "missing input file" path)
+                       (make-rule '() ts))))))
 
 (define (file-timestamp path)
   (let ([s (stat path)])
@@ -64,48 +89,81 @@
               (hash-ref s 'modify-time-nanoseconds))
         'before)))
 
-(define (build t)
+(define (target-state state t)
+  (hash-ref (build-state-target-state state) (target-key t) #f))
+
+(define (update-target-state state t ts)
+  (build-state-set-target-state state
+                                (hash-set (build-state-target-state state)
+                                          (target-key t)
+                                          ts)))
+
+(define (build t dest-dir)
   (unless (target? t) (arg-error 'build "target" t))
-  (do-build t #t)
+  (do-build t (build-state dest-dir (hash) #f) #t)
   (void))
 
-(define (do-build t [top? #f])
-  (unless (target? t) (arg-error 'build "target" t))
-  (define pre (current-time))
-  (define deps+ts+build ((target-get-deps t)))
-
-  (define (bad) (error "build: ill-formed target result" deps+ts+build))
-  (unless (and (list? deps+ts+build)
-               (= (length deps+ts+build) 3))
-    (bad))
-  (define deps (car deps+ts+build))
-  (define ts (cadr deps+ts+build))
-  (define to-build (car (cddr deps+ts+build)))
-  (unless (and (list? deps) (andmap target? deps)) (bad))
-  (unless (timestamp? ts) (bad))
-  (unless (or (not build) (procedure? build)) (bad))
-
-  (define dep-tss (map do-build deps))
+(define (do-build t state top?)
+  (define current (target-state state t))
   (cond
-    [(ormap (lambda (dep-ts) (timestamp-later? dep-ts ts))
-            dep-tss)
-     (unless to-build
-       (error "build: out-of-date target has no build procedure" (target-name t)))
-     (let ([ts (to-build)])
-       (unless (timestamp? ts)
-         (error "build: target-build result is not a timestamp" ts))
-       ts)]
-    [else
-     (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
-                (timestamp-later? pre ts))
-       (alert (~a (target-name t) " is up to date")))
-     ts]))
+    [(not current) (build-unbuilt t state top?)]
+    [(eq? current 'pending) (error "build: dependency cycle" (target-path t state))]
+    [else state]))
 
-(define (build-command-line targets)
+(define (build-unbuilt t state top?)
+  (call/cc
+   (lambda (suspend-esc)
+     (define pre (current-time))
+
+     (define r ((target-get-deps t) state))
+     (unless (rule? r)
+       (error "build: target result is not a rule" r))
+     
+     (define deps (rule-deps r))
+     (define ts (rule-timestamp r))
+     (define to-build (rule-build r))
+
+     (define pending-state (update-target-state state t 'pending))
+
+     (define new-state
+       (foldl (lambda (dep state) (do-build dep state #f))
+              pending-state
+              deps))
+     
+     (define dep-tss
+       (let ([target-state (build-state-target-state new-state)])
+         (map (lambda (dep)
+                (hash-ref target-state (target-key dep) #f))
+              deps)))
+     (cond
+       [(ormap (lambda (dep-ts) (timestamp-later? dep-ts ts))
+               dep-tss)
+        (unless to-build
+          (error "build: out-of-date target has no build procedure" (target-name t)))
+        (let ([ts (to-build new-state)])
+          (unless (timestamp? ts)
+            (error "build: target-build result is not a timestamp" ts))
+          (update-target-state new-state t ts))]
+       [else
+        (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
+                   (timestamp-later? pre ts))
+          (alert (~a (target-name t) " is up to date")))
+        (update-target-state new-state t ts)]))))
+
+(define-syntax (build-command-line stx)
+  (unless (and (list? stx)
+               (= (length stx) 2))
+    (bad-syntax stx))
+  `(,(quote-syntax do-build-command-line)
+    ,(quote-syntax (quote-module-path))
+    ,(cadr stx)))
+
+(define (do-build-command-line wrt targets)
   (command-line
    :args
    ([target (target-name (car targets))])
    (lambda (opts)
      (build (or (ormap (lambda (t) (and (equal? target (target-name t)) t))
                        targets)
-                (error (~a "unknown target: " target)))))))
+                (error (~a "unknown target: " target)))
+            (car (split-path wrt))))))

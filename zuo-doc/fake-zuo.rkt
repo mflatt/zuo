@@ -58,6 +58,9 @@
     append
     reverse
     length
+    member
+    assoc
+    remove
 
     not
     eq?

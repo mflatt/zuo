@@ -2,7 +2,7 @@
 
 (provide compile-c)
 
-(define (compile-c exe-file c-file c-flags config)
+(define (compile-c exe-file c-file c-flags config compile-wait)
   (define (lookup key) (hash-ref config key ""))
   (define exe-h (cleanable-file exe-file))
   (define command (string-join
@@ -18,6 +18,6 @@
                           (lookup 'LIBS)))))
   (displayln command)
   (define p (shell command))
-  (process-wait (hash-ref p 'process))
+  (compile-wait (hash-ref p 'process))
   (when (= 0 (process-status (hash-ref p 'process)))
     (cleanable-cancel exe-h)))

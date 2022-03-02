@@ -22,27 +22,28 @@
 (define here (file-target (quote-module-path)))
 
 (define image_zuo.c
-  (let ([name "image_zuo.c"])
+  (let ([name (quote-path "image_zuo.c")])
     (target name
-            (lambda ()
+            (lambda (state)
               (embed-image (hash 'output name
                                  'deps "image_zuo.dep"
                                  'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
                                  'keep-collects? #t))
-              (list '() (file-timestamp name) #f)))))
+              (rule '() (file-timestamp name))))))
 
 (define (exe-target name lib-path)
   (target name
-          (lambda ()
-            (list (list image_zuo.c)
+          (lambda (state)
+            (rule (list image_zuo.c)
                   (file-timestamp name)
-                  (lambda ()
+                  (lambda (state)
                     (define l (split-path name))
                     (when (car l) (mkdir* (car l)))
                     (compile-c name
-                               (target-name image_zuo.c)
+                               (target-path image_zuo.c state)
                                (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
-                               config)
+                               config
+                               process-wait)
                     (file-timestamp name))))
           (hash 'noisy? #t)))
 
@@ -56,23 +57,23 @@
 
 (define zuos-to-run-and-install
   (target "zuos-to-run-and-install"
-          (lambda ()
-            (list (list zuo-to-run zuo-to-install)
+          (lambda (state)
+            (rule (list zuo-to-run zuo-to-install)
                   'after
                   #f))))
 
 (define install
   (target "install"
-          (lambda ()
-            (list (list zuo-to-run)
+          (lambda (state)
+            (rule (list zuo-to-run)
                   'before
-                  (lambda ()
+                  (lambda (state)
                     (define (say-copy cp a b)
                       (displayln (~a "copying " a " to " b))
                       (cp a b))
                     (mkdir* install-prefix)
                     (mkdir* (build-path install-prefix "bin"))
-                    (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
+                    (say-copy cp (target-path zuo-to-install state) (build-path install-prefix "bin" "zuo"))
                     (mkdir* (build-path install-prefix "lib"))
                     (say-copy cp*
                               (build-path srcdir "lib" "zuo")

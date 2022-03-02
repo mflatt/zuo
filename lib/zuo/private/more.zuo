@@ -12,6 +12,7 @@
          equal?
          assoc
          member
+         remove
 
          call/comp
 
@@ -87,6 +88,17 @@
                             lst
                             (member (cdr lst)))]))])
     (member lst)))
+
+(define (remove k lst)
+  (unless (list? lst) (arg-error 'remove "list" lst))
+  (letrec ([remove (lambda (lst)
+                     (cond
+                       [(null? lst) '()]
+                       [else
+                        (if (equal? k (car lst))
+                            (cdr lst)
+                            (cons (car lst) (remove (cdr lst))))]))])
+    (remove lst)))
 
 (define (call/comp proc)
   (unless (procedure? proc) (arg-error 'call/comp "procedure" proc))

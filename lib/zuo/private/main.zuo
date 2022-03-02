@@ -1,10 +1,14 @@
 #lang zuo/base
 
-(require zuo/cmdline
+(require zuo/struct
+         zuo/cmdline
          zuo/makefile
+         zuo/thread
          zuo/build)
 
 (provide (all-from-out zuo/private/base/main
+                       zuo/struct
                        zuo/cmdline
                        zuo/makefile
+                       zuo/thread
                        zuo/build))
