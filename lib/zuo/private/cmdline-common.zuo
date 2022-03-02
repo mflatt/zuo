@@ -97,7 +97,7 @@
        (list (quote-syntax run-cmdline)
              (hash-ref accum 'program (quote-syntax (hash-ref (runtime-env) 'script "[script]")))
              (hash-ref accum 'init (quote-syntax (hash)))
-             (hash-ref accum 'argv (quote-syntax (hash-ref (runtime-env) 'args #f)))
+             (hash-ref accum 'argv (quote-syntax (hash-ref (runtime-env) 'args '())))
              (hash-ref accum 'flags-expr)
              (hash-ref accum 'finish (quote-syntax (lambda () (lambda (cmd) cmd))))
              (hash-ref accum 'finish-spec (quote-syntax '(() ())))

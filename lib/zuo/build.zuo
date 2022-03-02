@@ -1,6 +1,7 @@
 #lang zuo/base
 (require "struct.zuo"
-         "cmdline.zuo")
+         "cmdline.zuo"
+         "thread.zuo")
 
 ;; A target is
 ;;    (list name )
@@ -15,18 +16,19 @@
          file-target
          file-timestamp
          build
-         build-command-line)
+         build/command-line
+         provide-builder)
 
-(struct build-state (dest-dir target-state suspend-k))
+(struct build-state (dest-dir target-state resource-ch))
 
 (struct target (key
                 name
-                get-deps ; (build-state -> rule)
+                get-deps ; (name build-state -> rule)
                 options))
 
 (struct rule (deps
               timestamp
-              build)) ; (build-state -> new-timestamp)
+              build)) ; (name build-state -> new-timestamp)
 
 (define make-target
   (let ([target
@@ -53,7 +55,8 @@
 
 (define (target-path t state)
   (define name (target-name t))
-  (if (relative-path? name)
+  (if (and (relative-path? name)
+           (build-state-dest-dir state))
       (build-path (build-state-dest-dir state) name)
       name))
 
@@ -76,7 +79,7 @@
 
 (define (file-target path)
   (make-target path
-               (lambda (state)
+               (lambda (path state)
                  (let ([ts (file-timestamp path)])
                    (if (eq? ts 'before)
                        (error "missing input file" path)
@@ -98,9 +101,28 @@
                                           (target-key t)
                                           ts)))
 
-(define (build t dest-dir)
+(define (make-resources n)
+  (define ch (channel))
+  (let loop ([n n])
+    (unless (= n 0)
+      (channel-put ch 'go)
+      (loop (- n 1))))
+  ch)
+
+(define (acquire-resource state)
+  (channel-get (build-state-resource-ch state))
+  (void))
+
+(define (release-resource state)
+  (channel-put (build-state-resource-ch state) 'go))
+
+(define (build t [options (hash)])
   (unless (target? t) (arg-error 'build "target" t))
-  (do-build t (build-state dest-dir (hash) #f) #t)
+  (call-in-main-thread
+   (lambda ()
+     (do-build t (build-state (hash-ref options 'dest-dir #f)
+                              (hash)
+                              (make-resources (hash-ref options 'jobs 1))) #t)))
   (void))
 
 (define (do-build t state top?)
@@ -108,14 +130,23 @@
   (cond
     [(not current) (build-unbuilt t state top?)]
     [(eq? current 'pending) (error "build: dependency cycle" (target-path t state))]
+    [(channel? current) state]
+    [else state]))
+
+(define (force-build t state)
+  (define current (target-state state t))
+  (cond
+    [(channel? current) (update-target-state state t (channel-get current))]
     [else state]))
 
 (define (build-unbuilt t state top?)
   (call/cc
    (lambda (suspend-esc)
      (define pre (current-time))
-
-     (define r ((target-get-deps t) state))
+     (define path (target-path t state))
+     (define path-handle (cleanable-file path))
+     
+     (define r ((target-get-deps t) path state))
      (unless (rule? r)
        (error "build: target result is not a rule" r))
      
@@ -125,9 +156,13 @@
 
      (define pending-state (update-target-state state t 'pending))
 
-     (define new-state
+     (define fetch-state
        (foldl (lambda (dep state) (do-build dep state #f))
               pending-state
+              deps))
+     (define new-state
+       (foldl (lambda (dep state) (force-build dep state))
+              fetch-state
               deps))
      
      (define dep-tss
@@ -140,30 +175,73 @@
                dep-tss)
         (unless to-build
           (error "build: out-of-date target has no build procedure" (target-name t)))
-        (let ([ts (to-build new-state)])
-          (unless (timestamp? ts)
-            (error "build: target-build result is not a timestamp" ts))
-          (update-target-state new-state t ts))]
+        (let ([ch (channel)])
+          (thread (lambda ()
+                    (acquire-resource new-state)
+                    (let ([ts (to-build new-state)])
+                      (unless (timestamp? ts)
+                        (error "build: target-build result is not a timestamp" ts))
+                      (cleanable-cancel path-handle)
+                      (channel-put ch ts)
+                      (release-resource new-state))))
+          (update-target-state new-state t ch))]
        [else
+        (cleanable-cancel path-handle)
         (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
                    (timestamp-later? pre ts))
           (alert (~a (target-name t) " is up to date")))
         (update-target-state new-state t ts)]))))
 
-(define-syntax (build-command-line stx)
-  (unless (and (list? stx)
-               (= (length stx) 2))
-    (bad-syntax stx))
-  `(,(quote-syntax do-build-command-line)
-    ,(quote-syntax (quote-module-path))
-    ,(cadr stx)))
-
-(define (do-build-command-line wrt targets)
+(define (build/command-line targets [wrt #f] [opts (hash)])
+  (unless (and (list? targets) (andmap target? targets))
+    (arg-error 'build/command-line "list of targets" targets))
+  (unless (or (not wrt) (path-string? wrt))
+    (arg-error 'build/command-line "path string or #f" opts))
+  (unless (hash? opts)
+    (arg-error 'build/command-line "hash table" opts))
   (command-line
+   :argv (or (hash-ref opts 'args #f) (hash-ref (runtime-env) 'args))
+   :init (if (or (hash-ref opts 'dest-dir #f) (not wrt))
+             opts
+             (hash-set opts 'dest-dir (find-relative-directory wrt)))
+   :once-each
+   [opts ("-j" "--jobs") n "Use <n> parallel jobs"
+         (let ([v (read-from-string-all n)])
+           (if (and (= 1 (length v))
+                    (integer? (car v))
+                    (> (car v) 0))
+               (hash-set opts 'jobs (car v))
+               (error "not a positive integer" n)))]
    :args
    ([target (target-name (car targets))])
    (lambda (opts)
      (build (or (ormap (lambda (t) (and (equal? target (target-name t)) t))
                        targets)
                 (error (~a "unknown target: " target)))
-            (car (split-path wrt))))))
+            opts))))
+
+(define-syntax (provide-builder stx)
+  (unless (and (list? stx) (= 2 (length stx)))
+    (bad-syntax stx))
+  (define targets (string->uninterned-symbol "targets"))
+  (define builder (datum->syntax (car stx) 'builder))
+  (list (quote-syntax begin)
+        (list (quote-syntax provide) builder)
+        (list (quote-syntax define) targets (cadr stx))
+        (list (quote-syntax define)
+              (list builder
+                    'wrt)
+              (list (quote-syntax build/command-line)
+                    targets
+                    'wrt))
+        (list (quote-syntax module+) 'main
+              (list builder #f))))
+
+(define (find-relative-directory wrt)
+  (define l (split-path wrt))
+  (cond
+    [(not l) (if (relative-path? wrt)
+                 #f
+                 wrt)]
+    [(relative-path? (car l)) (car l)]
+    [else (find-relative-path (car l) (hash-ref (runtime-env) 'dir))]))

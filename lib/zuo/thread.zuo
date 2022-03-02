@@ -42,14 +42,14 @@
   (raw-make-channel ; make a channel to hold the main thread's result
    (state '() '() (hash) '())
    (lambda (chl st)
-     ;; for the scheduler loop, it's convenint to break out the head
+     ;; for the scheduler loop, it's convenient to break out the head
      ;; thunk of the thread queue, which starts out as being the main
      ;; thread's thunk
      (let loop ([st st] [hd-thunk (lambda () (channel-put chl (thunk)))])
        (cond
          [hd-thunk
           (let ([v (call/prompt hd-thunk)])
-            ; the thread either makes a state request or has terminated
+            ;; the thread either made a state request or has terminated
             (cond
               [(state-get-msg? v)
                (loop st (lambda () ((state-get-msg-k v) st)))]
@@ -123,7 +123,7 @@
     channel))
 
 (define (channel-put chl v)
-  (unless (channel? chl) (arg-error 'channel-put "channel" ch))
+  (unless (channel? chl) (arg-error 'channel-put "channel" chl))
   (let* ([st (current-state)]
          [chs (state-channels (current-state))]
          [ch (hash-ref chs (channel-id chl) #f)])
@@ -169,7 +169,7 @@
                 (loop (ch-set-tl (ch-set-hd ch (reverse tl)) '()))]))])))))
 
 (define (channel-get chl)
-  (unless (channel? chl) (arg-error 'channel-get "channel" ch))
+  (unless (channel? chl) (arg-error 'channel-get "channel" chl))
   (raw-channel-get (current-state) chl
                    (lambda (v st)
                      (current-state st)

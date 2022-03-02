@@ -22,18 +22,17 @@
 (define here (file-target (quote-module-path)))
 
 (define image_zuo.c
-  (let ([name (quote-path "image_zuo.c")])
-    (target name
-            (lambda (state)
-              (embed-image (hash 'output name
-                                 'deps "image_zuo.dep"
-                                 'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
-                                 'keep-collects? #t))
-              (rule '() (file-timestamp name))))))
+  (target "image_zuo.c"
+          (lambda (name state)
+            (embed-image (hash 'output name
+                               'deps "image_zuo.dep"
+                               'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
+                               'keep-collects? #t))
+            (rule '() (file-timestamp name)))))
 
 (define (exe-target name lib-path)
   (target name
-          (lambda (state)
+          (lambda (name state)
             (rule (list image_zuo.c)
                   (file-timestamp name)
                   (lambda (state)
@@ -43,7 +42,7 @@
                                (target-path image_zuo.c state)
                                (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
                                config
-                               process-wait)
+                               thread-process-wait)
                     (file-timestamp name))))
           (hash 'noisy? #t)))
 
@@ -57,14 +56,14 @@
 
 (define zuos-to-run-and-install
   (target "zuos-to-run-and-install"
-          (lambda (state)
+          (lambda (name state)
             (rule (list zuo-to-run zuo-to-install)
                   'after
                   #f))))
 
 (define install
   (target "install"
-          (lambda (state)
+          (lambda (name state)
             (rule (list zuo-to-run)
                   'before
                   (lambda (state)
@@ -80,8 +79,8 @@
                               (build-path install-prefix "lib" "zuo"))
                     'after)))))
 
-(build-command-line (list zuos-to-run-and-install
-                          image_zuo.c
-                          zuo-to-run
-                          zuo-to-install
-                          install))
+(provide-builder (list zuos-to-run-and-install
+                       image_zuo.c
+                       zuo-to-run
+                       zuo-to-install
+                       install))

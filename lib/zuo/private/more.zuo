@@ -19,6 +19,9 @@
          file-exists?
          directory-exists?
          link-exists?
+
+         simple-form-path
+         find-relative-path
          
          mkdir*
          rm*
@@ -122,6 +125,42 @@
   (unless (path-string? p) (arg-error 'link-exists? "path string" p))
   (let ([s (stat p #f)])
     (and s (eq? (hash-ref s 'type) 'link))))
+
+(define (explode-path p)
+  (unless (path-string? p) (arg-error 'explode-path "path string" p))
+  (define l (split-path p))
+  (if (not (car l))
+      (list (cdr l))
+      (append (explode-path (car l)) (list (cdr l)))))
+
+(define (dedot-exploded-path p)
+  (reverse
+   (let dedot ([p (reverse p)] [ups 0])
+     (cond
+       [(null? p) (if (= ups 0) '() (cons ".." (dedot '() (- ups 1))))]
+       [(equal? (car p) ".") (dedot (cdr p) ups)]
+       [(equal? (car p) "..") (dedot (cdr p) (+ ups 1))]
+       [(= ups 0) (cons (car p) (dedot (cdr p) 0))]
+       [else (dedot (cdr p) (- ups 1))]))))
+
+(define (simple-form-path p)
+  (apply build-path (dedot-exploded-path (explode-path p))))
+
+(define (find-relative-path wrt p)
+  (unless (and (path-string? wrt) (not (relative-path? wrt)))
+    (arg-error 'explode-path "absolute path string" wrt))
+  (unless (and (path-string? p) (not (relative-path? p)))
+    (arg-error 'explode-path "absolute path string" p))
+  (define ps (dedot-exploded-path (explode-path p)))
+  (define wrts (dedot-exploded-path (explode-path wrt)))
+  (if (equal? (car ps) (car wrts))
+      (let loop ([ps (cdr ps)] [wrts (cdr wrts)])
+        (cond
+          [(null? wrts) (if (null? ps) "." (apply build-path ps))]
+          [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
+          [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
+          [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
+      (apply build-path ps)))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

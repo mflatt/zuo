@@ -60,3 +60,25 @@
 (check-fail (quote-path . x) bad-stx)
 (check-fail (quote-path "adjacent.txt" c) bad-stx)
 
+(check (simple-form-path "a//b//c/d/../f/g")
+       (if unix?
+           "a/b/c/f/g"
+           "a\\b\\c\\f\\g"))
+(check (simple-form-path "a//b//c/d/.././../f/g")
+       (if unix?
+           "a/b/f/g"
+           "a\\b\\f\\g"))
+(check (simple-form-path "../../a//b//c/d")
+       (if unix?
+           "../../a/b/c/d"
+           "..\\..\\a\\b\\c\\d"))
+
+(when unix?
+  (check (find-relative-path "/home/zuo/src" "/home/zuo/src/private/optimize")
+         "private/optimize")
+  (check (find-relative-path "/home/zuo/src" "/home/zuo/lib")
+         "../lib")
+  (check (find-relative-path "/home/zuo/src" "/home/zuo/src")
+         ".")
+  (check (find-relative-path "/home/zuo/src" "/tmp/cache")
+         "../../../tmp/cache"))
