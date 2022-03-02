@@ -1,8 +1,10 @@
 #lang zuo/base
 
 (require zuo/cmdline
-         zuo/makefile)
+         zuo/makefile
+         zuo/build)
 
 (provide (all-from-out zuo/private/base/main
                        zuo/cmdline
-                       zuo/makefile))
+                       zuo/makefile
+                       zuo/build))

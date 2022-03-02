@@ -1,0 +1,111 @@
+#lang zuo/base
+(require "cmdline.zuo")
+
+;; A target is
+;;    (list name (-> (list deps timestamp (-> new-timestamp))))
+
+(provide target?
+         target
+         target-name
+         timestamp?
+         timestamp-later?
+         file-target
+         file-timestamp
+         build
+         build-command-line)
+
+(define target-key (string->uninterned-symbol "target"))
+
+(define (target name get-deps [options (hash)])
+  (unless (path-string? name) (arg-error 'target "path string" name))
+  (unless (procedure? get-deps) (arg-error 'target "procedure" get-deps))
+  (opaque target-key (list name get-deps options)))
+
+(define (target? v) (and (opaque-ref target-key v #f) #t))
+(define (target-name t)
+  (let ([l (opaque-ref target-key t #f)])
+    (if (not l)
+        (arg-error 'target-name "target" t)
+        (car l))))
+(define (target-get-deps t)
+  (cadr (opaque-ref target-key t #f)))
+(define (target-options t)
+  (cadr (cdr (opaque-ref target-key t #f))))
+
+(define (timestamp? v)
+  (or (eq? v 'before)
+      (eq? v 'after)
+      (and (pair? v)
+           (integer? (car v))
+           (integer? (cdr v)))))
+
+(define (timestamp-later? a b)
+  (cond
+    [(eq? a 'before) #f]
+    [(eq? b 'before) #t]
+    [(eq? b 'after) #f]
+    [(eq? a 'after) #t]
+    [(> (car a) (car b)) #t]
+    [(< (car a) (car b)) #f]
+    [else (> (cdr a) (cdr b))]))
+
+(define (file-target path)
+  (target path
+          (lambda ()
+            (let ([ts (file-timestamp path)])
+              (if (eq? ts 'before)
+                  (error "missing input file" path)
+                  (list '() ts #f))))))
+
+(define (file-timestamp path)
+  (let ([s (stat path)])
+    (if s
+        (cons (hash-ref s 'modify-time-seconds)
+              (hash-ref s 'modify-time-nanoseconds))
+        'before)))
+
+(define (build t)
+  (unless (target? t) (arg-error 'build "target" t))
+  (do-build t #t)
+  (void))
+
+(define (do-build t [top? #f])
+  (unless (target? t) (arg-error 'build "target" t))
+  (define pre (current-time))
+  (define deps+ts+build ((target-get-deps t)))
+
+  (define (bad) (error "build: ill-formed target result" deps+ts+build))
+  (unless (and (list? deps+ts+build)
+               (= (length deps+ts+build) 3))
+    (bad))
+  (define deps (car deps+ts+build))
+  (define ts (cadr deps+ts+build))
+  (define to-build (car (cddr deps+ts+build)))
+  (unless (and (list? deps) (andmap target? deps)) (bad))
+  (unless (timestamp? ts) (bad))
+  (unless (or (not build) (procedure? build)) (bad))
+
+  (define dep-tss (map do-build deps))
+  (cond
+    [(ormap (lambda (dep-ts) (timestamp-later? dep-ts ts))
+            dep-tss)
+     (unless to-build
+       (error "build: out-of-date target has no build procedure" (target-name t)))
+     (let ([ts (to-build)])
+       (unless (timestamp? ts)
+         (error "build: target-build result is not a timestamp" ts))
+       ts)]
+    [else
+     (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
+                (timestamp-later? pre ts))
+       (alert (~a (target-name t) " is up to date")))
+     ts]))
+
+(define (build-command-line targets)
+  (command-line
+   :args
+   ([target (target-name (car targets))])
+   (lambda (opts)
+     (build (or (ormap (lambda (t) (and (equal? target (target-name t)) t))
+                       targets)
+                (error (~a "unknown target: " target)))))))

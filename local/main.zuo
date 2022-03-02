@@ -19,50 +19,32 @@
 (define srcdir (hash-ref config 'srcdir))
 (define install-prefix (hash-ref config 'INSTALL_PREFIX))
 
-(define (target name noisy? deps pre timestamp build)
-  (hash 'name name 'noisy? noisy? 'deps deps 'pre pre 'timestamp timestamp 'build build))
-(define (target-name t) (hash-ref t 'name))
-
-(define beginning-of-time 0)
-
-(define (file-time path)
-  (define s (stat path))
-  (if s
-      (hash-ref s 'modify-time-seconds)
-      beginning-of-time))
-
-(define here
-  (target (quote-module-path) #f
-          '()
-          void
-          (lambda (name) (file-time name))
-          void))
+(define here (file-target (quote-module-path)))
 
 (define image_zuo.c
-  (target "image_zuo.c" #f
-          '()
-          (lambda (name)
-            (embed-image (hash 'output name
-                               'deps "image_zuo.dep"
-                               'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
-                               'keep-collects? #t)))
-          (lambda (name)
-            (file-time name))
-          void))
+  (let ([name "image_zuo.c"])
+    (target name
+            (lambda ()
+              (embed-image (hash 'output name
+                                 'deps "image_zuo.dep"
+                                 'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
+                                 'keep-collects? #t))
+              (list '() (file-timestamp name) #f)))))
 
 (define (exe-target name lib-path)
-  (target name #t
-          (list image_zuo.c here)
-          (lambda (name)
-            (define l (split-path name))
-            (when (car l) (mkdir* (car l))))
-          (lambda (name)
-            (file-time name))
-          (lambda (name)
-            (compile-c name
-                       (target-name image_zuo.c)
-                       (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
-                       config))))
+  (target name
+          (lambda ()
+            (list (list image_zuo.c)
+                  (file-timestamp name)
+                  (lambda ()
+                    (define l (split-path name))
+                    (when (car l) (mkdir* (car l)))
+                    (compile-c name
+                               (target-name image_zuo.c)
+                               (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
+                               config)
+                    (file-timestamp name))))
+          (hash 'noisy? #t)))
 
 (define (add-exe name)
   (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)
@@ -73,52 +55,32 @@
 (define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
 
 (define zuos-to-run-and-install
-  (target "zuos-to-run-and-install" #f
-          (list zuo-to-run zuo-to-install)
-          void
-          (lambda (name) beginning-of-time)
-          void))
+  (target "zuos-to-run-and-install"
+          (lambda ()
+            (list (list zuo-to-run zuo-to-install)
+                  'after
+                  #f))))
 
 (define install
-  (target "install" #f
-          (list zuo-to-run)
-          (lambda (name)
-            (define (say-copy cp a b)
-              (displayln (~a "copying " a " to " b))
-              (cp a b))
-            (mkdir* install-prefix)
-            (mkdir* (build-path install-prefix "bin"))
-            (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
-            (mkdir* (build-path install-prefix "lib"))
-            (say-copy cp*
-                      (build-path srcdir "lib" "zuo")
-                      (build-path install-prefix "lib" "zuo")))
-          (lambda (name) beginning-of-time)
-          void))
+  (target "install"
+          (lambda ()
+            (list (list zuo-to-run)
+                  'before
+                  (lambda ()
+                    (define (say-copy cp a b)
+                      (displayln (~a "copying " a " to " b))
+                      (cp a b))
+                    (mkdir* install-prefix)
+                    (mkdir* (build-path install-prefix "bin"))
+                    (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
+                    (mkdir* (build-path install-prefix "lib"))
+                    (say-copy cp*
+                              (build-path srcdir "lib" "zuo")
+                              (build-path install-prefix "lib" "zuo"))
+                    'after)))))
 
-(define (build-target t)
-  (define name (target-name t))
-  (define deps (hash-ref t 'deps))
-  (for-each build-target deps)
-  (define pre-state ((hash-ref t 'pre) name))
-  (define ts ((hash-ref t 'timestamp) name))
-  (cond
-    [(ormap (lambda (dep) (> ((hash-ref dep 'timestamp) (target-name dep)) ts)) deps)
-     ((hash-ref t 'build) name)
-     (when (hash-ref t 'noisy?)
-       (alert (~a "built " name)))]
-    [(hash-ref t 'noisy?)
-     (alert (~a name " is up to date"))]))
-
-(command-line
- :args
- ([target "zuos-to-run-and-install"])
- (lambda (opts)
-   (build-target
-    (cond
-      [(equal? target "image_zuo.c") image_zuo.c]
-      [(equal? target "zuo-to-run") zuo-to-run]
-      [(equal? target "zuo-to-install") zuo-to-install]
-      [(equal? target "zuos-to-run-and-install") zuos-to-run-and-install]
-      [(equal? target "install") install]
-      [else (error (~a "unknown target: " target))]))))
+(build-command-line (list zuos-to-run-and-install
+                          image_zuo.c
+                          zuo-to-run
+                          zuo-to-install
+                          install))
