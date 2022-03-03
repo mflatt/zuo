@@ -1,5 +1,4 @@
 #lang zuo/base
-(require "struct.zuo")
 
 (provide call-in-main-thread
          (rename-out

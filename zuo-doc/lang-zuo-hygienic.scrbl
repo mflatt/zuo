@@ -8,13 +8,13 @@
                      zuo-doc/fake-zuo-hygienic)
           "real-racket.rkt")
 
-@title{Zuo with Hygienic Macros}
+@title[#:tag "zuo-hygienic"]{Zuo with Hygienic Macros}
 
 @defmodulelang[zuo/hygienic #:no-declare #:packages ()]
-@declare-exporting[zuo-doc/fake-zuo-hygienic #:packages ()]
+@declare-exporting[zuo/hygienic #:packages () #:use-sources(zuo-doc/fake-zuo-hygienic)]
 
 The @racketmodname[zuo/hygienic] language provides the same set of
-bindings as @racketmodname[zuo], but with hygienic macros. Its
+bindings as @racketmodname[zuo/base], but with hygienic macros. Its
 macro-expansion protocol uses a different representation of
 identifiers and binding scope, and different rules for
 @racket[quote-syntax] and macros:

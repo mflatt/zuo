@@ -10,11 +10,8 @@ Racket with primitives for dealing with files and running processes.
 @table-of-contents[]
 
 @include-section["overview.scrbl"]
-
 @include-section["lang-zuo.scrbl"]
-
+@include-section["zuo-lib.scrbl"]
 @include-section["lang-zuo-hygienic.scrbl"]
-
 @include-section["lang-zuo-datum.scrbl"]
-
 @include-section["lang-zuo-kernel.scrbl"]

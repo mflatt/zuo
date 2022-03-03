@@ -3,7 +3,7 @@
          "compile.zuo")
 
 (define config (cond
-                 [(file-exists? "Makefile") (makefile->variables "Makefile")]
+                 [(file-exists? "Makefile") (config-file->hash "Makefile")]
                  ;; no `configure`-generated `Makefile`, so use defaults
                  [(eq? (hash-ref (runtime-env) 'system-type) 'unix)
                   (hash 'srcdir "."

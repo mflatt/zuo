@@ -1,9 +1,9 @@
 #lang zuo/base
 
-(provide makefile->variables)
+(provide config-file->hash)
 
-(define (makefile->variables path)
-  (unless (path-string? path) (arg-error 'makefile->variables "path string" path))
+(define (config-file->hash path)
+  (unless (path-string? path) (arg-error 'config->hash "path string" path))
   (define content (file->string path))
   (define lines (string-split content "\n"))
   (foldl (lambda (line accum)

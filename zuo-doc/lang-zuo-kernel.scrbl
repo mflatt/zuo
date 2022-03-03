@@ -9,7 +9,7 @@
                                 begin))
           "real-racket.rkt")
 
-@title{Zuo Kernel Language}
+@title[#:tag "zuo-kernel"]{Zuo Kernel Language}
 
 @defmodulelang[zuo/kernel #:no-declare #:packages ()]
 @declare-exporting[zuo-doc/fake-kernel #:packages ()]

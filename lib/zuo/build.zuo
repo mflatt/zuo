@@ -1,6 +1,5 @@
 #lang zuo/base
-(require "struct.zuo"
-         "cmdline.zuo"
+(require "cmdline.zuo"
          "thread.zuo"
          "private/build-db.zuo")
 

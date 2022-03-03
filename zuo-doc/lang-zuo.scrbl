@@ -2,10 +2,10 @@
 @(require (for-label zuo-doc/fake-zuo)
           "real-racket.rkt")
 
-@title{Zuo Language}
+@title[#:tag "zuo-base"]{Zuo Base Language}
 
-@defmodulelang[zuo #:no-declare #:packages ()]
-@declare-exporting[zuo-doc/fake-zuo #:packages ()]
+@defmodule[#:multi (zuo zuo/base) #:no-declare #:lang #:packages ()]
+@declare-exporting[zuo zuo/base #:packages () #:use-sources (zuo-doc/fake-zuo)]
 
 The @racketmodname[zuo] language is Zuo's default language. It's meant
 to be familiar to Racket programmers, and the description here leans
@@ -16,6 +16,11 @@ Zuo construct is not exactly the same. Filesystem operations, however,
 tend to use the names of Unix programs, which are much shorter than
 Racket's long names.
 
+The @racketmodname[zuo/base] language includes most of the bindings
+from @racketmodname[zuo], but not the ones that are from
+@racketmodname[zuo/cmdline], @racketmodname[zuo/config],
+@racketmodname[zuo/thread], or @racketmodname[zuo/build].
+         
 @section{Syntax and Evaluation Model}
 
 A @racketmodname[zuo] module consists of a sequence of definitions
@@ -206,6 +211,16 @@ implementation, instead, avoids the implicit parameterization.)
 See @racket[quote-syntax] for more information about the
 representation of syntax that a macro function consumes and produces.}
 
+@defform[(struct id (field-id ...))]{
+
+Analogous to @realracket*[struct] from @racketmodname[racket], but
+defining only @racket[id] as a constructor,
+@racket[id]@racketidfont{?} as a predicate,
+@racket[id]@racketidfont{-}@racket[field-id] as an accessor for each
+@racket[field-id], and
+@racket[id]@racketidfont{-set-}@racket[field-id] as a
+functional-update operation (along the lines of
+@realracket[struct-copy]) for each @racket[field-id].}
 
 @defform[(include module-path)]{
 

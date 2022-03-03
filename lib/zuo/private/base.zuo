@@ -7,7 +7,7 @@
 (define language-mod-path 'zuo/private/base)
 
 (include "base-common/lib.zuo")
-(include "base-common/struct.zuo")
+(include "base-common/bind-struct.zuo")
 (include "base-common/state.zuo")
 
 (include "base/s-exp.zuo")
