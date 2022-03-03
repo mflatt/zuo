@@ -79,3 +79,5 @@
         (check (shell->strings (~a "  " (string->shell s) "   ")) (list s)))
       (unless (= j (string-length s)) (j-loop (+ j 1))))
     (unless (= i (string-length s)) (i-loop (+ i 1)))))
+
+(check (string-sha1 "hello\n") "f572d396fae9206628714fb2ce00f72e94f2258f")

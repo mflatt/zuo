@@ -93,6 +93,7 @@
     string->uninterned-symbol
     symbol->string
     string
+    string-sha1
     char
     string-split string-join string-trim
 

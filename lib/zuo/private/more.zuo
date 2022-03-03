@@ -147,16 +147,18 @@
   (apply build-path (dedot-exploded-path (explode-path p))))
 
 (define (find-relative-path wrt p)
-  (unless (and (path-string? wrt) (not (relative-path? wrt)))
-    (arg-error 'explode-path "absolute path string" wrt))
-  (unless (and (path-string? p) (not (relative-path? p)))
-    (arg-error 'explode-path "absolute path string" p))
+  (unless (path-string? wrt)
+    (arg-error 'explode-path "path string" wrt))
+  (unless (path-string? p)
+    (arg-error 'explode-path "path string" p))
+  (unless (eq? (relative-path? wrt) (relative-path? p))
+    (error "explode-path: paths are not both relative or both absolute" (list wrt p)))
   (define ps (dedot-exploded-path (explode-path p)))
   (define wrts (dedot-exploded-path (explode-path wrt)))
   (if (equal? (car ps) (car wrts))
       (let loop ([ps (cdr ps)] [wrts (cdr wrts)])
         (cond
-          [(null? wrts) (if (null? ps) "." (apply build-path ps))]
+          [(null? wrts) (if (null? ps) #f (apply build-path ps))]
           [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
           [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
           [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))

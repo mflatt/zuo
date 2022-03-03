@@ -417,6 +417,10 @@ Returns the two's complement interpretation of four bytes in
 @racket[str] starting at index @racket[k] using the host machine's
 endianness.}
 
+@defproc[(string-sha1 [str string?]) string?]{
+
+Returns the SHA-1 hash of @racket[str] as a 40-digit hexadecimal string.}
+
 @defform[(char str)]{
 
 Expands to @racket[(string-ref str 0)], where @racket[str] must be a
@@ -861,7 +865,7 @@ after Ctl-C.}
 
 @deftogether[(
 @defproc[(file->string [name path-string]) string?]
-@defproc[(display-to-file [str string?] [name path-string]) void?]
+@defproc[(display-to-file [str string?] [name path-string] [options hash? (hash)]) void?]
 )]{
 
 Convenience function to open @racket[name] and read its content into a

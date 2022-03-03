@@ -19,7 +19,7 @@
 (define srcdir (hash-ref config 'srcdir))
 (define install-prefix (hash-ref config 'INSTALL_PREFIX))
 
-(define here (file-target (quote-module-path)))
+(define here (input-file-target (quote-module-path)))
 
 (define image_zuo.c
   (target "image_zuo.c"
@@ -28,13 +28,13 @@
                                'deps "image_zuo.dep"
                                'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
                                'keep-collects? #t))
-            (rule '() (file-timestamp name)))))
+            (rule '() (file-sha1 name state)))))
 
 (define (exe-target name lib-path)
   (target name
           (lambda (name state)
             (rule (list image_zuo.c)
-                  (file-timestamp name)
+                  (file-sha1 name state)
                   (lambda (state)
                     (define l (split-path name))
                     (when (car l) (mkdir* (car l)))
@@ -43,7 +43,7 @@
                                (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
                                config
                                thread-process-wait)
-                    (file-timestamp name))))
+                    (file-sha1 name state))))
           (hash 'noisy? #t)))
 
 (define (add-exe name)
@@ -58,7 +58,7 @@
   (target "zuos-to-run-and-install"
           (lambda (name state)
             (rule (list zuo-to-run zuo-to-install)
-                  'after
+                  done-sha1
                   #f))))
 
 (define install
@@ -77,7 +77,7 @@
                     (say-copy cp*
                               (build-path srcdir "lib" "zuo")
                               (build-path install-prefix "lib" "zuo"))
-                    'after)))))
+                    done-sha1)))))
 
 (provide-builder (list zuos-to-run-and-install
                        image_zuo.c

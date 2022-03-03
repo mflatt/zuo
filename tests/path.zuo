@@ -73,12 +73,23 @@
            "../../a/b/c/d"
            "..\\..\\a\\b\\c\\d"))
 
+(check (find-relative-path "home/zuo/src" "home/zuo/src/private/optimize")
+       (build-path "private" "optimize"))
+(check (find-relative-path "home/zuo/src" "home/zuo/lib")
+       (build-path ".." "lib"))
+(check (find-relative-path "home/zuo/src" "home/zuo/src")
+       #f)
+(check (find-relative-path "home/zuo/src" "tmp/cache")
+       (build-path "tmp" "cache"))
+(check-fail (find-relative-path "/home/zuo/src" "tmp/cache")
+            "both relative or both absolute")
+
 (when unix?
   (check (find-relative-path "/home/zuo/src" "/home/zuo/src/private/optimize")
          "private/optimize")
   (check (find-relative-path "/home/zuo/src" "/home/zuo/lib")
          "../lib")
   (check (find-relative-path "/home/zuo/src" "/home/zuo/src")
-         ".")
+         #f)
   (check (find-relative-path "/home/zuo/src" "/tmp/cache")
          "../../../tmp/cache"))
