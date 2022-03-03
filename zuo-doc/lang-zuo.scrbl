@@ -18,9 +18,10 @@ Racket's long names.
 
 The @racketmodname[zuo/base] language includes most of the bindings
 from @racketmodname[zuo], but not the ones that are from
-@racketmodname[zuo/cmdline], @racketmodname[zuo/config],
-@racketmodname[zuo/thread], or @racketmodname[zuo/build].
-         
+@racketmodname[zuo/cmdline], @racketmodname[zuo/build]
+@racketmodname[zuo/thread], @racketmodname[zuo/glob], or
+@racketmodname[zuo/config].
+
 @section{Syntax and Evaluation Model}
 
 A @racketmodname[zuo] module consists of a sequence of definitions

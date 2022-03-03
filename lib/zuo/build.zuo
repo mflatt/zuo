@@ -120,7 +120,7 @@
                                 (hash)
                                 (hash)
                                 (make-resources (hash-ref options 'jobs 1))))
-     (do-build t state #t)))
+     (force-build t (do-build t state #t))))
   (void))
 
 ;; Detects already built or cycles, but leaves in-progress (as
@@ -191,7 +191,9 @@
 
   ;; compare to recorded result, and rebuild if different
   (cond
-    [(and (not (equal? dep-sha1s prev-dep-sha1s))
+    [(and (not (and (equal? dep-sha1s prev-dep-sha1s)
+                    (or (not to-build)
+                        (equal? sha1 prev-sha1))))
           (not (equal? sha1 done-sha1)))
      (unless to-build
        (error "build: out-of-date target has no build procedure" (target-name t)))

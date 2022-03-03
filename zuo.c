@@ -4773,6 +4773,7 @@ static char *zuo_string_to_shell_c(const char *s) {
       p[i++] = '\'';
     } else if (isspace(c) || (c == '\'') || (c == '|') || (c == '&') || (c == ';')
                || (c == '(') || (c == ')') || (c == '<') || (c == '>')
+               || (c == '[') || (c == ']') || (c == '?')
                || !isprint(c)) {
       if (!quoting) {
         p[i++] = '"';

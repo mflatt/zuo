@@ -3,10 +3,12 @@
 (require zuo/cmdline
          zuo/config
          zuo/thread
-         zuo/build)
+         zuo/build
+         zuo/glob)
 
 (provide (all-from-out zuo/private/base/main
                        zuo/cmdline
                        zuo/config
                        zuo/thread
-                       zuo/build))
+                       zuo/build
+                       zuo/glob))
