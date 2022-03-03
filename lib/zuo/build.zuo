@@ -81,7 +81,7 @@
   (define name (target-name t))
   (if (and (relative-path? name)
            (build-state-dest-dir state))
-      (build-path (build-state-dest-dir state) name)
+      (build-normalized-path (build-state-dest-dir state) name)
       name))
 
 ;; As the name says: like `target-path` but absolute
@@ -103,7 +103,7 @@
 ;; input-file SHA-1s on the assumption that a SHA-1 recorded last time
 ;; is still right if the file's timestamp hasn't changed.
 
-(struct build-state (dest-dir      ; build path relative to current directory; #f is like "."
+(struct build-state (dest-dir      ; build directory's path
                      target-state  ; key -> (cons sha1 dep-sha1s) | 'pending | channel
                      db            ; absolute-path -> (cons sha1 dep-sha1s) | #t [for db file itself]
                      time-cache    ; absolute-path -> (cons timestamp sha1) 
@@ -115,7 +115,7 @@
   ;; Start a threading context, so we can have parallel build tasks
   (call-in-main-thread
    (lambda ()
-     (define state (build-state (hash-ref options 'dest-dir #f)
+     (define state (build-state (hash-ref options 'dest-dir ".")
                                 (hash)
                                 (hash)
                                 (hash)
@@ -183,10 +183,15 @@
   (define dep-sha1s
     (let ([target-dir (car (split-path abs-path))])
       (map (lambda (dep)
-             (define rel-path (find-relative-path target-dir
-                                                  (target-absolute-path dep new-state)))
+             (define dep-local-path (target-path dep new-state))
+             (define dep-path (if (relative-path? dep-local-path)
+                                  (find-relative-path target-dir
+                                                      (if (relative-path? target-dir)
+                                                          dep-local-path
+                                                          (path->absolute-path dep-local-path)))
+                                  dep-local-path))
              (define ts (target-state new-state dep))
-             (list rel-path (car ts)))
+             (list dep-path (car ts)))
            deps)))
 
   ;; compare to recorded result, and rebuild if different
@@ -230,7 +235,7 @@
    :argv (or (hash-ref opts 'args #f) (hash-ref (runtime-env) 'args))
    :init (if (or (hash-ref opts 'dest-dir #f) (not wrt))
              opts
-             (hash-set opts 'dest-dir (find-relative-directory wrt)))
+             (hash-set opts 'dest-dir (or (car (split-path wrt)) ".")))
    :once-each
    [opts ("-j" "--jobs") n "Use <n> parallel jobs"
          (let ([v (read-from-string-all n)])
@@ -310,15 +315,6 @@
 
 ;; ------------------------------------------------------------
 ;; Generic helpers
-
-(define (find-relative-directory wrt)
-  (define l (split-path wrt))
-  (cond
-    [(not l) (if (relative-path? wrt)
-                 #f
-                 wrt)]
-    [(relative-path? (car l)) (car l)]
-    [else (find-relative-path (car l) (hash-ref (runtime-env) 'dir))]))
 
 (define (make-resources n)
   (define ch (channel))

@@ -638,11 +638,15 @@ otherwise.}
 @defproc[(module-path-join [base module-path?] [rel-path path-string?]) module-path?]{
 
 Analogous to @racket[build-path], but for @tech{module paths}. Initial
-@filepath{.} and @filepath{..} elements are handles specially to avoid
-creating a module that that has @filepath{.} and @filepath{..}
-elements. When @racket[base] is a symbol, then the characters of
-@racket[rel-path] (after initial @filepath{.} and @filepath{..}
-elements) must be allowable in a symbol module path.}
+@filepath{.} and @filepath{..} elements in @racket[rel-path] combine
+syntactically with path elements at the end of @racket[base], and any
+@filepath{.} or @filepath{..} exposed at the end of @racket[base] (if
+it is a path string) are similarly eliminated syntactically.
+
+The @racket[rel-path] string must end with @litchar{.zou}. The
+characters of @racket[rel-path] must be allowable in a symbol module
+paths, except for a @litchar{.} in @filepath{.} and @filepath{..}
+elements or a @litchar{.zuo} suffix.}
 
 @defproc[(module->hash [mod-path module-path?]) hash?]{
 

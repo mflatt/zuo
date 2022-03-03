@@ -3501,7 +3501,7 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
   int bad = 0, ups = 1, ups_until = 0, saw_non_dot = 0, suffix = 0;
 
   while (i < len) {
-    if (!saw_non_dot && (s[i] == '.')) {
+    if (s[i] == '.') {
       if (s[i+1] == '/')
         i += 2;
       else if (s[i+1] == '.') {
@@ -3509,10 +3509,19 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
           i += 3;
         else
           bad = 1;
-        ups++;
+        if (!saw_non_dot)
+          ups++;
+      } else if ((s[i+1] == 'z')
+                 && (s[i+2] == 'u')
+                 && (s[i+3] == 'o')
+                 && (s[i+4] == 0)) {
+        suffix = 4;
+        i += 4;
+        saw_non_dot = 1;
       } else
         bad = 1;
-      ups_until = i;
+      if (!saw_non_dot)
+        ups_until = i;
     } else if (zuo_is_symbol_module_char(s[i])) {
       saw_non_dot = 1;
       if (s[i] == '/')
@@ -3521,13 +3530,6 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
         i += 2;
       else
         i++;
-    } else if ((s[i] == '.')
-               && (s[i+1] == 'z')
-               && (s[i+2] == 'u')
-               && (s[i+3] == 'o')
-               && (s[i+4] == 0)) {
-      suffix = 4;
-      i += 4;
     } else
       bad = 1;
     if (bad)
@@ -3588,11 +3590,18 @@ zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
     while (ups > 0) {
       zuo_t *l;
       if (mod_path == z.o_false)
-        zuo_fail1w(who, "too many up elements", rel_mod_path);
+        break;
       l = zuo_split_path(mod_path);
       mod_path = _zuo_car(l);
-      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), ".") != 0)
+      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), "..") == 0)
+        ups++;
+      else if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), ".") != 0)
         ups--;
+    }
+    /* if `ups` is non-zero, then `mod_path` must be false */
+    while (ups > 0) {
+      rel_str = zuo_build_path2(zuo_string(".."), rel_str);
+      ups--;
     }
     if (mod_path == z.o_false)
       return rel_str;
@@ -4117,9 +4126,6 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
   zuo_t *file_path, *l, *mod;
 
   check_module_path("module->hash", module_path);
-
-  if (module_path->tag == zuo_string_tag)
-    module_path = zuo_path_to_complete_path(module_path);
 
   /* check for already-loaded module */
   for (l = z.o_modules; l != z.o_null; l = _zuo_cdr(l)) {
@@ -6181,10 +6187,14 @@ int zuo_main(int argc, char **argv) {
     load_path = zuo_string(load_file);
     st = zuo_stat(load_path, z.o_true);
     if ((st != z.o_false)
-        && (zuo_trie_lookup(st, zuo_symbol("type")) == zuo_symbol("dir")))
-      load_path = zuo_build_path2(load_path, zuo_string("main.zuo"));
+        && (zuo_trie_lookup(st, zuo_symbol("type")) == zuo_symbol("dir"))) {
+      if (!strcmp(load_file, "."))
+        load_path = zuo_string("main.zuo");
+      else
+        load_path = zuo_build_path2(load_path, zuo_string("main.zuo"));
+    }
   } else
-    load_path = zuo_path_to_complete_path(zuo_string("stdin"));
+    load_path = zuo_string("stdin");
 
   /* Finish initialization */
   zuo_runtime_init(lib_path, zuo_make_runtime_env(exe_path, load_file, argc, argv));

@@ -14,8 +14,9 @@
 ;; for non-input targets that are dependencies, just because it's
 ;; easier to not distinguish when writing.
 
-;; Paths are stored in the ".db" files relative to the file's
-;; directory. The format of each file is a top-level sequence of
+;; Paths are stored in the ".db" files as absolute (when they started
+;; that way in a target) or relative to the file's directory. The
+;; format of each file is a top-level sequence of
 ;;   (<rel-path> . <info>)
 ;; For "_zuo.db", it's more specifically
 ;;   (<rel-path> <sha1> (<dep-rel-path> <sha1>) ...)
@@ -25,7 +26,8 @@
 (provide db-record-target-sha1s
          db-load-sha1s
          file-sha1/cached
-         path->absolute-path)
+         path->absolute-path
+         build-normalized-path)
 
 ;; Given a target's absolute path, construct various ".db" paths and
 ;; send them on to `k`
@@ -55,12 +57,14 @@
      (define new-tc-content
        (foldl (lambda (dep tc-content)
                 (define dep-name (car dep))
-                (define time (file-timestamp (build-path dir dep-name)))
+                (define time (file-timestamp (if (relative-path? dep-name)
+                                                 (build-path dir dep-name)
+                                                 dep-name)))
                 (cond
                   [time (reassoc (list dep-name time (cadr dep)) tc-content)]
                   [else tc-content]))
               tc-content
-              (cdr ts)))
+              (cons (list name (car ts)) (cdr ts))))
      (update-file db-path new-db-content)
      (update-file tc-path new-tc-content))))
 
@@ -130,5 +134,24 @@
 
 (define (path->absolute-path p)
   (if (relative-path? p)
-      (build-path (hash-ref (runtime-env) 'dir) p)
+      (build-normalized-path (hash-ref (runtime-env) 'dir) p)
       p))
+
+;; Like `build-module-path` in that `.` and `..` is normalized at the
+;; start of `path` and as exposed at the end of `base`
+(define (build-normalized-path orig-base path)
+  (let loop ([base orig-base] [elems (explode-path path)])
+    (cond
+      [(null? elems) base]
+      [(string=? (car elems) ".") (loop base (cdr elems))]
+      [(string=? (car elems) "..")
+       (define l (split-path base))
+       (loop (car l)
+             (cond
+               [(not l) (error "build-normalized-path: too many ups" (list orig-base path))]
+               [(equal? (cdr l) ".") elems]
+               [(equal? (cdr l) "..") (cons ".." elems)]
+               [else (cdr elems)]))]
+      [(string=? base ".") (loop (car elems) (cdr elems))]
+      [else (loop (build-path base (car elems)) (cdr elems))])))
+

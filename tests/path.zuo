@@ -53,10 +53,9 @@
 (check-fail (relative-path? 0) "not a path string")
 
 (check (path-string? (quote-path "adjacent.txt")))
-(check (not (relative-path? (quote-path "adjacent.txt"))))
 (check-fail (quote-path) bad-stx)
 (check-fail (quote-path x) bad-stx)
-(check-fail (quote-path ,(quote-module-path)) bad-stx)
+(check-fail (quote-path ,(hash-ref (runtime-env) 'dir)) bad-stx)
 (check-fail (quote-path . x) bad-stx)
 (check-fail (quote-path "adjacent.txt" c) bad-stx)
 

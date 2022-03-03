@@ -58,10 +58,12 @@
       (fd-close in))))
 
 ;; check setting the process directory and environment variables
-(let ()
+(let ([path->absolute-path (lambda (p) (if (relative-path? p)
+                                           (build-path (hash-ref (runtime-env) 'dir) p)
+                                           p))])
   (define runtime-to-file
     (~a "#lang zuo\n"
-        (~s `(let* ([out (fd-open-output ,answer.txt :truncate)])
+        (~s `(let* ([out (fd-open-output ,(path->absolute-path answer.txt) :truncate)])
                (fd-write out (~s (cons
                                   (hash-ref (runtime-env) 'dir)
                                   (hash-ref (runtime-env) 'env))))))))

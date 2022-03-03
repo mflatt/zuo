@@ -20,6 +20,7 @@
          directory-exists?
          link-exists?
 
+         explode-path
          simple-form-path
          find-relative-path
          
