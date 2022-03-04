@@ -22,29 +22,29 @@
 (define (targets at-dir)
   (define image_zuo.c
     (target (at-dir "image_zuo.c")
-            (lambda (self token)
-              (embed-image (hash 'output (target-name self)
+            (lambda (path token)
+              (embed-image (hash 'output path
                                  'deps "image_zuo.dep"
                                  'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
                                  'keep-collects? #t))
-              (rule '() (file-sha1 (target-name self) token)))))
+              (rule '() (file-sha1 path token)))))
 
   (define (exe-target name lib-path)
     (target (at-dir name)
-            (lambda (self token)
-              (rule (list image_zuo.c)
-                    (file-sha1 (target-name self) token)
+            (lambda (path token)
+              (rule (list image_zuo.c
+                          (input-data-target 'config (string-sha1 (~s config))))
+                    (file-sha1 path token)
                     (lambda ()
-                      (define l (split-path (target-name self)))
+                      (define l (split-path path))
                       (when (car l) (mkdir* (car l)))
-                      (compile-c (target-name self)
-                                 (target-name image_zuo.c)
+                      (compile-c path
+                                 (target-path image_zuo.c)
                                  (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
                                  config
                                  thread-process-wait)
-                      (file-sha1 (target-name self) token))))
-            (hash 'noisy? #t)))
-  
+                      (file-sha1 path token))))))
+
   (define (add-exe name)
     (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)
         (~a name ".exe")
@@ -54,30 +54,26 @@
   (define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
   
   (define zuos-to-run-and-install
-    (target (at-dir "zuos-to-run-and-install")
-            (lambda (self token)
-              (rule (list zuo-to-run zuo-to-install)
-                    phony-sha1
-                    (lambda ()
-                      phony-sha1)))))
+    (target 'zuos-to-run-and-install
+            (lambda (token)
+              (phony-rule (list zuo-to-run zuo-to-install)
+                          void))))
 
   (define install
-    (target (at-dir "install")
-            (lambda (self token)
-              (rule (list zuo-to-run)
-                    phony-sha1
-                    (lambda ()
-                      (define (say-copy cp a b)
-                        (displayln (~a "copying " a " to " b))
-                        (cp a b))
-                      (mkdir* install-prefix)
-                      (mkdir* (build-path install-prefix "bin"))
-                      (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
-                      (mkdir* (build-path install-prefix "lib"))
-                      (say-copy cp*
-                                (build-path srcdir "lib" "zuo")
-                                (build-path install-prefix "lib" "zuo"))
-                      phony-sha1)))))
+    (target 'install
+            (lambda (token)
+              (phony-rule (list zuo-to-run)
+                          (lambda ()
+                            (define (say-copy cp a b)
+                              (displayln (~a "copying " a " to " b))
+                              (cp a b))
+                            (mkdir* install-prefix)
+                            (mkdir* (build-path install-prefix "bin"))
+                            (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
+                            (mkdir* (build-path install-prefix "lib"))
+                            (say-copy cp*
+                                      (build-path srcdir "lib" "zuo")
+                                      (build-path install-prefix "lib" "zuo")))))))
 
   (list zuos-to-run-and-install
         image_zuo.c

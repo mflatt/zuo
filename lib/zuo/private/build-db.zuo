@@ -146,4 +146,6 @@
       p))
 
 (define (dir-part path)
-  (or (car (split-path path)) "."))
+  (if (symbol? path)
+      "."
+      (or (car (split-path path)) ".")))

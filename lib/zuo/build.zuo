@@ -5,14 +5,16 @@
 
 (provide target?
          (rename-out [make-target target]
-                     [make-rule rule])
+                     [make-rule rule]
+                     [make-phony-rule phony-rule])
          input-file-target
+         input-data-target
 
+         target-path
          target-name
 
          file-sha1
          no-sha1
-         phony-sha1
 
          build
          build/command-line
@@ -30,23 +32,28 @@
 (struct target (key       ; shortcut: `string->symbol` of the path
                 name      ; a symbol or path relative to the current directory
                 get-rule  ; (token -> rule), where `path` is relative to current directory
-                options)) ; 'input, 'precious?, etc.
+                kind      ; 'normal, 'input, or 'phony
+                options)) ; 'precious?, etc.
 
 ;; A rule is a result from `get-rule`:
 (struct rule (deps        ; list of targets
               sha1        ; current SHA-1
               build))     ; (token -> new-sha1), called when deps SHA-1s different than recorded
 
+;; A phony target returns a phony-rule, instead:
+(struct phony-rule (deps
+                    build))
+
 ;; During a target's `get-rule` or `build`, calls to `build/recur`
 ;; trigger recording of additional dependencies
 
 (define no-sha1 "")
-(define phony-sha1 "x")
+(define phony-sha1 (string->uninterned-symbol "x")) ; internal use
 (define (sha1? s)
-  (and (string? s)
-       (or (= (string-length s) 40)
-           (string=? s no-sha1)
-           (string=? s phony-sha1))))
+  (or (and (string? s)
+           (or (= (string-length s) 40)
+               (string=? s no-sha1)))
+      (eq? s phony-sha1)))
 
 ;; public constructor
 (define make-target
@@ -56,8 +63,14 @@
              (arg-error 'target "path string or symbol" name))
            (unless (procedure? get-rule) (arg-error 'target "procedure" get-rule))
            (unless (hash? options) (arg-error 'target "hash table" options))
-           (let ([key (if (symbol? name) name (string->symbol name))])
-             (target key name get-rule options)))])
+           (cond
+             [(symbol? name)
+              (let ([key (string->uninterned-symbol (symbol->string name))]
+                    [get-rule (get-phony-rule->get-rule get-rule)])
+                (target key name get-rule 'phony options))]
+             [else
+              (let ([key (string->symbol name)])
+                (target key name get-rule 'normal options))]))])
     target))
 
 ;; public constructor
@@ -78,20 +91,52 @@
 ;; An input-file target has no dependencies
 (define (input-file-target path)
   (unless (path-string? path) (arg-error 'input-file-target "path string" path))
-  (make-target path
-               (lambda (self token)
-                 (let ([sha1 (file-sha1 path token)])
-                   (if (equal? sha1 no-sha1)
-                       (error "missing input file" path)
-                       (make-rule '() sha1))))
-               (hash 'input? #t)))
+  (target (string->symbol path)
+          path
+          (lambda (path token)
+            (let ([sha1 (file-sha1 path token)])
+              (if (equal? sha1 no-sha1)
+                  (error "missing input file" path)
+                  (make-rule '() sha1))))
+          'input
+          (hash)))
 
 ;; An input-data target supplies its SHA-1 up front
 (define (input-data-target name sha1)
   (unless (symbol? name) (arg-error 'input-data-target "symbol" name))
-  (make-target name
-               (lambda (token) (make-rule '() sha1))
-               (hash 'input? #t)))
+  (target name
+          name
+          (lambda (path token) (make-rule '() sha1))
+          'input
+          (hash)))
+
+(define make-phony-rule
+  (let ([phony-rule
+         (lambda (deps build)
+           (unless (and (list? deps)
+                        (andmap target? deps))
+             (arg-error 'phony-rule "list of targets" deps))
+           (unless (procedure? build)
+             (arg-error 'phony-rule "procedure" build))
+           (phony-rule deps build))])
+    phony-rule))
+
+(define (get-phony-rule->get-rule get-phony-rule)
+  (lambda (path token)
+    (define r (get-phony-rule token))
+    (unless (phony-rule? r)
+      (error "build: target result is not a phony rule" r))
+    (rule (phony-rule-deps r)
+          phony-sha1
+          (lambda ()
+            ((phony-rule-build r))
+            phony-sha1))))
+
+(define (target-path t)
+  (let ([n (target-name t)])
+    (if (symbol? n)
+        (error "target-path: target does not have a path name" t)
+        n)))
 
 ;; ------------------------------------------------------------
 ;; Build state and loop
@@ -144,7 +189,7 @@
 (define (do-build t state top?)
   (define current (target-state state t))
   (cond
-    [(not current) (build-unbuilt t state top?)]
+    [(not current) (build-input-or-unbuilt t state top?)]
     [(eq? current 'pending) (error "build: dependency cycle" (target-name t))]
     [(channel? current) state]
     [else state]))
@@ -162,13 +207,25 @@
        (update-target-state/record-sha1s state t ts))]
     [else state]))
 
+;; Shortcut for plain inputs, otherwise starts a build
+(define (build-input-or-unbuilt t state top?)
+  (cond
+    [(eq? (target-kind t) 'input)
+     ;; no dependencies, not need for a thread to build, etc.
+     (define r ((target-get-rule t) (target-name t) #f))
+     (define sha1 (rule-sha1 r))
+     (update-target-state state t (list sha1))]
+    [else (build-unbuilt t state top?)]))
+
 ;; Starts a build for a specific target
 (define (build-unbuilt t state top?)
   (define path (target-name t))
   (define target-dir (dir-part path))
+  (define dep-top? (and top? (symbol? path)))
   
   ;; delete a target file if we don't finish:
-  (define path-handle (and (not (hash-ref (target-options t) 'precious? #f))
+  (define path-handle (and (path-string? path)
+                           (not (hash-ref (target-options t) 'precious? #f))
                            (cleanable-file path)))
 
   (define pending-state (update-target-state state t 'pending))
@@ -184,7 +241,7 @@
   (channel-put (token-ch tok) loaded-state)
 
   ;; first phase of the target: get a rule
-  (define r ((target-get-rule t) t tok))
+  (define r ((target-get-rule t) (target-name t) tok))
   (unless (rule? r)
     (error "build: target result is not a rule" r))
   (define deps (rule-deps r))
@@ -195,7 +252,7 @@
 
   ;; trigger builds of dependencies, but don't want for them to complete
   (define fetch-state
-    (foldl (lambda (dep state) (do-build dep state #f))
+    (foldl (lambda (dep state) (do-build dep state dep-top?))
            rule-state
            deps))
 
@@ -221,7 +278,6 @@
   ;; the extra dependencies this time
   (define same-so-far?
     (and (equal? sha1 prev-sha1)
-         (not (equal? sha1 phony-sha1))
          (andmap (lambda (dep-key)
                    (equal? (hash-ref dep-sha1s dep-key)
                            (hash-ref prev-dep-sha1s dep-key #f)))
@@ -240,7 +296,7 @@
                (hash-keys prev-dep-sha1s))
         '()))
   (define more-fetch-state
-    (foldl (lambda (dep state) (do-build dep state #f))
+    (foldl (lambda (dep state) (do-build dep state dep-top?))
            new-state
            more-deps))
   (define newer-state
@@ -261,7 +317,7 @@
                                 (hash-ref prev-dep-sha1s dep-key #f)))
                       (hash-keys all-dep-sha1s)))
          (and (= 0 (hash-count all-dep-sha1s))
-              (not (equal? sha1 phony-sha1))))
+              (not (eq? sha1 phony-sha1))))
      ;; no need to rebuild
      (when path-handle (cleanable-cancel path-handle))
      (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
@@ -280,7 +336,9 @@
                    (unless (sha1? sha1)
                      (error "build: target-build result is not a SHA-1" sha1))
                    (when path-handle (cleanable-cancel path-handle))
-                   (channel-put ch (cons sha1 dep-sha1s))
+                   (channel-put ch (if (eq? sha1 phony-sha1)
+                                       (list no-sha1)
+                                       (cons sha1 dep-sha1s)))
                    (release-resource newer-state))))
        ;; meanwhile, record a channel as the start's current build state
        (update-target-state newer-state t ch))]))
@@ -305,7 +363,7 @@
    :args
    ([target (target-name (car targets))])
    (lambda (opts)
-     (build (or (ormap (lambda (t) (and (equal? target (target-name t)) t))
+     (build (or (ormap (lambda (t) (and (equal? target (~a (target-name t)))< t))
                        targets)
                 (error (~a "unknown target: " target)))
             opts))))
@@ -350,7 +408,8 @@
                      [else dep-local-path]))
   (define ts (target-state state dep))
   (define dep-key (if (symbol? dep-path) dep-path (string->symbol dep-path)))
-  (hash-set dep-sha1s dep-key (car ts)))
+  (define sha1 (car ts))
+  (hash-set dep-sha1s dep-key (if (eq? sha1 phony-sha1) no-sha1 sha1)))
 
 (define (record-target-accumulated state for-t t)
   (let* ([accum-key (target-key for-t)]
@@ -375,16 +434,16 @@
                                           ts)))
 
 (define (update-target-state/record-sha1s state t ts)
-  (record-target-sha1s state t ts)
+  (unless (eq? 'phony (target-kind t))
+    (record-target-sha1s state t ts))
   (update-target-state state t ts))
 
 (define (record-target-sha1s state t ts)
-  (unless (hash-ref (target-options t) 'input? #f)
-    (db-record-target-sha1s (split-path (target-name t)) ts)))
+  (db-record-target-sha1s (split-path (target-name t)) ts))
 
 (define (load-sha1s state t path)
   (cond
-    [(hash-ref (target-options t) 'input? #f) state]
+    [(symbol? path) state]
     [else
      (define db+tc (db-load-sha1s (split-path path)
                                   (build-state-db state)
