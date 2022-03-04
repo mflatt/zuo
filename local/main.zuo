@@ -21,19 +21,15 @@
 
 (define (targets at-dir)
   (define image_zuo.c
-    (target (at-dir "image_zuo.c")
-            (lambda (path token)
-              (embed-image (hash 'output path
-                                 'deps "image_zuo.dep"
-                                 'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
-                                 'keep-collects? #t))
-              (rule '() (file-sha1 path token)))))
+    (image-target (hash 'output (at-dir "image_zuo.c")
+                        'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
+                        'keep-collects? #t)))
 
   (define (exe-target name lib-path)
     (target (at-dir name)
             (lambda (path token)
               (rule (list image_zuo.c
-                          (input-data-target 'config (string-sha1 (~s config))))
+                          (input-data-target 'config config))
                     (file-sha1 path token)
                     (lambda ()
                       (define l (split-path path))

@@ -25,19 +25,29 @@
 
 (provide db-record-target-sha1s
          db-load-sha1s
+
          file-sha1/cached
          path->absolute-path
-         dir-part)
+         dir-part
+
+         symbol->key
+         symbol-key?
+         symbol-key->symbol)
 
 (define (db-file-path target-dir) (build-path target-dir "_zuo.db"))
 (define (tc-file-path target-dir) (build-path target-dir "_zuo_tc.db"))
 
 ;; for serialization and deserialization of dep-sha1s tables
-(define (hash->list ht) (map (lambda (k) (list (symbol->string k) (hash-ref ht k))) (hash-keys ht)))
-(define (list->hash l) (foldl (lambda (p ht)
-                                (hash-set ht (string->symbol (car p)) (cadr p)))
+(define (hash->list ht) (map (lambda (k) (list (serialize-key k) (hash-ref ht k))) (hash-keys ht)))
+(define (list->hash l) (foldl (lambda (p ht) (hash-set ht (deserialize-key (car p)) (cadr p)))
                               (hash)
                               l))
+(define (serialize-key key) (if (symbol-key? key)
+                                (symbol-key->symbol key)
+                                (symbol->string key))) ; represents a path
+(define (deserialize-key key) (if (string? key)
+                                  (string->symbol key)  ; represents a path
+                                  (symbol->key key)))
 
 ;; Records the result of a build of `abs-path`, mainly storing the
 ;; SHA-1 and dep SHA-1s in "_zuo.db", but also recording a timestamp
@@ -60,12 +70,15 @@
   (define new-tc-content
     (foldl (lambda (dep tc-content)
              (define dep-name (car dep))
-             (define time (file-timestamp (if (relative-path? dep-name)
-                                              (build-path dir dep-name)
-                                              dep-name)))
              (cond
-               [time (reassoc (list dep-name time (cadr dep)) tc-content)]
-               [else tc-content]))
+               [(symbol? dep-name) tc-content]
+               [else
+                (define time (file-timestamp (if (relative-path? dep-name)
+                                                 (build-path dir dep-name)
+                                                 dep-name)))
+                (cond
+                  [time (reassoc (list dep-name time (cadr dep)) tc-content)]
+                  [else tc-content])]))
            tc-content
            (cons (list name (car ts)) dep-sha1s-l)))
   (update-file db-path new-db-content)
@@ -93,11 +106,9 @@
        (define new
          (foldl (lambda (name+val table)
                   (define name (car name+val))
-                  (define key (if (symbol? name)
-                                  name
-                                  (string->symbol (if (relative-path? name)
-                                                      (build-normalized-path dir name)
-                                                      name))))
+                  (define key (string->symbol (if (relative-path? name)
+                                                  (build-normalized-path dir name)
+                                                  name)))
                   (hash-set table key (deserialize (cdr name+val))))
                 table
                 content))
@@ -149,3 +160,19 @@
   (if (symbol? path)
       "."
       (or (car (split-path path)) ".")))
+
+(define (symbol->key name)
+  (string->uninterned-symbol (~a "!" (symbol->string name))))
+
+(define (symbol-key? sym)
+  (let ([str (symbol->string sym)])
+    (and (= (char "!") (string-ref str 0))
+         (not (eq? sym (string->symbol str))))))
+
+(define (symbol-key->symbol sym)
+  (let ([str (symbol->string sym)])
+    (string->symbol (substring str 1 (string-length str)))))
+
+
+
+         

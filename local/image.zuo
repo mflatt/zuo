@@ -1,6 +1,7 @@
 #lang zuo
 
-(provide embed-image)
+(provide embed-image
+         image-target)
 
 ;; `embed-image` looks for the following keys in `cmd`:
 ;;
@@ -42,112 +43,107 @@
 
   (define deps-file (hash-ref cmd 'deps #f))
   (define c-file (hash-ref cmd 'output #f))
+  
+  (when c-file
+    (displayln (~a "generating " c-file " embedding these libraries: " (string-join (map ~s libs)))))
+  (when deps-file
+    (display-to-file "" deps-file :truncate))
+  
+  (define deps-h (and deps-file (cleanable-file deps-file)))
 
-  (cond
-    [(and deps-file
-          c-file
-          (let ([c-s (stat c-file)])
-            (and c-s
-                 (file-exists? deps-file)
-                 (let ([deps (read-from-string-all (file->string deps-file))])
-                   (and (list? deps)
-                        (pair? deps)
-                        (equal? (car deps) libs)
-                        (andmap (lambda (file)
-                                  (define s (stat file))
-                                  (and s
-                                       (<= (hash-ref s 'modify-time-seconds)
-                                           (hash-ref c-s 'modify-time-seconds))))
-                                (list* (quote-path ".." "zuo.c")
-                                       (quote-module-path) ; this file, too
-                                       (cdr deps))))))))
-     'up-to-date]
-    [else
-     (when c-file
-       (displayln (~a "generating " c-file " embedding these libraries: " (string-join (map ~s libs)))))
-     
-     (define deps-h (and deps-file (cleanable-file deps-file)))
-     (when deps-file
-       (display-to-file (~a (~s libs) "\n") deps-file :truncate))
+  (define image
+    (let ([ht (apply process
+                     (append
+                      (list (hash-ref (runtime-env) 'exe))
+                      (if deps-file
+                          (list "-M" deps-file)
+                          (list))
+                      (list "" (hash 'stdin 'pipe 'stdout 'pipe))))])
+      (define p (hash-ref ht 'process))
+      (define in (hash-ref ht 'stdin))
+      (define out (hash-ref ht 'stdout))
+      (fd-write in "#lang zuo/kernel\n")
+      (fd-write in "(begin\n")
+      (for-each (lambda (lib)
+                  (fd-write in (~a "(module->hash '" lib ")\n")))
+                libs)
+      (fd-write in "(dump-image-and-exit (fd-open-output 'stdout (hash))))\n")
+      (fd-close in)
+      (let ([image (fd-read out eof)])
+        (fd-close out)
+        (process-wait p)
+        (unless (= 0 (process-status p))
+          (error "image dump failed"))
+        image)))
 
-     (define image
-       (let ([ht (apply process
-                        (append
-                         (list (hash-ref (runtime-env) 'exe))
-                         (if deps-file
-                             (list "-M" deps-file)
-                             (list))
-                         (list "" (hash 'stdin 'pipe 'stdout 'pipe))))])
-         (define p (hash-ref ht 'process))
-         (define in (hash-ref ht 'stdin))
-         (define out (hash-ref ht 'stdout))
-         (fd-write in "#lang zuo/kernel\n")
-         (fd-write in "(begin\n")
-         (for-each (lambda (lib)
-                     (fd-write in (~a "(module->hash '" lib ")\n")))
-                   libs)
-         (fd-write in "(dump-image-and-exit (fd-open-output 'stdout (hash))))\n")
-         (fd-close in)
-         (let ([image (fd-read out eof)])
-           (fd-close out)
-           (process-wait p)
-           (unless (= 0 (process-status p))
-             (error "image dump failed"))
-           image)))
+  (define zuo.c (fd-read (fd-open-input (quote-path ".." "zuo.c")) eof))
+  (define out (if c-file
+                  (fd-open-output c-file (hash 'exists 'truncate))
+                  (fd-open-output 'stdout (hash))))
+  
+  (define lines (string-split zuo.c "\n"))
+  
+  (define (~hex v)
+    (if (= v 0)
+        "0"
+        (let loop ([v v] [accum '()])
+          (if (= v 0)
+              (apply ~a accum)
+              (loop (quotient v 16)
+                    (cons (let ([i (bitwise-and v 15)])
+                            (substring "0123456789abcdef" i (+ i 1)))
+                          accum))))))
 
-     (define zuo.c (fd-read (fd-open-input (quote-path ".." "zuo.c")) eof))
-     (define out (if c-file
-                     (fd-open-output c-file (hash 'exists 'truncate))
-                     (fd-open-output 'stdout (hash))))
+  (define embedded-image-line "#define EMBEDDED_IMAGE 0")
+  (define embedded-image-line/cr (~a embedded-image-line "\r"))
 
-     (define lines (string-split zuo.c "\n"))
+  (for-each
+   (lambda (line)
+     (cond
+       [(or (string=? line embedded-image-line)
+            (string=? line embedded-image-line/cr))
+        (define nl (if (string=? line embedded-image-line/cr) "\r\n" "\n"))
+        (unless (hash-ref cmd 'keep-collects? #f)
+          (fd-write out (~a "#define ZUO_LIB_PATH NULL" nl)))
+        (fd-write out (~a "#define EMBEDDED_IMAGE 1" nl))
+        (fd-write out (~a "static zuo_uint32_t emedded_boot_image_len = "
+                          (quotient (string-length image) 4)
+                          ";" nl))
+        (fd-write out (~a "static zuo_uint32_t emedded_boot_image[] = {" nl))
+        (let ([accum->line (lambda (accum) (apply ~a (reverse (cons nl accum))))])
+          (let loop ([i 0] [col 0] [accum '()])
+            (cond
+              [(= i (string-length image))
+               (unless (null? accum)
+                 (fd-write out (accum->line accum)))]
+              [(= col 8)
+               (fd-write out (accum->line accum))
+               (loop i 0 '())]
+              [else
+               (loop (+ i 4) (+ col 1)
+                     (cons (~a " 0x" (~hex (string-u32-ref image i)) ",")
+                           accum))])))
+        (fd-write out (~a " 0 };" nl))]
+       [else
+        (fd-write out (~a line "\n"))]))
+   lines)
 
-     (define (~hex v)
-       (if (= v 0)
-           "0"
-           (let loop ([v v] [accum '()])
-             (if (= v 0)
-                 (apply ~a accum)
-                 (loop (quotient v 16)
-                       (cons (let ([i (bitwise-and v 15)])
-                               (substring "0123456789abcdef" i (+ i 1)))
-                             accum))))))
+  (when deps-h
+    (cleanable-cancel deps-h)))
 
-     (define embedded-image-line "#define EMBEDDED_IMAGE 0")
-     (define embedded-image-line/cr (~a embedded-image-line "\r"))
-
-     (for-each
-      (lambda (line)
-        (cond
-          [(or (string=? line embedded-image-line)
-               (string=? line embedded-image-line/cr))
-           (define nl (if (string=? line embedded-image-line/cr) "\r\n" "\n"))
-           (unless (hash-ref cmd 'keep-collects? #f)
-             (fd-write out (~a "#define ZUO_LIB_PATH NULL" nl)))
-           (fd-write out (~a "#define EMBEDDED_IMAGE 1" nl))
-           (fd-write out (~a "static zuo_uint32_t emedded_boot_image_len = "
-                             (quotient (string-length image) 4)
-                             ";" nl))
-           (fd-write out (~a "static zuo_uint32_t emedded_boot_image[] = {" nl))
-           (let ([accum->line (lambda (accum) (apply ~a (reverse (cons nl accum))))])
-             (let loop ([i 0] [col 0] [accum '()])
-               (cond
-                 [(= i (string-length image))
-                  (unless (null? accum)
-                    (fd-write out (accum->line accum)))]
-                 [(= col 8)
-                  (fd-write out (accum->line accum))
-                  (loop i 0 '())]
-                 [else
-                  (loop (+ i 4) (+ col 1)
-                        (cons (~a " 0x" (~hex (string-u32-ref image i)) ",")
-                              accum))])))
-           (fd-write out (~a " 0 };" nl))]
-          [else
-           (fd-write out (~a line "\n"))]))
-      lines)
-
-     (when deps-h
-       (cleanable-cancel deps-h))
-
-     'built]))
+(define (image-target cmd)
+  (target (hash-ref cmd 'output)
+          (lambda (path token)
+            (rule (list (quote-path ".." "zuo.c")
+                        (quote-module-path)
+                        (input-data-target 'config (hash-remove cmd 'output)))
+                  (file-sha1 path token)
+                  (lambda ()
+                    (define deps-file (path-replace-suffix path ".dep"))
+                    (embed-image (let* ([cmd (hash-set cmd 'output path)]
+                                        [cmd (hash-set cmd 'deps deps-file)])
+                                   cmd))
+                    ;; register each source module as an additional dependency:
+                    (for-each (lambda (p) (build/recur p token))
+                              (read-from-string-all (file->string deps-file)))
+                    (file-sha1 path token))))))

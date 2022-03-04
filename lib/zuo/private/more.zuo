@@ -24,7 +24,8 @@
          simple-form-path
          find-relative-path
          build-normalized-path
-         
+         path-replace-suffix
+
          mkdir*
          rm*
          cp*
@@ -169,20 +170,34 @@
 ;; Like `build-module-path` in that `.` and `..` is normalized at the
 ;; start of `path` and as exposed at the end of `base`
 (define (build-normalized-path orig-base path)
+  (unless (path-string? orig-base) (arg-error 'build-normalized-path "path string" orig-base))
+  (unless (path-string? path) (arg-error 'build-normalized-path "path string" path))
   (let loop ([base orig-base] [elems (explode-path path)])
     (cond
       [(null? elems) base]
+      [(string=? base ".") (loop (car elems) (cdr elems))]
       [(string=? (car elems) ".") (loop base (cdr elems))]
       [(string=? (car elems) "..")
        (define l (split-path base))
        (loop (car l)
              (cond
-               [(not l) (error "build-normalized-path: too many ups" (list orig-base path))]
+               [(not (car l)) (error "build-normalized-path: too many ups" (list orig-base path))]
                [(equal? (cdr l) ".") elems]
                [(equal? (cdr l) "..") (cons ".." elems)]
                [else (cdr elems)]))]
-      [(string=? base ".") (loop (car elems) (cdr elems))]
       [else (loop (build-path base (car elems)) (cdr elems))])))
+
+(define (path-replace-suffix path suffix)
+  (unless (path-string? path) (arg-error 'path-replace-suffix "path string" path))
+  (unless (string? suffix) (arg-error 'path-replace-suffix "string" suffix))
+  (let loop ([i (string-length path)])
+    (cond
+      [(= i 0) (~a path suffix)]
+      [else
+       (let ([i (- i 1)])
+         (if (= (string-ref path i) 46) ; 46 = (char ".")
+             (~a (substring path 0 i) suffix)
+             (loop i)))])))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

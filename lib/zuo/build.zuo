@@ -18,6 +18,7 @@
 
          build
          build/command-line
+         build/recur
          make-at-dir
          provide-targets)
 
@@ -77,15 +78,15 @@
 (define make-rule
   (let ([rule
          (lambda (deps sha1 [build #f])
-           (unless (and (list? deps)
-                        (andmap target? deps))
-             (arg-error 'rule "list of targets" deps))
-           (unless (sha1? sha1)
-             (arg-error 'rule "sha1?" sha1))
-           (unless (or (not build)
-                       (procedure? build))
-             (arg-error 'rule "procedure or #f" build))
-           (rule deps sha1 build))])
+           (let ([norm-deps (and (list? deps) (map coerce-to-target deps))])
+             (unless (and norm-deps (andmap target? norm-deps))
+               (arg-error 'rule "list of targets" deps))
+             (unless (sha1? sha1)
+               (arg-error 'rule "sha1?" sha1))
+             (unless (or (not build)
+                         (procedure? build))
+               (arg-error 'rule "procedure or #f" build))
+             (rule norm-deps sha1 build)))])
     rule))
 
 ;; An input-file target has no dependencies
@@ -101,12 +102,17 @@
           'input
           (hash)))
 
+(define (coerce-to-target t)
+  (if (path-string? t)
+      (input-file-target t)
+      t))
+
 ;; An input-data target supplies its SHA-1 up front
-(define (input-data-target name sha1)
+(define (input-data-target name v)
   (unless (symbol? name) (arg-error 'input-data-target "symbol" name))
-  (target name
+  (target (symbol->key name)
           name
-          (lambda (path token) (make-rule '() sha1))
+          (lambda (path token) (make-rule '() (string-sha1 (~s v))))
           'input
           (hash)))
 
@@ -124,7 +130,7 @@
 (define (get-phony-rule->get-rule get-phony-rule)
   (lambda (path token)
     (define r (get-phony-rule token))
-    (unless (phony-rule? r)
+    (unless (phony-rule? r)<
       (error "build: target result is not a phony rule" r))
     (rule (phony-rule-deps r)
           phony-sha1
@@ -157,32 +163,38 @@
                      target-accum  ; key -> dep-sha1s
                      db            ; key -> (cons sha1 dep-sha1s) | #t [for db file itself]
                      time-cache    ; key -> (cons timestamp sha1) 
-                     resource-ch)) ; channel with available resources enqueued
+                     resource-ch   ; channel with available resources enqueued
+                     log?))        ; logging enabled?
 
 ;; Main entry point to build a target `t`
-(define (build t [options (hash)])
-  (unless (target? t) (arg-error 'build "target" t))
-  (unless (hash? options) (arg-error 'build "hash table" options))
-  ;; Start a threading context, so we can have parallel build tasks
-  (call-in-main-thread
-   (lambda ()
-     (define ch (channel))
-     (define state (build-state ch
-                                (hash)
-                                (hash)
-                                (hash)
-                                (hash)
-                                (make-resources (hash-ref options 'jobs 1))))
-     (force-build t (do-build t state #t))))
-  (void))
+(define (build t-in [options (hash)])
+  (let ([t (coerce-to-target t-in)])
+    (unless (target? t) (arg-error 'build "target" t-in))
+    (unless (hash? options) (arg-error 'build "hash table" options))
+    ;; Start a threading context, so we can have parallel build tasks
+    (call-in-main-thread
+     (lambda ()
+       (define ch (channel))
+       (define state (build-state ch
+                                  (hash)
+                                  (hash)
+                                  (hash)
+                                  (hash)
+                                  (make-resources (hash-ref options 'jobs 1))
+                                  (or (hash-ref options 'log? #f)
+                                      (assoc "ZUO_BUILD_LOG" (hash-ref (runtime-env) 'env)))))
+       (force-build t (do-build t state #t))))
+    (void)))
 
-(define (build/recur t token)
-  (unless (token? build) (arg-error 'build/recur "build token" build))
-  (unless (target? t) (arg-error 'build/recur "target?" t))
-  (let* ([state (channel-get (token-ch token))]
-         [state (force-build t (do-build t state #t))]
-         [state (record-target-accumulated state (token-target token) t)])
-    (channel-put (token-ch token) state)))
+(define (build/recur t-in token)
+  (unless (token? token) (arg-error 'build/recur "build token" token))
+  (let ([t (coerce-to-target t-in)])
+    (unless (target? t) (arg-error 'build/recur "target" t-in))
+    (when (symbol? (target-name t)) (error "build/recur: cannot recur with a data target"))
+    (let* ([state (channel-get (token-ch token))]
+           [state (force-build t (do-build t state #t))]
+           [state (record-target-accumulated state (token-target token) t)])
+      (channel-put (token-ch token) state))))
 
 ;; Detects already built or cycles, but leaves in-progress (as
 ;; represented by a channel) alone
@@ -235,7 +247,7 @@
   (define loaded-state (load-sha1s pending-state t path))
   (define prev-ts (previous-target-state loaded-state (target-key t)))
   (define prev-sha1 (car prev-ts))
-  (define prev-dep-sha1s (cdr prev-ts))
+  (define prev-dep-sha1s/raw-symbols (cdr prev-ts))
 
   (define tok (token t (build-state-ch state)))
   (channel-put (token-ch tok) loaded-state)
@@ -247,6 +259,18 @@
   (define deps (rule-deps r))
   (define sha1 (rule-sha1 r))
   (define to-build (rule-build r))
+
+  ;; if we recorded any data targets, we need to fix up the keys
+  (define prev-dep-sha1s (foldl (lambda (dep-key dep-sha1s)
+                                  (cond
+                                    [(symbol-key? dep-key)
+                                     (let ([actual-key (translate-key dep-key deps t)])
+                                       (hash-set (hash-remove dep-sha1s dep-key)
+                                                 actual-key
+                                                 (hash-ref dep-sha1s dep-key)))]
+                                    [else dep-sha1s]))
+                                prev-dep-sha1s/raw-symbols
+                                (hash-keys prev-dep-sha1s/raw-symbols)))
 
   (define rule-state (channel-get (token-ch tok)))
 
@@ -277,20 +301,25 @@
   ;; then we can assume that the extra dependencies generated previously are still
   ;; the extra dependencies this time
   (define same-so-far?
-    (and (equal? sha1 prev-sha1)
+    (and (log-changed (equal? sha1 prev-sha1) path state)
          (andmap (lambda (dep-key)
-                   (equal? (hash-ref dep-sha1s dep-key)
-                           (hash-ref prev-dep-sha1s dep-key #f)))
+                   (log-changed (equal? (hash-ref dep-sha1s dep-key)
+                                        (hash-ref prev-dep-sha1s dep-key #f))
+                                dep-key
+                                state))
                  (hash-keys dep-sha1s))))
 
   (define more-deps
     (if same-so-far?
         (foldl (lambda (dep-key more-sha1s)
-                 (if (hash-ref dep-sha1s dep-key #f)
+                 (if (or (hash-ref dep-sha1s dep-key #f)
+                         (symbol-key? dep-key))
                      more-sha1s
                      (cons (input-file-target
-                            (build-normalized-path (or (car (split-path path)) ".")
-                                                   (symbol->string dep-key)))
+                            (let ([path (symbol->string dep-key)])
+                              (if (relative-path? path)
+                                  (build-normalized-path target-dir path)
+                                  path)))
                            more-sha1s)))
                '()
                (hash-keys prev-dep-sha1s))
@@ -313,8 +342,10 @@
   (cond
     [(or (and same-so-far?
               (andmap (lambda (dep-key)
-                        (equal? (hash-ref all-dep-sha1s dep-key #f)
-                                (hash-ref prev-dep-sha1s dep-key #f)))
+                        (log-changed (equal? (hash-ref all-dep-sha1s dep-key #f)
+                                             (hash-ref prev-dep-sha1s dep-key #f))
+                                     dep-key
+                                     state))
                       (hash-keys all-dep-sha1s)))
          (and (= 0 (hash-count all-dep-sha1s))
               (not (eq? sha1 phony-sha1))))
@@ -361,9 +392,9 @@
                (hash-set opts 'jobs (car v))
                (error "not a positive integer" n)))]
    :args
-   ([target (target-name (car targets))])
+   ([target (~a (target-name (car targets)))])
    (lambda (opts)
-     (build (or (ormap (lambda (t) (and (equal? target (~a (target-name t)))< t))
+     (build (or (ormap (lambda (t) (and (equal? target (~a (target-name t))) t))
                        targets)
                 (error (~a "unknown target: " target)))
             opts))))
@@ -372,7 +403,9 @@
   (define dir (car (split-path mod-path)))
   (if dir
       (lambda (path)
-        (build-normalized-path dir path))
+        (if (relative-path? path)
+            (build-normalized-path dir path)
+            path))
       (lambda (path) path)))
 
 ;; Exports `targets`, which is a function that takes an `at-dir`
@@ -415,7 +448,7 @@
   (let* ([accum-key (target-key for-t)]
          [dep-sha1s (hash-ref (build-state-target-accum state) accum-key (hash))]
          [dep-sha1s (add-dependent-target-state t dep-sha1s (dir-part (target-name for-t)) state)])
-    (build-state-set-target-accum state accum-key dep-sha1s)))
+    (build-state-set-target-accum state (hash-set (build-state-target-accum state) accum-key dep-sha1s))))
 
 (define (merge-target-accumulated state t ts)
   (let ([more-dep-sha1s (hash-ref (build-state-target-accum state) (target-key t) #f)])
@@ -455,7 +488,7 @@
 
 (define (previous-target-state state key)
   (or (hash-ref (build-state-db state) key #f)
-      (list no-sha1)))
+      (cons no-sha1 (hash))))
 
 (define (file-sha1 path [token #f])
   (unless (path-string? path) (arg-error 'file-sha1 "path string" path))
@@ -464,6 +497,16 @@
     (when state (channel-put (token-ch token) state))
     (or (file-sha1/cached path (and state (build-state-time-cache state)))
         no-sha1)))
+
+;; translate a data key as loaded from a previous-run to a key as
+;; instantiated for this run
+(define (translate-key key deps t)
+  (let ([sym (symbol-key->symbol key)])
+    (or (ormap (lambda (dep)
+                 (and (eq? (target-name dep) sym)
+                      (target-key dep)))
+               deps)
+        key)))
 
 ;; see also "private/build-db.zuo"
 
@@ -484,3 +527,12 @@
 
 (define (release-resource state)
   (channel-put (build-state-resource-ch state) 'go))
+
+(define (log-changed same? who state)
+  (unless same?
+    (when (build-state-log? state)
+      (let ([who (if (and (symbol? who) (symbol-key? who))
+                     (~a "'" who)
+                     who)])
+        (alert (~a who " changed")))))
+  same?)
