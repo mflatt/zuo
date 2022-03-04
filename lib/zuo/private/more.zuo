@@ -23,6 +23,7 @@
          explode-path
          simple-form-path
          find-relative-path
+         build-normalized-path
          
          mkdir*
          rm*
@@ -156,14 +157,32 @@
     (error "explode-path: paths are not both relative or both absolute" (list wrt p)))
   (define ps (dedot-exploded-path (explode-path p)))
   (define wrts (dedot-exploded-path (explode-path wrt)))
-  (if (equal? (car ps) (car wrts))
-      (let loop ([ps (cdr ps)] [wrts (cdr wrts)])
+  (if (or (null? ps) (null? wrts) (equal? (car ps) (car wrts)))
+      (let loop ([ps ps] [wrts wrts])
         (cond
           [(null? wrts) (if (null? ps) #f (apply build-path ps))]
           [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
           [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
           [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
       (apply build-path ps)))
+
+;; Like `build-module-path` in that `.` and `..` is normalized at the
+;; start of `path` and as exposed at the end of `base`
+(define (build-normalized-path orig-base path)
+  (let loop ([base orig-base] [elems (explode-path path)])
+    (cond
+      [(null? elems) base]
+      [(string=? (car elems) ".") (loop base (cdr elems))]
+      [(string=? (car elems) "..")
+       (define l (split-path base))
+       (loop (car l)
+             (cond
+               [(not l) (error "build-normalized-path: too many ups" (list orig-base path))]
+               [(equal? (cdr l) ".") elems]
+               [(equal? (cdr l) "..") (cons ".." elems)]
+               [else (cdr elems)]))]
+      [(string=? base ".") (loop (car elems) (cdr elems))]
+      [else (loop (build-path base (car elems)) (cdr elems))])))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

@@ -9,45 +9,55 @@
          input-file-target
 
          target-name
-         target-path
 
          file-sha1
          no-sha1
-         done-sha1
+         phony-sha1
 
          build
          build/command-line
-         provide-builder)
+         make-at-dir
+         provide-targets)
 
 ;; ------------------------------------------------------------
 ;; Targets and rules
 
-(struct target (key       ; a gensym to serve as a hash-table key
-                name      ; a path relative to the build directory (not current or source directory)
-                get-rule  ; (path build-state -> rule), where `path` is relative to current directory
+;; A token represents a build in progress, used by a target's `get-rule` or `build`
+;; function to make recursive call or get SHA-1s (possibly cached)
+(struct token (target     ; the target that received this token
+               ch))       ; a channel to access the build state
+
+(struct target (key       ; shortcut: `string->symbol` of the path
+                name      ; a symbol or path relative to the current directory
+                get-rule  ; (token -> rule), where `path` is relative to current directory
                 options)) ; 'input, 'precious?, etc.
 
-;; result from `get-rule`:
+;; A rule is a result from `get-rule`:
 (struct rule (deps        ; list of targets
               sha1        ; current SHA-1
-              build))     ; (path build-state -> new-sha1), called when deps SHA-1s different than recorded
+              build))     ; (token -> new-sha1), called when deps SHA-1s different than recorded
+
+;; During a target's `get-rule` or `build`, calls to `build/recur`
+;; trigger recording of additional dependencies
 
 (define no-sha1 "")
-(define done-sha1 "x")
+(define phony-sha1 "x")
 (define (sha1? s)
   (and (string? s)
        (or (= (string-length s) 40)
            (string=? s no-sha1)
-           (string=? s done-sha1))))
+           (string=? s phony-sha1))))
 
 ;; public constructor
 (define make-target
   (let ([target
          (lambda (name get-rule [options (hash)])
-           (unless (path-string? name) (arg-error 'target "path string" name))
+           (unless (or (symbol? name) (path-string? name))
+             (arg-error 'target "path string or symbol" name))
            (unless (procedure? get-rule) (arg-error 'target "procedure" get-rule))
            (unless (hash? options) (arg-error 'target "hash table" options))
-           (target (string->uninterned-symbol name) name get-rule options))])
+           (let ([key (if (symbol? name) name (string->symbol name))])
+             (target key name get-rule options)))])
     target))
 
 ;; public constructor
@@ -67,55 +77,53 @@
 
 ;; An input-file target has no dependencies
 (define (input-file-target path)
+  (unless (path-string? path) (arg-error 'input-file-target "path string" path))
   (make-target path
-               (lambda (path state)
-                 (let ([sha1 (file-sha1 path state)])
+               (lambda (self token)
+                 (let ([sha1 (file-sha1 path token)])
                    (if (equal? sha1 no-sha1)
                        (error "missing input file" path)
                        (make-rule '() sha1))))
                (hash 'input? #t)))
 
-;; Resolves a target's path, which is relative to a build directory,
-;; to a path that is relative to the current directory
-(define (target-path t state)
-  (define name (target-name t))
-  (if (and (relative-path? name)
-           (build-state-dest-dir state))
-      (build-normalized-path (build-state-dest-dir state) name)
-      name))
-
-;; As the name says: like `target-path` but absolute
-(define (target-absolute-path t state)
-  (path->absolute-path (target-path t state)))
+;; An input-data target supplies its SHA-1 up front
+(define (input-data-target name sha1)
+  (unless (symbol? name) (arg-error 'input-data-target "symbol" name))
+  (make-target name
+               (lambda (token) (make-rule '() sha1))
+               (hash 'input? #t)))
 
 ;; ------------------------------------------------------------
 ;; Build state and loop
 
 ;; When a target is built, the build result is recorded as
 ;;
-;;   (list sha1 (list dep-path-rel-to-target sha1) ..)
+;;   (list sha1 (list dep-sym-or-path-rel-to-target sha1) ..)
 ;;
 ;; This result is in the `target-state` field of a build state, while
-;; `db` holds the same-shaped information from the previous build (but
-;; mapped by absolute path in symbol form, instead of key).
+;; `db` holds the same-shaped information from the previous build.
 ;;
 ;; The `time-cache` field of a build state is a shortcut for getting
 ;; input-file SHA-1s on the assumption that a SHA-1 recorded last time
 ;; is still right if the file's timestamp hasn't changed.
 
-(struct build-state (dest-dir      ; build directory's path
+(struct build-state (ch            ; channel to hold the state while target is running
                      target-state  ; key -> (cons sha1 dep-sha1s) | 'pending | channel
-                     db            ; absolute-path -> (cons sha1 dep-sha1s) | #t [for db file itself]
-                     time-cache    ; absolute-path -> (cons timestamp sha1) 
+                     target-accum  ; key -> dep-sha1s
+                     db            ; key -> (cons sha1 dep-sha1s) | #t [for db file itself]
+                     time-cache    ; key -> (cons timestamp sha1) 
                      resource-ch)) ; channel with available resources enqueued
 
 ;; Main entry point to build a target `t`
 (define (build t [options (hash)])
   (unless (target? t) (arg-error 'build "target" t))
+  (unless (hash? options) (arg-error 'build "hash table" options))
   ;; Start a threading context, so we can have parallel build tasks
   (call-in-main-thread
    (lambda ()
-     (define state (build-state (hash-ref options 'dest-dir ".")
+     (define ch (channel))
+     (define state (build-state ch
+                                (hash)
                                 (hash)
                                 (hash)
                                 (hash)
@@ -123,13 +131,21 @@
      (force-build t (do-build t state #t))))
   (void))
 
+(define (build/recur t token)
+  (unless (token? build) (arg-error 'build/recur "build token" build))
+  (unless (target? t) (arg-error 'build/recur "target?" t))
+  (let* ([state (channel-get (token-ch token))]
+         [state (force-build t (do-build t state #t))]
+         [state (record-target-accumulated state (token-target token) t)])
+    (channel-put (token-ch token) state)))
+
 ;; Detects already built or cycles, but leaves in-progress (as
 ;; represented by a channel) alone
 (define (do-build t state top?)
   (define current (target-state state t))
   (cond
     [(not current) (build-unbuilt t state top?)]
-    [(eq? current 'pending) (error "build: dependency cycle" (target-path t state))]
+    [(eq? current 'pending) (error "build: dependency cycle" (target-name t))]
     [(channel? current) state]
     [else state]))
 
@@ -137,40 +153,50 @@
 (define (force-build t state)
   (define current (target-state state t))
   (cond
-    [(channel? current) (update-target-state/record-sha1s state t (channel-get current))]
+    [(channel? current)
+     ;; Waiting on the channel might block so relenquish state
+     (channel-put (build-state-ch state) state)
+     (let* ([ts (channel-get current)]
+            [state (channel-get (build-state-ch state))]
+            [ts (merge-target-accumulated state t ts)])
+       (update-target-state/record-sha1s state t ts))]
     [else state]))
 
 ;; Starts a build for a specific target
 (define (build-unbuilt t state top?)
-  (define path (target-path t state))
-  (define abs-path (path->absolute-path path))
-
+  (define path (target-name t))
+  (define target-dir (dir-part path))
+  
   ;; delete a target file if we don't finish:
   (define path-handle (and (not (hash-ref (target-options t) 'precious? #f))
                            (cleanable-file path)))
 
   (define pending-state (update-target-state state t 'pending))
 
+  ;; get previously recorded result, possibly loading from a file
+  ;; that is cached in the build state
+  (define loaded-state (load-sha1s pending-state t path))
+  (define prev-ts (previous-target-state loaded-state (target-key t)))
+  (define prev-sha1 (car prev-ts))
+  (define prev-dep-sha1s (cdr prev-ts))
+
+  (define tok (token t (build-state-ch state)))
+  (channel-put (token-ch tok) loaded-state)
+
   ;; first phase of the target: get a rule
-  (define r ((target-get-rule t) path pending-state))
+  (define r ((target-get-rule t) t tok))
   (unless (rule? r)
     (error "build: target result is not a rule" r))
   (define deps (rule-deps r))
   (define sha1 (rule-sha1 r))
   (define to-build (rule-build r))
 
-  ;; get previously recorded result, possibly loading from a file
-  ;; that is cached in the build state
-  (define loaded-state (load-sha1s pending-state t abs-path))
-
-  (define prev-ts (previous-target-state loaded-state abs-path))
-  (define prev-sha1 (car prev-ts))
-  (define prev-dep-sha1s (cdr prev-ts))
+  (define rule-state (channel-get (token-ch tok)))
 
   ;; trigger builds of dependencies, but don't want for them to complete
   (define fetch-state
     (foldl (lambda (dep state) (do-build dep state #f))
-           loaded-state
+           rule-state
            deps))
 
   ;; now that they're all potentially started, wait for completions
@@ -179,63 +205,95 @@
            fetch-state
            deps))
 
-  ;; extract results, assemble in a list of `(list <rel-path> <sha1>)`
+  ;; extract results, assemble in a hash table: <rel-path> -> <sha1>
   (define dep-sha1s
-    (let ([target-dir (car (split-path abs-path))])
-      (map (lambda (dep)
-             (define dep-local-path (target-path dep new-state))
-             (define dep-path (if (relative-path? dep-local-path)
-                                  (find-relative-path target-dir
-                                                      (if (relative-path? target-dir)
-                                                          dep-local-path
-                                                          (path->absolute-path dep-local-path)))
-                                  dep-local-path))
-             (define ts (target-state new-state dep))
-             (list dep-path (car ts)))
-           deps)))
+    (foldl (lambda (dep dep-sha1s)
+             (add-dependent-target-state dep dep-sha1s target-dir new-state))
+           (hash)
+           (append deps
+                   (hash-ref (build-state-target-accum new-state) (target-key t) '()))))
 
+  ;; calling the build step for `t` might generate more dependencies, but those
+  ;; extra dependencies are supposed to be determined only by the ones declared
+  ;; so far; so, if the dependencies declares so far are consistent with recorded
+  ;; dependencies, and if the target's current hash matches the prvious result,
+  ;; then we can assume that the extra dependencies generated previously are still
+  ;; the extra dependencies this time
+  (define same-so-far?
+    (and (equal? sha1 prev-sha1)
+         (not (equal? sha1 phony-sha1))
+         (andmap (lambda (dep-key)
+                   (equal? (hash-ref dep-sha1s dep-key)
+                           (hash-ref prev-dep-sha1s dep-key #f)))
+                 (hash-keys dep-sha1s))))
+
+  (define more-deps
+    (if same-so-far?
+        (foldl (lambda (dep-key more-sha1s)
+                 (if (hash-ref dep-sha1s dep-key #f)
+                     more-sha1s
+                     (cons (input-file-target
+                            (build-normalized-path (or (car (split-path path)) ".")
+                                                   (symbol->string dep-key)))
+                           more-sha1s)))
+               '()
+               (hash-keys prev-dep-sha1s))
+        '()))
+  (define more-fetch-state
+    (foldl (lambda (dep state) (do-build dep state #f))
+           new-state
+           more-deps))
+  (define newer-state
+    (foldl (lambda (dep state) (force-build dep state))
+           more-fetch-state
+           more-deps))
+  (define all-dep-sha1s
+    (foldl (lambda (dep dep-sha1s)
+             (add-dependent-target-state dep dep-sha1s target-dir newer-state))
+           dep-sha1s
+           more-deps))
+  
   ;; compare to recorded result, and rebuild if different
   (cond
-    [(and (not (and (equal? dep-sha1s prev-dep-sha1s)
-                    (or (not to-build)
-                        (equal? sha1 prev-sha1))))
-          (not (equal? sha1 done-sha1)))
+    [(or (and same-so-far?
+              (andmap (lambda (dep-key)
+                        (equal? (hash-ref all-dep-sha1s dep-key #f)
+                                (hash-ref prev-dep-sha1s dep-key #f)))
+                      (hash-keys all-dep-sha1s)))
+         (and (= 0 (hash-count all-dep-sha1s))
+              (not (equal? sha1 phony-sha1))))
+     ;; no need to rebuild
+     (when path-handle (cleanable-cancel path-handle))
+     (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
+                (equal? prev-sha1 sha1)
+                (not (equal? sha1 phony-sha1)))
+       (alert (~a (target-name t) " is up to date")))
+     (update-target-state newer-state t (cons sha1 all-dep-sha1s))]
+    [else
      (unless to-build
        (error "build: out-of-date target has no build procedure" (target-name t)))
      ;; always run a build for a dependency in its own thread
      (let ([ch (channel)])
        (thread (lambda ()
-                 (acquire-resource new-state) ; limits process parallelism
-                 (let ([sha1 (to-build new-state)]) ; build!
+                 (acquire-resource newer-state) ; limits process parallelism
+                 (let* ([sha1 (to-build)]) ; build!
                    (unless (sha1? sha1)
-                     (error "build: target-build result is not a sha1" sha1))
+                     (error "build: target-build result is not a SHA-1" sha1))
                    (when path-handle (cleanable-cancel path-handle))
                    (channel-put ch (cons sha1 dep-sha1s))
-                   (release-resource new-state))))
+                   (release-resource newer-state))))
        ;; meanwhile, record a channel as the start's current build state
-       (update-target-state new-state t ch))]
-    [else
-     ;; no need to rebuild
-     (when path-handle (cleanable-cancel path-handle))
-     (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
-                (equal? prev-sha1 sha1)
-                (not (equal? sha1 done-sha1)))
-       (alert (~a (target-name t) " is up to date")))
-     (update-target-state new-state t (cons sha1 dep-sha1s))]))
+       (update-target-state newer-state t ch))]))
 
-;; Alterntaive entry point suiable for use from a script's `main`
-(define (build/command-line targets [wrt #f] [opts (hash)])
+;; Alternative entry point suitable for use from a script's `main`
+(define (build/command-line targets [opts (hash)])
   (unless (and (list? targets) (andmap target? targets))
     (arg-error 'build/command-line "list of targets" targets))
-  (unless (or (not wrt) (path-string? wrt))
-    (arg-error 'build/command-line "path string or #f" opts))
   (unless (hash? opts)
     (arg-error 'build/command-line "hash table" opts))
   (command-line
    :argv (or (hash-ref opts 'args #f) (hash-ref (runtime-env) 'args))
-   :init (if (or (hash-ref opts 'dest-dir #f) (not wrt))
-             opts
-             (hash-set opts 'dest-dir (or (car (split-path wrt)) ".")))
+   :init opts
    :once-each
    [opts ("-j" "--jobs") n "Use <n> parallel jobs"
          (let ([v (read-from-string-all n)])
@@ -252,30 +310,63 @@
                 (error (~a "unknown target: " target)))
             opts))))
 
-;; Defines and exports `builder` and `targets` while also setting up a
-;; `main` submodule to call `builder`
-(define-syntax (provide-builder stx)
+(define (make-at-dir mod-path)
+  (define dir (car (split-path mod-path)))
+  (if dir
+      (lambda (path)
+        (build-normalized-path dir path))
+      (lambda (path) path)))
+
+;; Exports `targets`, which is a function that takes an `at-dir`
+;; function, while also setting up a `main` submodule to call
+;; `build/command-line`
+(define-syntax (provide-targets stx)
   (unless (and (list? stx) (= 2 (length stx)))
     (bad-syntax stx))
-  (define targets (string->uninterned-symbol "targets"))
-  (define builder (datum->syntax (car stx) 'builder))
+  (define targets (cadr stx))
   (list (quote-syntax begin)
-        (list (quote-syntax provide) builder targets)
-        (list (quote-syntax define) targets (cadr stx))
-        (list (quote-syntax define)
-              (list builder
-                    'wrt)
-              (list (quote-syntax build/command-line)
-                    targets
-                    'wrt))
+        (list (quote-syntax provide) targets)
         (list (quote-syntax module+) 'main
-              (list builder #f))))
+              (list (quote-syntax build/command-line)
+                    (list targets
+                          ;; builds to current directory by default:
+                          (lambda (path) path))))))
 
 ;; ------------------------------------------------------------
 ;; Helpers for reading and updating build state
 
 (define (target-state state t)
   (hash-ref (build-state-target-state state) (target-key t) #f))
+
+(define (add-dependent-target-state dep dep-sha1s target-dir state)
+  (define dep-local-path (target-name dep))
+  (define dep-path (cond
+                     [(symbol? dep-local-path) dep-local-path]
+                     [(relative-path? dep-local-path)
+                      (find-relative-path target-dir
+                                          (if (relative-path? target-dir)
+                                              dep-local-path
+                                              (path->absolute-path dep-local-path)))]
+                     [else dep-local-path]))
+  (define ts (target-state state dep))
+  (define dep-key (if (symbol? dep-path) dep-path (string->symbol dep-path)))
+  (hash-set dep-sha1s dep-key (car ts)))
+
+(define (record-target-accumulated state for-t t)
+  (let* ([accum-key (target-key for-t)]
+         [dep-sha1s (hash-ref (build-state-target-accum state) accum-key (hash))]
+         [dep-sha1s (add-dependent-target-state t dep-sha1s (dir-part (target-name for-t)) state)])
+    (build-state-set-target-accum state accum-key dep-sha1s)))
+
+(define (merge-target-accumulated state t ts)
+  (let ([more-dep-sha1s (hash-ref (build-state-target-accum state) (target-key t) #f)])
+    (if more-dep-sha1s
+        (cons (car ts)
+              (foldl (lambda (dep-key dep-sha1s)
+                       (hash-set dep-sha1s dep-key (hash-ref more-dep-sha1s dep-key)))
+                     (cdr ts)
+                     (hash-keys more-dep-sha1s)))
+        ts)))
 
 (define (update-target-state state t ts)
   (build-state-set-target-state state
@@ -288,28 +379,32 @@
   (update-target-state state t ts))
 
 (define (record-target-sha1s state t ts)
-  (unless (hash-ref (target-options t) 'input?  #f)
-    (db-record-target-sha1s (target-absolute-path t state) ts)))
+  (unless (hash-ref (target-options t) 'input? #f)
+    (db-record-target-sha1s (split-path (target-name t)) ts)))
 
-(define (load-sha1s state t abs-path)
+(define (load-sha1s state t path)
   (cond
     [(hash-ref (target-options t) 'input? #f) state]
     [else
-     (define db+tc (db-load-sha1s abs-path (build-state-db state)
+     (define db+tc (db-load-sha1s (split-path path)
+                                  (build-state-db state)
                                   (build-state-time-cache state)))
      (if db+tc
          (let ([state (build-state-set-db state (car db+tc))])
            (build-state-set-time-cache state (cdr db+tc)))
          state)]))
 
-(define (previous-target-state state abs-path)
-  (hash-ref (build-state-db state)
-            (string->symbol abs-path)
-            '("")))
+(define (previous-target-state state key)
+  (or (hash-ref (build-state-db state) key #f)
+      (list no-sha1)))
 
-(define (file-sha1 path [state #f])
-  (or (file-sha1/cached path (and state (build-state-time-cache state)))
-      no-sha1))
+(define (file-sha1 path [token #f])
+  (unless (path-string? path) (arg-error 'file-sha1 "path string" path))
+  (unless (or (not token) (token? token)) (error 'file-sha1 "build-token" token))
+  (let ([state (and token (channel-get (token-ch token)))])
+    (when state (channel-put (token-ch token) state))
+    (or (file-sha1/cached path (and state (build-state-time-cache state)))
+        no-sha1)))
 
 ;; see also "private/build-db.zuo"
 

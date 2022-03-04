@@ -19,68 +19,70 @@
 (define srcdir (hash-ref config 'srcdir))
 (define install-prefix (hash-ref config 'INSTALL_PREFIX))
 
-(define here (input-file-target (quote-module-path)))
+(define (targets at-dir)
+  (define image_zuo.c
+    (target (at-dir "image_zuo.c")
+            (lambda (self token)
+              (embed-image (hash 'output (target-name self)
+                                 'deps "image_zuo.dep"
+                                 'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
+                                 'keep-collects? #t))
+              (rule '() (file-sha1 (target-name self) token)))))
 
-(define image_zuo.c
-  (target "image_zuo.c"
-          (lambda (name state)
-            (embed-image (hash 'output name
-                               'deps "image_zuo.dep"
-                               'libs (map string->symbol (string-split (hash-ref config 'EMBED_LIBS "zuo")))
-                               'keep-collects? #t))
-            (rule '() (file-sha1 name state)))))
+  (define (exe-target name lib-path)
+    (target (at-dir name)
+            (lambda (self token)
+              (rule (list image_zuo.c)
+                    (file-sha1 (target-name self) token)
+                    (lambda ()
+                      (define l (split-path (target-name self)))
+                      (when (car l) (mkdir* (car l)))
+                      (compile-c (target-name self)
+                                 (target-name image_zuo.c)
+                                 (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
+                                 config
+                                 thread-process-wait)
+                      (file-sha1 (target-name self) token))))
+            (hash 'noisy? #t)))
+  
+  (define (add-exe name)
+    (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)
+        (~a name ".exe")
+        name))
 
-(define (exe-target name lib-path)
-  (target name
-          (lambda (name state)
-            (rule (list image_zuo.c)
-                  (file-sha1 name state)
-                  (lambda (state)
-                    (define l (split-path name))
-                    (when (car l) (mkdir* (car l)))
-                    (compile-c name
-                               (target-path image_zuo.c state)
-                               (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
-                               config
-                               thread-process-wait)
-                    (file-sha1 name state))))
-          (hash 'noisy? #t)))
+  (define zuo-to-run (exe-target (add-exe "to-run/zuo") (build-path srcdir ".." "lib")))
+  (define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
+  
+  (define zuos-to-run-and-install
+    (target (at-dir "zuos-to-run-and-install")
+            (lambda (self token)
+              (rule (list zuo-to-run zuo-to-install)
+                    phony-sha1
+                    (lambda ()
+                      phony-sha1)))))
 
-(define (add-exe name)
-  (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)
-      (~a name ".exe")
-      name))
+  (define install
+    (target (at-dir "install")
+            (lambda (self token)
+              (rule (list zuo-to-run)
+                    phony-sha1
+                    (lambda ()
+                      (define (say-copy cp a b)
+                        (displayln (~a "copying " a " to " b))
+                        (cp a b))
+                      (mkdir* install-prefix)
+                      (mkdir* (build-path install-prefix "bin"))
+                      (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
+                      (mkdir* (build-path install-prefix "lib"))
+                      (say-copy cp*
+                                (build-path srcdir "lib" "zuo")
+                                (build-path install-prefix "lib" "zuo"))
+                      phony-sha1)))))
 
-(define zuo-to-run (exe-target (add-exe "to-run/zuo") (build-path srcdir ".." "lib")))
-(define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
+  (list zuos-to-run-and-install
+        image_zuo.c
+        zuo-to-run
+        zuo-to-install
+        install))
 
-(define zuos-to-run-and-install
-  (target "zuos-to-run-and-install"
-          (lambda (name state)
-            (rule (list zuo-to-run zuo-to-install)
-                  done-sha1
-                  #f))))
-
-(define install
-  (target "install"
-          (lambda (name state)
-            (rule (list zuo-to-run)
-                  'before
-                  (lambda (state)
-                    (define (say-copy cp a b)
-                      (displayln (~a "copying " a " to " b))
-                      (cp a b))
-                    (mkdir* install-prefix)
-                    (mkdir* (build-path install-prefix "bin"))
-                    (say-copy cp (target-path zuo-to-install state) (build-path install-prefix "bin" "zuo"))
-                    (mkdir* (build-path install-prefix "lib"))
-                    (say-copy cp*
-                              (build-path srcdir "lib" "zuo")
-                              (build-path install-prefix "lib" "zuo"))
-                    done-sha1)))))
-
-(provide-builder (list zuos-to-run-and-install
-                       image_zuo.c
-                       zuo-to-run
-                       zuo-to-install
-                       install))
+(provide-targets targets)

@@ -27,79 +27,87 @@
          db-load-sha1s
          file-sha1/cached
          path->absolute-path
-         build-normalized-path)
+         dir-part)
 
-;; Given a target's absolute path, construct various ".db" paths and
-;; send them on to `k`
-(define (db-paths abs-path k)
-  (let* ([dir+name (split-path abs-path)]
-         [dir (car dir+name)]
-         [db-path (build-path dir "_zuo.db")]
-         [tc-path (build-path dir "_zuo_tc.db")])
-    (k db-path tc-path dir (cdr dir+name))))
+(define (db-file-path target-dir) (build-path target-dir "_zuo.db"))
+(define (tc-file-path target-dir) (build-path target-dir "_zuo_tc.db"))
+
+;; for serialization and deserialization of dep-sha1s tables
+(define (hash->list ht) (map (lambda (k) (list (symbol->string k) (hash-ref ht k))) (hash-keys ht)))
+(define (list->hash l) (foldl (lambda (p ht)
+                                (hash-set ht (string->symbol (car p)) (cadr p)))
+                              (hash)
+                              l))
 
 ;; Records the result of a build of `abs-path`, mainly storing the
 ;; SHA-1 and dep SHA-1s in "_zuo.db", but also recording a timestamp
 ;; plus SHA-1 for dependencies in "_zuo_tc.db"
-(define (db-record-target-sha1s abs-path ts)
-  (db-paths
-   abs-path
-   (lambda (db-path tc-path dir name)
-     (define db-content
-       (if (file-exists? db-path)
-           (read-from-string-all (file->string db-path))
-           '()))
-     (define tc-content
-       (if (file-exists? tc-path)
-           (read-from-string-all (file->string tc-path))
-           '()))
-     (define new-db-content (reassoc (cons name ts) db-content))
-     (define new-tc-content
-       (foldl (lambda (dep tc-content)
-                (define dep-name (car dep))
-                (define time (file-timestamp (if (relative-path? dep-name)
-                                                 (build-path dir dep-name)
-                                                 dep-name)))
-                (cond
-                  [time (reassoc (list dep-name time (cadr dep)) tc-content)]
-                  [else tc-content]))
-              tc-content
-              (cons (list name (car ts)) (cdr ts))))
-     (update-file db-path new-db-content)
-     (update-file tc-path new-tc-content))))
+(define (db-record-target-sha1s target-dir+name ts)
+  (define dir (or (car target-dir+name) "."))
+  (define name (cdr target-dir+name))
+  (define db-path (db-file-path dir))
+  (define tc-path (tc-file-path dir))
+  (define db-content
+    (if (file-exists? db-path)
+        (read-from-string-all (file->string db-path))
+        '()))
+  (define tc-content
+    (if (file-exists? tc-path)
+        (read-from-string-all (file->string tc-path))
+        '()))
+  (define dep-sha1s-l (hash->list (cdr ts)))
+  (define new-db-content (reassoc (list* name (car ts) dep-sha1s-l) db-content))
+  (define new-tc-content
+    (foldl (lambda (dep tc-content)
+             (define dep-name (car dep))
+             (define time (file-timestamp (if (relative-path? dep-name)
+                                              (build-path dir dep-name)
+                                              dep-name)))
+             (cond
+               [time (reassoc (list dep-name time (cadr dep)) tc-content)]
+               [else tc-content]))
+           tc-content
+           (cons (list name (car ts)) dep-sha1s-l)))
+  (update-file db-path new-db-content)
+  (update-file tc-path new-tc-content))
 
 ;; Loads previous-build information for `abs-path`, as well as cached
 ;; SHA-1s for things that might be dependencies; loading needs to
 ;; happen only once per directory that has a (non-input) build target
-(define (db-load-sha1s abs-path db tc)
-  (db-paths
-   abs-path
-   (lambda (db-path tc-path dir name)
-     (define key (string->symbol db-path))
-     (cond
-       [(hash-ref db key #f) #f]
-       [else
-        ;; if loading fails, then we'll delete files on the
-        ;; grounds that they must be in bad shape
-        (define (read-in path table)
-          (define c-handle (cleanable-file path))
-          (define content (if (file-exists? path)
-                              (read-from-string-all (file->string path))
-                              '()))
-          (define new
-            (foldl (lambda (name+val table)
-                     (define name (car name+val))
-                     (define key (string->symbol (if (relative-path? name)
-                                                     (simple-form-path (build-path dir name))
-                                                     name)))
-                     (hash-set table key (cdr name+val)))
-                   table
-                   content))
-          (cleanable-cancel c-handle)
-          new)
-        (define new-db (read-in db-path (hash-set db key #t)))
-        (define new-tc (read-in tc-path tc))
-        (cons new-db new-tc)]))))
+(define (db-load-sha1s target-dir+name db tc)
+  (define dir (or (car target-dir+name) "."))
+  (define name (cdr target-dir+name))
+  (define db-path (db-file-path dir))
+  (define tc-path (tc-file-path dir))
+  (define key (string->symbol db-path))
+  (cond
+    [(hash-ref db key #f) #f]
+    [else
+     ;; if loading fails, then we'll delete files on the
+     ;; grounds that they must be in bad shape
+     (define (read-in path table deserialize)
+       (define c-handle (cleanable-file path))
+       (define content (if (file-exists? path)
+                           (read-from-string-all (file->string path))
+                           '()))
+       (define new
+         (foldl (lambda (name+val table)
+                  (define name (car name+val))
+                  (define key (if (symbol? name)
+                                  name
+                                  (string->symbol (if (relative-path? name)
+                                                      (build-normalized-path dir name)
+                                                      name))))
+                  (hash-set table key (deserialize (cdr name+val))))
+                table
+                content))
+       (cleanable-cancel c-handle)
+       new)
+     (define new-db (read-in db-path (hash-set db key #t) (lambda (v)
+                                                            (cons (car v)
+                                                                  (list->hash (cdr v))))))
+     (define new-tc (read-in tc-path tc (lambda (v) v)))
+     (cons new-db new-tc)]))
 
 ;; Helpers to get an input file's SHA-1, possibly cached
 (define (file-sha1/cached path time-cache)
@@ -107,7 +115,7 @@
     (and timestamp
          (let ([cached (and time-cache
                             (hash-ref time-cache
-                                      (string->symbol (path->absolute-path path))
+                                      (string->symbol path)
                                       #f))])
            (if (and cached
                     (equal? (car cached) timestamp))
@@ -137,21 +145,5 @@
       (build-normalized-path (hash-ref (runtime-env) 'dir) p)
       p))
 
-;; Like `build-module-path` in that `.` and `..` is normalized at the
-;; start of `path` and as exposed at the end of `base`
-(define (build-normalized-path orig-base path)
-  (let loop ([base orig-base] [elems (explode-path path)])
-    (cond
-      [(null? elems) base]
-      [(string=? (car elems) ".") (loop base (cdr elems))]
-      [(string=? (car elems) "..")
-       (define l (split-path base))
-       (loop (car l)
-             (cond
-               [(not l) (error "build-normalized-path: too many ups" (list orig-base path))]
-               [(equal? (cdr l) ".") elems]
-               [(equal? (cdr l) "..") (cons ".." elems)]
-               [else (cdr elems)]))]
-      [(string=? base ".") (loop (car elems) (cdr elems))]
-      [else (loop (build-path base (car elems)) (cdr elems))])))
-
+(define (dir-part path)
+  (or (car (split-path path)) "."))

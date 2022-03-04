@@ -70,4 +70,4 @@ cat ${srcdir}/Makefile.in >> Makefile
 
 echo "#lang zuo" > main.zuo
 echo "(require "'"'"${srcdir}/local/main.zuo"'"'")" >> main.zuo
-echo "(builder (quote-module-path))" >> main.zuo
+echo "(build/command-line (targets (make-at-dir (quote-module-path))))" >> main.zuo
