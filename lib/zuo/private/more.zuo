@@ -5,8 +5,7 @@
          "base/define.zuo"
          "list.zuo")
 
-(provide any?
-         void?
+(provide void?
          boolean?
 
          equal?
@@ -44,8 +43,6 @@
          find-executable-path
          shell)
 
-;; mainly for contracts in the docs:
-(define (any? v) #t)
 (define (void? v) (eq? v (void)))
 
 (define (boolean? v) (or (eq? v #t) (eq? v #f)))
@@ -187,17 +184,23 @@
                [else (cdr elems)]))]
       [else (loop (build-path base (car elems)) (cdr elems))])))
 
-(define (path-replace-suffix path suffix)
-  (unless (path-string? path) (arg-error 'path-replace-suffix "path string" path))
+(define (path-replace-suffix path-in suffix)
+  (unless (path-string? path-in) (arg-error 'path-replace-suffix "path string" path-in))
   (unless (string? suffix) (arg-error 'path-replace-suffix "string" suffix))
-  (let loop ([i (string-length path)])
-    (cond
-      [(= i 0) (~a path suffix)]
-      [else
-       (let ([i (- i 1)])
-         (if (= (string-ref path i) 46) ; 46 = (char ".")
-             (~a (substring path 0 i) suffix)
-             (loop i)))])))
+  (define l (split-path path-in))
+  (define path (cdr l))
+  (define new-path
+    (let loop ([i (string-length path)])
+      (cond
+        [(= i 0) (~a path suffix)]
+        [else
+         (let ([i (- i 1)])
+           (if (= (string-ref path i) 46) ; 46 = (char ".")
+               (~a (substring path 0 i) suffix)
+               (loop i)))])))
+  (if (car l)
+      (build-path (car l) new-path)
+      new-path))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

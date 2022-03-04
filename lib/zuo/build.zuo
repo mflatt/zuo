@@ -3,8 +3,7 @@
          "thread.zuo"
          "private/build-db.zuo")
 
-(provide target?
-         (rename-out [make-target target]
+(provide (rename-out [make-target target]
                      [make-rule rule]
                      [make-phony-rule phony-rule])
          input-file-target
@@ -13,12 +12,20 @@
          target-path
          target-name
 
+         target?
+         token?
+         rule?
+         phony-rule?
+
+         sha1?
          file-sha1
          no-sha1
 
          build
          build/command-line
          build/recur
+
+         find-target
          make-at-dir
          provide-targets)
 
@@ -381,7 +388,7 @@
   (unless (hash? opts)
     (arg-error 'build/command-line "hash table" opts))
   (command-line
-   :argv (or (hash-ref opts 'args #f) (hash-ref (runtime-env) 'args))
+   :args-in (or (hash-ref opts 'args #f) (hash-ref (runtime-env) 'args))
    :init opts
    :once-each
    [opts ("-j" "--jobs") n "Use <n> parallel jobs"
@@ -394,10 +401,23 @@
    :args
    ([target (~a (target-name (car targets)))])
    (lambda (opts)
-     (build (or (ormap (lambda (t) (and (equal? target (~a (target-name t))) t))
-                       targets)
+     (build (or (find-target target targets)
                 (error (~a "unknown target: " target)))
             opts))))
+
+(define (find-target name targets)
+  (define len (string-length name))
+  (define (matches? t-name)
+    (let* ([t-name (~a t-name)]
+           [t-len (string-length t-name)])
+      (and (>= t-len len)
+           (let ([start (- t-len len)])
+             (string=? name (substring name start (string-length name)))
+             (or (= t-len len)
+                 (= (char "/") (string-ref name (- start 1)))
+                 (= (char "\\") (string-ref name (- start 1))))))))
+  (ormap (lambda (t) (and (matches? (target-name t)) t))
+         targets))
 
 (define (make-at-dir mod-path)
   (define dir (car (split-path mod-path)))
@@ -414,14 +434,18 @@
 (define-syntax (provide-targets stx)
   (unless (and (list? stx) (= 2 (length stx)))
     (bad-syntax stx))
-  (define targets (cadr stx))
+  (define targets-expr (cadr stx))
+  (define targets-id (string->uninterned-symbol "targets"))
   (list (quote-syntax begin)
-        (list (quote-syntax provide) targets)
-        (list (quote-syntax module+) 'main
-              (list (quote-syntax build/command-line)
-                    (list targets
-                          ;; builds to current directory by default:
-                          (lambda (path) path))))))
+        `(,(quote-syntax define) ,targets-id ,targets-expr)
+        `(,(quote-syntax provide) (,(quote-syntax rename-out)
+                                   [,targets-id targets]))
+        `(,(quote-syntax module+)
+          main
+          (,(quote-syntax build/command-line)
+           (,targets-id
+            ;; builds to current directory by default:
+            (lambda (path) path))))))
 
 ;; ------------------------------------------------------------
 ;; Helpers for reading and updating build state
@@ -490,7 +514,7 @@
   (or (hash-ref (build-state-db state) key #f)
       (cons no-sha1 (hash))))
 
-(define (file-sha1 path [token #f])
+(define (file-sha1 path token)
   (unless (path-string? path) (arg-error 'file-sha1 "path string" path))
   (unless (or (not token) (token? token)) (error 'file-sha1 "build-token" token))
   (let ([state (and token (channel-get (token-ch token)))])

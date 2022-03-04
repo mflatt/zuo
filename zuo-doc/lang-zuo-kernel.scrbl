@@ -76,14 +76,14 @@ in @racketmodname[zuo/kernel] (and the values originate there):
   bitwise-and bitwise-ior bitwise-xor bitwise-not
 
   string? string-length string-ref string-u32-ref substring string
-  string=? string-ci=?
+  string=? string-ci=? string-sha1
 
   symbol? symbol->string string->symbol string->uninterned-symbol
   
   hash? hash hash-ref hash-set hash-remove
   hash-keys hash-count hash-keys-subset?
 
-  procedure? apply call/cc
+  procedure? apply call/cc call/prompt
 
   eq? not void
 

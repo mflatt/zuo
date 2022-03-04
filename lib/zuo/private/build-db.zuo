@@ -99,6 +99,7 @@
      ;; if loading fails, then we'll delete files on the
      ;; grounds that they must be in bad shape
      (define (read-in path table deserialize)
+       (suspend-signal) ; don't lose the file as a result of Ctl-C
        (define c-handle (cleanable-file path))
        (define content (if (file-exists? path)
                            (read-from-string-all (file->string path))
@@ -113,6 +114,7 @@
                 table
                 content))
        (cleanable-cancel c-handle)
+       (resume-signal)
        new)
      (define new-db (read-in db-path (hash-set db key #t) (lambda (v)
                                                             (cons (car v)

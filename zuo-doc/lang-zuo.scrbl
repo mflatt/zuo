@@ -279,18 +279,18 @@ or @racket[#false]. Any value other than @racket[#f] counts as true
 for conditionals.
 
 @deftogether[(
-@defproc[(boolean? [v any?]) boolean?]
-@defproc[(not [v any?]) boolean?]
+@defproc[(boolean? [v any/c]) boolean?]
+@defproc[(not [v any/c]) boolean?]
 )]{
 
 Just like @realracket*[boolean? not] from @racket[racket].}
 
-@defproc[(eq? [v1 any?] [v2 any?]) boolean?]{
+@defproc[(eq? [v1 any/c] [v2 any/c]) boolean?]{
 
 Analogous to @realracket[eq?] from @racket[racket], but even small Zuo
 numbers are not necessarily @racket[eq?] when they are @racket[=].}
 
-@defproc[(equal? [v1 any?] [v2 any?]) boolean?]{
+@defproc[(equal? [v1 any/c] [v2 any/c]) boolean?]{
 
 Analogous to @realracket[equal?] from @racket[racket].}
 
@@ -302,7 +302,7 @@ with modular arithmetic (i.e., wraparound on overflow). It is always
 written in decimal form with a leading @litchar{-} for negative
 numbers.
 
-@defproc[(integer? [v any?]) boolean?]{
+@defproc[(integer? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is an integer, @racket[#f] otherwise.}
 
@@ -336,28 +336,28 @@ Zuo pairs and lists work the same as in Racket with the same textual
 representation.
 
 @deftogether[(
-@defproc[(pair? [v any?])
+@defproc[(pair? [v any/c])
          boolean?]
-@defproc[(null? [v any?])
+@defproc[(null? [v any/c])
          boolean?]
-@defproc[(list? [v any?])
+@defproc[(list? [v any/c])
          boolean?]
-@defproc[(cons [a any?] [d any?])
+@defproc[(cons [a any/c] [d any/c])
          pair?]
 @defproc[(car [p pair?])
-         any?]
+         any/c]
 @defproc[(cdr [p pair?])
-         any?]
-@defproc[(list [v any?] ...)
+         any/c]
+@defproc[(list [v any/c] ...)
          list?]
-@defproc[(list* [v any?] ... [tail any?])
-         any?]
+@defproc[(list* [v any/c] ... [tail any/c])
+         any/c]
 @defproc*[([(append [lst list?] ...) list?]
-           [(append [lst list?] ... [v any?]) any?])]
+           [(append [lst list?] ... [v any/c]) any/c])]
 @defproc[(reverse [lst list?]) list?]           
 @defproc[(length [lst list?]) integer?]
-@defproc[(list-ref [lst pair?] [pos integer?]) any?]
-@defproc[(list-tail [lst any?] [pos integer?]) any?]
+@defproc[(list-ref [lst pair?] [pos integer?]) any/c]
+@defproc[(list-tail [lst any/c] [pos integer?]) any/c]
 )]{
 
 Just like @realracket*[pair? null? cons car cdr list? list* append
@@ -365,10 +365,10 @@ reverse list-ref list-tail] from @racketmodname[racket], except that
 @racket[list?] takes time proportional to the length of the list.}
 
 @deftogether[(
-@defproc[(caar [p pair?]) any?]
-@defproc[(cadr [p pair?]) any?]
-@defproc[(cdar [p pair?]) any?]
-@defproc[(cddr [p pair?]) any?]
+@defproc[(caar [p pair?]) any/c]
+@defproc[(cadr [p pair?]) any/c]
+@defproc[(cdar [p pair?]) any/c]
+@defproc[(cddr [p pair?]) any/c]
 )]{
 
 Just like @realracket*[caar cadr cdar cddr] from @racketmodname[racket].}
@@ -379,12 +379,12 @@ Just like @realracket*[caar cadr cdar cddr] from @racketmodname[racket].}
          list?]
 @defproc[(for-each [proc procedure?] [lst list?] ...+)
          void?]
-@defproc[(foldl [proc procedure?] [init any?] [lst list?] ...+)
-         any?]
+@defproc[(foldl [proc procedure?] [init any/c] [lst list?] ...+)
+         any/c]
 @defproc[(andmap [proc procedure?] [lst list?])
-          any?]
+          any/c]
 @defproc[(ormap [proc procedure?] [lst list?])
-         any?]
+         any/c]
 @defproc[(filter [proc procedure?] [lst list?])
          list?]
 )]{
@@ -395,11 +395,11 @@ are more restricted and do not apply @racket[proc] to the last
 argument in tail position.}
 
 @deftogether[(
-@defproc[(member [v any?] [lst list?])
+@defproc[(member [v any/c] [lst list?])
          (or/c pair? #f)]
-@defproc[(assoc [v any?] [lst list?])
+@defproc[(assoc [v any/c] [lst list?])
          (or/c pair? #f)]
-@defproc[(remove [v any?] [lst list?])
+@defproc[(remove [v any/c] [lst list?])
          (or/c pair? #f)]
 )]{
 
@@ -411,7 +411,7 @@ Like @realracket*[member assoc remove] from @racketmodname[racket].}
 Zuo @deftech{strings} are sequences of bytes.
 
 @deftogether[(
-@defproc[(string? [v any?]) boolean?]
+@defproc[(string? [v any/c]) boolean?]
 @defproc[(string [char integer?] ...) string?]
 @defproc[(string-length [str string?]) integer?]
 @defproc[(string-ref [str string?] [k integer?]) integer?]
@@ -476,7 +476,7 @@ Symbols with those characters will print in a way that cannot be read
 back into Zuo.
 
 @deftogether[(
-@defproc[(symbol? [v any?]) boolean?]
+@defproc[(symbol? [v any/c]) boolean?]
 @defproc[(symbol->string [sym symbol?]) string?]
 @defproc[(string->symbol [str string?]) symbol?]
 @defproc[(string->uninterned-symbol [str string?]) symbol?]
@@ -497,24 +497,23 @@ Hash table print in a way analogous to Racket, but there is no reader
 support to convert the textual form back into a hash table value.
 
 @deftogether[(
-@defproc[(hash? [v any?]) boolean?]
-@defproc[(hash [key symbol?] [val any?] ... ...) hash?]
+@defproc[(hash? [v any/c]) boolean?]
+@defproc[(hash [key symbol?] [val any/c] ... ...) hash?]
 @defproc*[([(hash-ref [hash hash?]
                       [key symbol?])
-            any?]
+            any/c]
            [(hash-ref [hash hash?]
                       [key symbol?]
-                      [failure-value any?])
-            any?])]
+                      [failure-value any/c])
+            any/c])]
 @defproc[(hash-set [hash (and/c hash? immutable?)]
                    [key symbol?]
-                   [v any?])
+                   [v any/c])
          hash?]
 @defproc[(hash-remove [hash (and/c hash? immutable?)]
                       [key symbol?])
          hash?]
-@defproc[(hash-keys [hash hash?])
-         @elem{list of @racket[symbol?]}]
+@defproc[(hash-keys [hash hash?]) (listof symbol?)]
 @defproc[(hash-count [hash hash?]) integer?]
 @defproc[(hash-keys-subset? [hash1 hash?] [hash2 hash?])
          boolean?]
@@ -531,11 +530,11 @@ opposed to a failure thunk.}
 @section{Procedures}
 
 @deftogether[(
-@defproc[(procedure? [v any?]) any?]
-@defproc[(apply [proc procedure?] [lst list?]) any?]
-@defproc[(call/cc [proc procedure?]) any?]
-@defproc[(call/prompt [proc procedure?]) any?]
-@defproc[(call/comp [proc procedure?]) any?]
+@defproc[(procedure? [v any/c]) any/c]
+@defproc[(apply [proc procedure?] [lst list?]) any/c]
+@defproc[(call/cc [proc procedure?]) any/c]
+@defproc[(call/prompt [proc procedure?]) any/c]
+@defproc[(call/comp [proc procedure?]) any/c]
 )]{
 
 Like @realracket*[procedure? apply call/cc
@@ -550,14 +549,28 @@ tag or abort handler.}
 A @deftech{path string} is is a @tech{string} that is not non-empty
 and to contains no nul bytes.
 
-@defproc[(path-string? [v any?]) boolean?]{
+@defproc[(path-string? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a path string, @racket[#f] otherwise.}
+
+@defproc[(relative-path? [path path-string?]) boolean?]{
+
+Returns @racket[#t] if @racket[v] is a relative path, @racket[#f] otherwise.}
 
 @defproc[(build-path [base path-string?] [rel path-string?] ...) path-string?]{
 
 Combines @racket[base] path (absolute or relative) with the relative
 paths @racket[rel], adding path separators as needed.}
+
+@defproc[(build-normalized-path [base path-string?] [rel path-string?]) path-string?]{
+
+Similar to @racket[build-path], but any @filepath{.} or @filepath{..}
+element at the start of @racket[rel] is syntactically eliminated as
+much as possible. That is, @filepath{.} elements are dropped, and a
+@filepath{..} element is dropped when a trailing element of
+@racket[base] can be removed. Furthermore, any trailing @filepath{.}
+or @filepath{..} element of at the end of @racket[base] is
+syntactically resolved when exposed via @filepath{..} in @racket[rel].}
 
 @defproc[(split-path [path path-string?]) pair?]{
 
@@ -567,9 +580,28 @@ components. If @racket[path] has only a single element, the
 @racket[path] unchanged; otherwise, the final element is returned
 without trailing separators.}
 
-@defproc[(relative-path? [path path-string?]) boolean?]{
+@defproc[(explode-path [path path-string?]) (listof path-string?)]{
 
-Returns @racket[#t] if @racket[v] is a relative path, @racket[#f] otherwise.}
+Split @racket[path] into a list of individual path elements.}
+
+@defproc[(simple-form-path [path path-string?]) path-string?]{
+
+Syntactically normalized @racket[path] by eliminating @filepath{.} and
+@filepath{..} elements (except for @filepath{..} at the start that
+cannot be eliminated), removing redundant path separators, and making
+all path separators the platform default (on Windows).}
+
+@defproc[(find-relative-path [base path-string?] [path path-string?]) path-string?]{
+
+Finds a path relative to @racket[base] that accesses the same file or
+directory as @racket[path]. If @racket[base] and @racket[path] are
+both absolute and they do not share a root element, the result can
+still be an absolute path.}
+
+@defproc[(path-replace-suffix [path path-string?] [suffix string?]) path-string?]{
+
+Removes any @litchar{.} suffix from the last element of @racket[path],
+and then appends @racket[suffix] to the end of the path.}
 
 @defform[(quote-path path ...+)]{
 
@@ -581,12 +613,12 @@ equivalent to @racket[(build-path (car (split-path
 
 @section{Opaque Records}
 
-@defproc[(opaque [key any?] [val any?]) any?]{
+@defproc[(opaque [key any/c] [val any/c]) any/c]{
 
 Returns an opaque record that encapsulates @racket[val] with access
 allowed via @racket[key].}
 
-@defproc[(opaque-ref [key any?] [v any?] [failure-val any?]) any?]{
+@defproc[(opaque-ref [key any/c] [v any/c] [failure-val any/c]) any/c]{
 
 Returns the value encapsulated in @racket[v] if its is an opaque
 object with access allowed via @racket[key], @racket[failure-val] otherwise.}
@@ -600,7 +632,7 @@ access the contained value before it's set results in an error where
 the variable's name is used in the error message. A variable's
 contained value can be set only once.
 
-@defproc[(variable? [v any?]) boolean?]{
+@defproc[(variable? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a variable, @racket[#f] otherwise.}
 
@@ -610,12 +642,12 @@ Returns @racket[#t] if @racket[v] is a variable, @racket[#f] otherwise.}
 Creates a variable named by @racket[name] and without a value until
 one is installed with @racket[variable-set!].}
 
-@defproc[(variable-set! [var variable?] [val any?]) void?]{
+@defproc[(variable-set! [var variable?] [val any/c]) void?]{
 
 Sets the value contained by @racket[var] to @racket[val] or errors if
 @racket[var] already has a contained value.}
 
-@defproc[(variable-ref [var variable?]) any?]{
+@defproc[(variable-ref [var variable?]) any/c]{
 
 Returns the value contained by @racket[var] or errors if @racket[var]
 does not yet have a contained value.}
@@ -630,7 +662,7 @@ must contain only the letters @litchar{A}-@litchar{Z},
 @litchar{/}. Furthermore, @litchar{/} in a symbol module path cannot
 be at the start, end, or adjacent to another @litchar{/}.
 
-@defproc[(module-path? [v any?]) boolean?]{
+@defproc[(module-path? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a @tech{module path}, @racket[#f]
 otherwise.}
@@ -654,7 +686,7 @@ Loads @racket[mod-path] if it has not been loaded already, and returns
 the @tech{hash table} representation of the loaded module. See also
 Secref["module-protocol"]}
 
-@defproc[(kernel-eval [s-exp any?]) any?]{
+@defproc[(kernel-eval [s-exp any/c]) any/c]{
 
 Evaluates a term as if it appeared in a @racketmodname[zuo/kernel] module
 (but the result does not have to be a @tech{hash table}).}
@@ -665,22 +697,17 @@ Returns a @tech{hash table} that maps each primitive and constant name
 available in the body of a @racketmodname[zuo/kernel] module to its value.}
 
 
-@section{Miscellaneous}
+@section{void}
 
-@defproc[(void? [v any?]) boolean?]{
+@defproc[(void? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is the unique @deftech{void} value,
 @racket[#f] otherwise.}
 
-@defproc[(void [v any?] ...) void?]{
+@defproc[(void [v any/c] ...) void?]{
 
 Accepts any number of arguments and ignored them, returning the void
 value.}
-
-@defproc[(any? [v any?]) boolean?]{
-
-Always returns @racket[#t]. This procedure is mostly used just as a
-contract in documentation.}
 
 
 @section{Reading and Writing Objects}
@@ -693,9 +720,9 @@ they appeared in the string).}
 
 
 @deftogether[(
-@defproc[(~v [v any?] ...) string?]
-@defproc[(~a [v any?] ...) string?]
-@defproc[(~s [v any?] ...) string?]
+@defproc[(~v [v any/c] ...) string?]
+@defproc[(~a [v any/c] ...) string?]
+@defproc[(~s [v any/c] ...) string?]
 )]{
 
 Like @realracket*[~v ~a ~s], but with no formatting options. These
@@ -710,8 +737,8 @@ symbols format in @realracket[print] and @realracket[write] styles with
 @litchar{#<:}...@litchar{>} notation in all styles.}
 
 @deftogether[(
-@defproc[(display [v any?]) void?]
-@defproc[(displayln [v any?]) void?]
+@defproc[(display [v any/c]) void?]
+@defproc[(displayln [v any/c]) void?]
 )]{
 
 Convenience output functions that are analogous to @realracket*[display
@@ -719,7 +746,7 @@ displayln] from @racketmodname[racket]. They use @racket[~a] and
 @racket[(fd-open-output'stdout)].}
 
 
-@defproc[(error [v any?] ...) void?]{
+@defproc[(error [v any/c] ...) void?]{
 
 Errors (and exits) after printing the @racket[v]s to standard error,
 using an error color if standard error is a terminal.
@@ -731,7 +758,7 @@ combined using @racket[~v], and that resulting string is written
 @realracket[display]-style.}
 
 
-@defproc[(alert [v any?] ...) void?]{
+@defproc[(alert [v any/c] ...) void?]{
 
 Prints to standard output using the same formatting rules as
 @racket[error], but in an alert color for terminals. This function is
@@ -744,7 +771,7 @@ Errors (and exits) after printing an error about @racket[name]
 receiving the wrong number of arguments, where @racket[args] are the
 arguments that were supplied.}
 
-@defproc[(arg-error [who symbol?] [what string?] [v any?]) void?]{
+@defproc[(arg-error [who symbol?] [what string?] [v any/c]) void?]{
 
 Errors (and exits) after printing an error from @racket[who] about a
 @racket[what] expected in place of @racket[v].}
@@ -757,10 +784,10 @@ where the two are used to determine a binding when the identifier is
 used in a macro expansion.
 
 @deftogether[(
-@defproc[(identifier? [v any?]) boolean?]
+@defproc[(identifier? [v any/c]) boolean?]
 @defproc[(syntax-e [v identifier?]) symbol?]
-@defproc[(syntax->datum [v any?]) any?]
-@defproc[(datum->syntax [ctx identifier?] [v any?]) any?]
+@defproc[(syntax->datum [v any/c]) any/c]
+@defproc[(datum->syntax [ctx identifier?] [v any/c]) any/c]
 @defproc[(bound-identifier=? [id1 identifier?]
                              [id2 identifier?]) boolean?]
 )]{
@@ -772,15 +799,15 @@ symbols count as an identifier, however, and for
 @racket[datum->syntax] function always just returns its second
 argument.}
 
-@defproc[(syntax-error [message string?] [stx any?]) void?]{
+@defproc[(syntax-error [message string?] [stx any/c]) void?]{
 
 Exits as an error after printing @racket[message], @litchar{: }, and
 @racket[(~s (syntax->datum stx))].}
 
 @deftogether[(
-@defproc[(bad-syntax [stx any?]) void?]
-@defproc[(misplaced-syntax [stx any?]) void?]
-@defproc[(duplicate-identifier [stx any?]) void?]
+@defproc[(bad-syntax [stx any/c]) void?]
+@defproc[(misplaced-syntax [stx any/c]) void?]
+@defproc[(duplicate-identifier [stx any/c]) void?]
 )]{
 
 Calls @racket[syntax-error] with a suitable error message and @racket[stx].}
@@ -802,7 +829,7 @@ indicate that it expects three arguments as a macro transformer; see
 Files, input and out streams more generally, and processes are all
 represented as @tech{handles}.
 
-@defproc[(handle? [v any?]) boolean?]{
+@defproc[(handle? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a @tech{handle}, @racket[#f]
 otherwise.}
@@ -871,7 +898,7 @@ Writes the bytes of @racket[str] to the output file or output stream
 associated with @racket[handle], erroring for any other kind of
 @racket[handle].}
 
-@defproc[(fd-terminal? [handle handle?] [check-ansi? any? #f]) boolean?]{
+@defproc[(fd-terminal? [handle handle?] [check-ansi? any/c #f]) boolean?]{
 
 Returns @racket[#t] if the open input or output stream associated with
 @racket[handle] is a terminal, @racket[#f] otherwise. If
@@ -891,7 +918,7 @@ after Ctl-C.}
 Convenience function to open @racket[name] and read its content into a
 string or to write @racket[str] as its new content.}
 
-@defthing[eof any?]{
+@defthing[eof any/c]{
 
 A constant representing an end-of-file.}
 
@@ -967,11 +994,13 @@ keys are as follows, and supplying an unrecognized key in
 
 ]}
 
-@defproc[(process-wait [process handle?]) void?]{
+@defproc[(process-wait [process handle?] ...) handle?]{
 
-Waits until the process represented by @racket[process] has
-terminated, erroring if @racket[process] is any other kind of handle.
-Waiting again on the same handle will return immediately.}
+Waits until the process represented by a @racket[process] has
+terminated, erroring if a @racket[process] is any other kind of
+handle. The result is the handle for a terminated process that's one
+of the argument @racket[process] handles; waiting again on the same
+handle will produce a result immediately.}
 
 @defproc[(process-status [process handle?]) (or/c 'running integer?)]{
 
@@ -1019,7 +1048,7 @@ with an executable name.}
 
 @section{Filesystem}
 
-@defproc[(stat [name path-string?] [follow-links? any? #t]) (or/c hash? #f)]{
+@defproc[(stat [name path-string?] [follow-links? any/c #t]) (or/c hash? #f)]{
 
 Returns information about the file, directory, or link referenced by
 @racket[name]. If @racket[follow-links?] is @racket[#f], then when

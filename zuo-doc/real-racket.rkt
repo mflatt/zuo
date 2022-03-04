@@ -1,10 +1,15 @@
 #lang at-exp racket/base
 (require scribble/manual
          (for-syntax racket/base)
-         (for-label racket/base))
+         (for-label racket/base
+                    racket/contract/base
+                    racket/cmdline))
 
 (provide realracket
-         realracket*)
+         realracket*
+         (for-label any/c
+                    listof
+                    ->))
 
 (define-syntax (realracket stx)
   (syntax-case stx ()

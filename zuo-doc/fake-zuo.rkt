@@ -65,7 +65,6 @@
     not
     eq?
     equal?
-    any?
     void?
 
     +
@@ -145,6 +144,11 @@
     file-exists?
     directory-exists?
     link-exists?
+    explode-path
+    simple-form-path
+    find-relative-path
+    build-normalized-path
+    path-replace-suffix
     rm* cp* mkdir*
     :error :truncate :must-truncate :append :update :can-update
     cleanable-file
@@ -176,7 +180,34 @@
     runtime-env
     dump-image-and-exit
     exit
-    suspend-signal resume-signal))
+    suspend-signal resume-signal
+
+    command-line
+
+    target
+    rule
+    phony-rule
+    input-file-target
+    input-data-target
+    target-path
+    target-name
+    target?
+    token?
+    rule?
+    phony-rule?
+    sha1?
+    file-sha1
+    no-sha1
+    build
+    build/command-line
+    build/recur
+    make-at-dir
+    provide-targets
+    find-target
+
+    call-in-main-thread
+    thread? thread channel? channel channel-put channel-get
+    thread-process-wait
+    config-file->hash))
 
 (intro-define-fake)
-

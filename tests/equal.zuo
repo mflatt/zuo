@@ -51,4 +51,3 @@
 (check (eq? (void) (void)))
 (check (void? (void)))
 (check (not (void? 'void)))
-(check (any? (void)))

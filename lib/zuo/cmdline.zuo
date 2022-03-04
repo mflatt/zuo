@@ -41,17 +41,15 @@
                 (and (list? (car stx))
                      (andmap string? (car stx))))
       (syntax-error "command-line: bad flag-string list for flag" line-stx))
-    ;; check identifiers and then help string, with at least one more:
+    ;; check identifiers and then help string/sequence, with at least one more:
     (unless (let loop ([stx (cdr stx)])
               (cond
                 [(null? (cdr stx)) #f]
                 [(string? (car stx)) #t]
-                [(and (pair? (car stx))
-                      (list? (car stx))
-                      (andmap string? (car stx))) #t]
+                [(list? (car stx)) #t]
                 [(identifier? (car stx)) (loop (cdr stx))]
                 [else #f]))
-      (syntax-error "command-line: missing or misplaced help string for flag" line-stx))
+      (syntax-error "command-line: missing or misplaced help string/sequence for flag" line-stx))
     (define flags (if (string? (car stx)) (list (car stx)) (car stx)))
     (define ids (let loop ([stx (cdr stx)])
                   (if (identifier? (car stx))
@@ -88,11 +86,21 @@
                            (,(quote-syntax cons) ,(car flags) ,flag-id)
                            ,(loop (cdr flags))))))))
     (hash-set accum+expr 'help
-              (cons (list key flags spec (if (string? help-str) (list help-str) help-str))
+              (cons (list (quote-syntax list)
+                          (list (quote-syntax quote) key)
+                          (list (quote-syntax quote) flags)
+                          (list (quote-syntax quote) spec)
+                          (if (string? help-str)
+                              (list (quote-syntax list) help-str)
+                              (cons (quote-syntax list) help-str)))
                     (hash-ref accum 'help '()))))
-    
+ 
   (define (expected-mode stx)
     (syntax-error "command-line: expected tag like `:multi` or `:args`" (car stx)))
+  
+  (define (check-already accum what)
+    (when (hash-ref accum what #f)
+      (syntax-error (~a "command-line: multiple `:" what "` clauses") all-stx)))
 
   (let loop ([stx (cdr stx)] [mode #f] [group-id #f] [accum (hash 'flags-expr (quote-syntax '()))])
     (cond
@@ -100,11 +108,11 @@
        (list (quote-syntax run-cmdline)
              (hash-ref accum 'program (quote-syntax (hash-ref (runtime-env) 'script "[script]")))
              (hash-ref accum 'init (quote-syntax (hash)))
-             (hash-ref accum 'argv (quote-syntax (hash-ref (runtime-env) 'args '())))
+             (hash-ref accum 'args-in (quote-syntax (hash-ref (runtime-env) 'args '())))
              (hash-ref accum 'flags-expr)
              (hash-ref accum 'finish (quote-syntax (lambda () (lambda (cmd) cmd))))
              (hash-ref accum 'finish-spec (quote-syntax '(() ())))
-             (list (quote-syntax quote) (reverse (hash-ref accum 'help '()))))]
+             (cons (quote-syntax list) (reverse (hash-ref accum 'help '()))))]
       [(identifier? (car stx))
        (define head (syntax-e (car stx)))
        (cond
@@ -114,6 +122,7 @@
          [(eq? head ':init)
           (unless (pair? (cdr stx))
             (syntax-error "command-line: missing expression for `:init`" all-stx))
+          (check-already accum 'init)
           (loop (cddr stx) #f #f (hash-set accum 'init (cadr stx)))]
          [(eq? head ':args)
           (unless (>= (length stx) 3)
@@ -125,12 +134,28 @@
                                                         ,@(cddr stx)))
                                     'finish-spec `(,(quote-syntax quote)
                                                    ,(formals->spec (cadr stx)))))]
-         [(eq? head ':argv)
+         [(eq? head ':args-in)
           (unless (pair? (cdr stx))
-            (syntax-error "command-line: bad syntax at `:argv`" all-stx))
-          (loop (cddr stx) #f #f (hash-set accum 'argv (cadr stx)))]
+            (syntax-error "command-line: bad syntax at `:args-in`" all-stx))
+          (check-already accum 'args-in)
+          (loop (cddr stx) #f #f (hash-set accum 'args-in (list (quote-syntax check-args-in) (cadr stx))))]
+         [(eq? head ':program)
+          (unless (pair? (cdr stx))
+            (syntax-error "command-line: bad syntax at `:program`" all-stx))
+          (check-already accum 'program)
+          (loop (cddr stx) #f #f (hash-set accum 'program (list (quote-syntax check-program) (cadr stx))))]
          [else (expected-mode stx)])]
       [(not mode)
        (expected-mode stx)]
       [else
        (loop (cdr stx) mode group-id (parse-flag-line mode group-id accum (car stx)))])))
+
+(define (check-args-in args)
+  (unless (and (list? args) (andmap string? args))
+    (error "command-line: result for `:args-in` is not a list of strings" args))
+  args)
+
+(define (check-program prog)
+  (unless (string? prog)
+    (error "command-line: result for `:program` is not a string" prog))
+  prog)
