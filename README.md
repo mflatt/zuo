@@ -1,8 +1,6 @@
 Zuo: A Tiny Racket for Scripting
 ================================
 
-[Work in progress]
-
 You should use Racket to write scripts. But what if you need something
 much smaller than Racket for some reason — or what if you're trying
 to script a build of Racket itself? Zuo is a tiny Racket with
@@ -16,11 +14,20 @@ defined, and even the base Zuo language is defined by layers of
 `#lang`s. One of the early layers implements macros.
 
 
+Some Example Scripts
+--------------------
+
+See [`local/hello.zuo`](local/hello.zuo),
+[`local/tree.zuo`](local/tree.zuo),
+[`local/image.zuo`](local/image.zuo), and
+[`local/main.zuo`](local/main.zuo).
+
+
 Building and Running Zuo
 ------------------------
 
 Compile `zuo.c` with a C compiler. No additional are files needed,
-other than system and C-library headers. No compiler flags should be
+other than system and C library headers. No compiler flags should be
 needed, although flags like `-o zuo` or `-O2` are a good idea.
 
 You can also use `configure`, `make`, and `make install`, where `make`

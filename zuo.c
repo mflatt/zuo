@@ -2286,11 +2286,15 @@ static zuo_t *zuo_substring(zuo_t *obj, zuo_t *start_i, zuo_t *end_i) {
   const char *who = "substring";
   zuo_int_t s_idx, e_idx, len;
   check_string(who, obj);
-  check_integer(who, start_i);
-  check_integer(who, end_i);
-  s_idx = ZUO_INT_I(start_i);
-  e_idx = ZUO_INT_I(end_i);
   len = ZUO_STRING_LEN(obj);
+  check_integer(who, start_i);
+  s_idx = ZUO_INT_I(start_i);
+  if (end_i == z.o_undefined)
+    e_idx = len;
+  else {
+    check_integer(who, end_i);
+    e_idx = ZUO_INT_I(end_i);
+  }
   if ((s_idx < 0) || (s_idx > len))
     zuo_fail1w(who, "starting index out of bounds for string", start_i);
   if ((e_idx < 0) || (e_idx > len))
@@ -5967,7 +5971,7 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("string-length", zuo_string_length);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string-ref", zuo_string_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string-u32-ref", zuo_string_u32_ref);
-  ZUO_TOP_ENV_SET_PRIMITIVE3("substring", zuo_substring);
+  ZUO_TOP_ENV_SET_PRIMITIVEc("substring", zuo_substring);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string=?", zuo_string_eql);
   ZUO_TOP_ENV_SET_PRIMITIVE2("string-ci=?", zuo_string_ci_eql);
   ZUO_TOP_ENV_SET_PRIMITIVE1("string->symbol", zuo_string_to_symbol);

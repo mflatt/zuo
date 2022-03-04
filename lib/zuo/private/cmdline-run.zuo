@@ -40,7 +40,7 @@
                                     (loop (append pend-flags (list arg)) args saw cmd))]
            [(or (string=? arg "--help")
                 (string=? arg "-h"))
-            (show-help program finish-spec help-specs)
+            (show-help program finish-spec help-specs flags)
             (exit 0)]
            [(and (> (string-length arg) 2)
                  (= (string-ref arg 0) (char "-"))
@@ -99,7 +99,7 @@
       (handler cmd)
       (error (~a " did not produce a procedure to receive accumulated state"))))
 
-(define (show-help program finish-spec help-specs)
+(define (show-help program finish-spec help-specs flags)
   (displayln
    (~a "usage: " program " [<option> ...]"
        (let ([s (spec->expected-string finish-spec)])
@@ -137,7 +137,7 @@
                          (car text)))
           (loop (cdr text))))
       (loop (cdr help-specs) key)))
-  (display (~a "  --help, -h\n"
+  (display (~a "  --help" (if (assoc "-h" flags) "" ", -h") "\n"
                "     Show this help\n"
                "  --\n"
                "     Do not treat any remaining argument as a switch (at this level)\n"

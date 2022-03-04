@@ -12,6 +12,7 @@
          assoc
          member
          remove
+         sort
 
          call/comp
 
@@ -35,6 +36,9 @@
          displayln
          file->string
          display-to-file
+
+         string<?
+         string->integer
 
          string-split
          string-join
@@ -102,6 +106,21 @@
                             (cdr lst)
                             (cons (car lst) (remove (cdr lst))))]))])
     (remove lst)))
+
+(define (sort ls less-than?)
+  (unless (list? ls) (arg-error 'sort "list" ls))
+  (unless (procedure? less-than?) (arg-error 'sort "procedure" less-than?))
+  (let sort ([ls ls] [len (length ls)])
+    (cond
+      [(< len 2) ls]
+      [else (let ([half (quotient len 2)])
+              (let merge ([a (sort (list-tail ls half) (- len half))]
+                          [b (sort (list-tail (reverse ls) (- len half)) half)])
+                (cond
+                  [(null? a) b]
+                  [(null? b) a]
+                  [(less-than? (car b) (car a)) (cons (car b) (merge a (cdr b)))]
+                  [else (cons (car a) (merge (cdr a) b))])))])))
 
 (define (call/comp proc)
   (unless (procedure? proc) (arg-error 'call/comp "procedure" proc))
@@ -266,6 +285,38 @@
   (define fd (fd-open-output path options))
   (fd-write fd str)
   (fd-close fd))
+
+(define (string<? a b)
+  (unless (string? a) (arg-error 'string<? "string" a))
+  (unless (string? b) (arg-error 'string<? "string" b))
+  (let string<? ([i 0])
+    (cond
+      [(= i (string-length a)) (< i (string-length b))]
+      [(= i (string-length b)) #t]
+      [(< (string-ref a i) (string-ref b i)) #t]
+      [(> (string-ref a i) (string-ref b i)) #f]
+      [else (string<? (+ i 1))])))
+
+(define (string->integer s)
+  (unless (string? s) (arg-error 'string->integer "string" s))
+  (let ([len (string-length s)])
+    (and (not (= len 0))
+         (let ([neg? (= (string-ref s 0) 45)]) ; 45 = (char "-")
+           (and (not (and neg? (= len 1)))
+                (let string->integer ([n 0] [i (if neg? 1 0)])
+                  (cond
+                    [(= i (string-length s))
+                     (if neg? (- n) n)]
+                    [else
+                     (let ([c (string-ref s i)])
+                       (cond
+                         [(and (>= c 48) (<= c 57))
+                          (let ([n (+ (* n 10) (- c 48))])
+                            (if (< n 0)
+                                ;; overflow has one edge care where it's ok
+                                (and neg? (= (+ i 1) (string-length s)) (= n -9223372036854775808) n)
+                                (string->integer n (+ i 1))))]
+                         [else #f]))])))))))
 
 (define (do-string-split who str sep-str)
   (let* ([sep-len (string-length sep-str)]

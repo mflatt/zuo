@@ -392,11 +392,9 @@
    :init opts
    :once-each
    [opts ("-j" "--jobs") n "Use <n> parallel jobs"
-         (let ([v (read-from-string-all n)])
-           (if (and (= 1 (length v))
-                    (integer? (car v))
-                    (> (car v) 0))
-               (hash-set opts 'jobs (car v))
+         (let ([v (string->integer n)])
+           (if (and v (> v 0))
+               (hash-set opts 'jobs v)
                (error "not a positive integer" n)))]
    :args
    ([target (~a (target-name (car targets)))])
@@ -412,10 +410,10 @@
            [t-len (string-length t-name)])
       (and (>= t-len len)
            (let ([start (- t-len len)])
-             (string=? name (substring name start (string-length name)))
+             (string=? name (substring t-name start))
              (or (= t-len len)
-                 (= (char "/") (string-ref name (- start 1)))
-                 (= (char "\\") (string-ref name (- start 1))))))))
+                 (= (char "/") (string-ref t-name (- start 1)))
+                 (= (char "\\") (string-ref t-name (- start 1))))))))
   (ormap (lambda (t) (and (matches? (target-name t)) t))
          targets))
 

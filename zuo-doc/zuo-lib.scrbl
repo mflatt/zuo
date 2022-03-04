@@ -110,11 +110,11 @@ dependency sent to @racket[build/recur] is recorded as a dependency of
 the target in addition to the ones that were reported by
 @racket[_get-deps]. Any changes in these additional targets trigger a
 rebuild of the target in the future. Meanwhile, the build system
-assumes that if none of the dependencies from @racket[_get-deps]
-change, then the set of additional dependencies discovered by
-@racket[_rebuild] would be the same; that assumption allows the build
-system to skip rediscovery through @racket[_rebuild] if none of the
-dependencies from @racket[_get-deps] have changed.
+assumes that if none of the dependencies change, then the set of
+additional dependencies discovered by @racket[_rebuild] would be the
+same; that assumption allows the build system to skip
+@racket[_rebuild] and its discoveries if none of the dependencies have
+changed.
 
 A @deftech{phony} target is like a regular target, but one that always
 needs to be rebuilt. A typical use of a phony target is to give a name

@@ -387,6 +387,8 @@ Just like @realracket*[caar cadr cdar cddr] from @racketmodname[racket].}
          any/c]
 @defproc[(filter [proc procedure?] [lst list?])
          list?]
+@defproc[(sort [lst list?] [less-than? procedure?])
+         list?]
 )]{
 
 Like @realracket*[map for-each foldl andmap ormap filter] from
@@ -417,13 +419,14 @@ Zuo @deftech{strings} are sequences of bytes.
 @defproc[(string-ref [str string?] [k integer?]) integer?]
 @defproc[(substring [str string?] 
                     [start integer?]
-                    [end integer?]) string?]
+                    [end integer? (string-length str)]) string?]
 @defproc[(string=? [str1 string?] [str2 string?]) boolean?]
 @defproc[(string-ci=? [str1 string?] [str2 string?]) boolean?]
+@defproc[(string<? [str1 string?] [str2 string?]) boolean?]
 )]{
 
 Analogous to @realracket*[string? string string-length string-ref substring
-string=?] from @racketmodname[racket], or more precisely analogous to
+string=? string<?] from @racketmodname[racket], or more precisely analogous to
 @realracket*[bytes? bytes-length bytes-ref subbytes bytes=? bytes-ci=?] from
 @racketmodname[racket].}
 
@@ -432,6 +435,11 @@ string=?] from @racketmodname[racket], or more precisely analogous to
 Returns the two's complement interpretation of four bytes in
 @racket[str] starting at index @racket[k] using the host machine's
 endianness.}
+
+@defproc[(string->integer [str string?]) (or/c integer? #f)]{
+
+Tries to parse @racket[str] as an integer returning @racket[#f] if
+that fails.}
 
 @defproc[(string-sha1 [str string?]) string?]{
 
