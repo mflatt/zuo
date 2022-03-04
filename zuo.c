@@ -3529,7 +3529,7 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
                                          zuo_cons(zuo_string(".zuo"),
                                                   z.o_null))));
 
-  return zuo_build_path2(Z.o_library_path, strobj);
+  return zuo_build_path2(Z.o_library_path, zuo_platform_slashes(strobj));
 }
 
 zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int *_ups, int keep_suffix) {

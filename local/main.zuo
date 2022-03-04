@@ -29,14 +29,16 @@
     (target (at-dir name)
             (lambda (path token)
               (rule (list image_zuo.c
-                          (input-data-target 'config config))
+                          (input-data-target 'config config)
+			  (quote-module-path)
+			  (quote-path "compile.zuo"))
                     (file-sha1 path token)
                     (lambda ()
                       (define l (split-path path))
                       (when (car l) (mkdir* (car l)))
                       (compile-c path
                                  (target-path image_zuo.c)
-                                 (list (~a "-DZUO_LIB_PATH=\"" lib-path "\""))
+                                 (list (~a "-DZUO_LIB_PATH=" lib-path))
                                  config
                                  thread-process-wait)
                       (file-sha1 path token))))))
@@ -46,8 +48,10 @@
         (~a name ".exe")
         name))
 
-  (define zuo-to-run (exe-target (add-exe "to-run/zuo") (build-path srcdir ".." "lib")))
-  (define zuo-to-install (exe-target (add-exe "to-install/zuo") (~a install-prefix "/lib")))
+  (define (as-c-string path) (~s path)) ; probably a good enough approximation
+
+  (define zuo-to-run (exe-target (add-exe "to-run/zuo") (as-c-string (build-path srcdir ".." "lib"))))
+  (define zuo-to-install (exe-target (add-exe "to-install/zuo") (as-c-string (build-path install-prefix "lib"))))
   
   (define zuos-to-run-and-install
     (target 'zuos-to-run-and-install

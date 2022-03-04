@@ -137,6 +137,8 @@
 (define (update-file path new-content)
   (define path-tmp (~a path "-tmp"))
   (display-to-file (string-join (map ~s new-content) "\n") path-tmp :truncate)
+  (when (eq? 'windows (hash-ref (runtime-env) 'system-type))
+    (when (file-exists? path) (rm path)))
   (mv path-tmp path))
 
 ;; Like `hash-set`, but for an association list

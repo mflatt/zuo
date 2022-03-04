@@ -11,9 +11,11 @@
                   "(require \"cycle.zuo\")\n"))
 (fd-close out)
 
-(check (run-zuo `(require ,cycle-file)
+(check (run-zuo `(require ,(if (relative-path? cycle-file)
+			       (build-path (hash-ref (runtime-env) 'dir) cycle-file)
+			       cycle-file))
                 (lambda (status out err)
                   (and (not (= status 0))
                        (equal? out "")
-                       (contains? err "cycle in module loading")))))
+		       (contains? err "cycle in module loading")))))
 

@@ -81,8 +81,13 @@
                   (fd-open-output c-file (hash 'exists 'truncate))
                   (fd-open-output 'stdout (hash))))
   
-  (define lines (string-split zuo.c "\n"))
-  
+  (define lines (let ([l (reverse (string-split zuo.c "\n"))])
+		  ;; splitting on newlines should leave us with an empty last string
+		  ;; that doesn't represent a line
+  		  (reverse (if (and (pair? l) (equal? "" (car l)))
+			       (cdr l)
+			       l))))
+
   (define (~hex v)
     (if (= v 0)
         "0"
@@ -127,6 +132,8 @@
        [else
         (fd-write out (~a line "\n"))]))
    lines)
+
+  (when c-file (fd-close out))
 
   (when deps-h
     (cleanable-cancel deps-h)))
