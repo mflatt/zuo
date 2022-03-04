@@ -3440,6 +3440,20 @@ static zuo_t *zuo_build_path2(zuo_t *pre, zuo_t *post) {
   return zuo_build_path(zuo_cons(pre, zuo_cons(post, z.o_null)));
 }
 
+static zuo_t *zuo_platform_slashes(zuo_t *str) {
+#ifdef ZUO_UNIX
+  return str;
+#endif
+#ifdef ZUO_WINDOWS
+  zuo_intptr_t i;
+  str = zuo_sized_string(ZUO_STRING_PTR(str), ZUO_STRING_LEN(str));
+  for (i = ZUO_STRING_LEN(str); i--; )
+    if (ZUO_STRING_PTR(str)[i] == '/')
+      ZUO_STRING_PTR(str)[i] = '\\';
+  return str;
+#endif
+}
+
 static zuo_t *zuo_split_path(zuo_t *p) {
   zuo_int_t i;
   int non_sep, tail_seps;
@@ -3467,6 +3481,29 @@ static zuo_t *zuo_split_path(zuo_t *p) {
   }
 
   return zuo_cons(z.o_false, p);
+}
+
+static zuo_t *zuo_normalize_input_path(zuo_t *path) {
+  /* normalize slashes and drop "." elements (leaving ".." elements alone) */
+  zuo_t *l = z.o_null;
+  while (1) {
+    zuo_t *p = zuo_split_path(path);
+    if (_zuo_car(p) == z.o_false) {
+      path = _zuo_cdr(p);
+      break;
+    }
+    if (strcmp(ZUO_STRING_PTR(_zuo_cdr(p)), ".") != 0)
+      l = zuo_cons(_zuo_cdr(p), l);
+    path = _zuo_car(p);
+  }
+  while (l != z.o_null) {
+    if (strcmp(ZUO_STRING_PTR(path), ".") == 0)
+      path = _zuo_car(l);
+    else
+      path = zuo_build_path2(path, _zuo_car(l));
+    l = _zuo_cdr(l);
+  }
+  return path;
 }
 
 static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
@@ -3598,6 +3635,7 @@ zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
       else if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), ".") != 0)
         ups--;
     }
+    rel_str = zuo_platform_slashes(rel_str);
     /* if `ups` is non-zero, then `mod_path` must be false */
     while (ups > 0) {
       rel_str = zuo_build_path2(zuo_string(".."), rel_str);
@@ -6185,6 +6223,7 @@ int zuo_main(int argc, char **argv) {
   } else if (load_file[0] != 0) {
     zuo_t *st;
     load_path = zuo_string(load_file);
+    load_path = zuo_normalize_input_path(load_path);
     st = zuo_stat(load_path, z.o_true);
     if ((st != z.o_false)
         && (zuo_trie_lookup(st, zuo_symbol("type")) == zuo_symbol("dir"))) {
