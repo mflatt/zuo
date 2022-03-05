@@ -108,7 +108,7 @@
          (foldl (lambda (name+val table)
                   (define name (car name+val))
                   (define key (string->symbol (if (relative-path? name)
-                                                  (build-normalized-path dir name)
+                                                  (build-path dir name)
                                                   name)))
                   (hash-set table key (deserialize (cdr name+val))))
                 table
@@ -157,7 +157,7 @@
 
 (define (path->absolute-path p)
   (if (relative-path? p)
-      (build-normalized-path (hash-ref (runtime-env) 'dir) p)
+      (build-path (hash-ref (runtime-env) 'dir) p)
       p))
 
 (define (dir-part path)

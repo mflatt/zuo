@@ -570,20 +570,19 @@ Returns @racket[#t] if @racket[v] is a path string, @racket[#f] otherwise.}
 
 Returns @racket[#t] if @racket[v] is a relative path, @racket[#f] otherwise.}
 
-@defproc[(build-path [base path-string?] [rel path-string?] ...) path-string?]{
+@defproc[(build-raw-path [base path-string?] [rel path-string?] ...) path-string?]{
 
 Combines @racket[base] path (absolute or relative) with the relative
 paths @racket[rel], adding path separators as needed.}
 
-@defproc[(build-normalized-path [base path-string?] [rel path-string?]) path-string?]{
+@defproc[(build-path [base path-string?] [rel path-string?] ...) path-string?]{
 
-Similar to @racket[build-path], but any @filepath{.} or @filepath{..}
-element at the start of @racket[rel] is syntactically eliminated as
-much as possible. That is, @filepath{.} elements are dropped, and a
-@filepath{..} element is dropped when a trailing element of
-@racket[base] can be removed. Furthermore, any trailing @filepath{.}
-or @filepath{..} element of at the end of @racket[base] is
-syntactically resolved when exposed via @filepath{..} in @racket[rel].}
+Similar to @racket[build-raw-path], but any @filepath{.} or
+@filepath{..} element in a @racket[rel] is syntactically eliminated,
+and separators in @racket[rel] are normalized. Removing @filepath{..}
+elements may involve syntactically resolving elements at the end of
+@racket[base]. Furthermore, if base is at some point reduced to
+@racket["."], it will not be prefixed on the result.}
 
 @defproc[(split-path [path path-string?]) pair?]{
 
@@ -595,11 +594,12 @@ without trailing separators.}
 
 @defproc[(explode-path [path path-string?]) (listof path-string?)]{
 
-Split @racket[path] into a list of individual path elements.}
+Split @racket[path] into a list of individual path elements by
+repeatedly applying @racket[split-path].}
 
 @defproc[(simple-form-path [path path-string?]) path-string?]{
 
-Syntactically normalized @racket[path] by eliminating @filepath{.} and
+Syntactically normalizes @racket[path] by eliminating @filepath{.} and
 @filepath{..} elements (except for @filepath{..} at the start that
 cannot be eliminated), removing redundant path separators, and making
 all path separators the platform default (on Windows).}
@@ -680,15 +680,10 @@ be at the start, end, or adjacent to another @litchar{/}.
 Returns @racket[#t] if @racket[v] is a @tech{module path}, @racket[#f]
 otherwise.}
 
-@defproc[(module-path-join [base module-path?] [rel-path path-string?]) module-path?]{
+@defproc[(build-module-path [base module-path?] [rel-path path-string?]) module-path?]{
 
-Analogous to @racket[build-path], but for @tech{module paths}. Initial
-@filepath{.} and @filepath{..} elements in @racket[rel-path] combine
-syntactically with path elements at the end of @racket[base], and any
-@filepath{.} or @filepath{..} exposed at the end of @racket[base] (if
-it is a path string) are similarly eliminated syntactically.
-
-The @racket[rel-path] string must end with @litchar{.zou}. The
+Analogous to @racket[build-path], but for @tech{module paths}. The
+@racket[rel-path] string must end with @litchar{.zou}, and the
 characters of @racket[rel-path] must be allowable in a symbol module
 paths, except for a @litchar{.} in @filepath{.} and @filepath{..}
 elements or a @litchar{.zuo} suffix.}

@@ -61,7 +61,7 @@
   (define (as-c-string path) (~s path)) ; probably a good enough approximation
 
   ;; The two executable targets
-  (define zuo-to-run (exe-target "to-run/zuo" (as-c-string (quote-path ".." "lib"))))
+  (define zuo-to-run (exe-target "to-run/zuo" (as-c-string (quote-path ".." ".." "lib"))))
   (define zuo-to-install (exe-target "to-install/zuo" (as-c-string (build-path install-prefix "lib"))))
 
   ;; A phony target to build both executables, which we'll list first

@@ -23,7 +23,6 @@
          explode-path
          simple-form-path
          find-relative-path
-         build-normalized-path
          path-replace-suffix
 
          mkdir*
@@ -152,6 +151,9 @@
       (list (cdr l))
       (append (explode-path (car l)) (list (cdr l)))))
 
+(define (simple-form-path p)
+  (apply build-path (explode-path p)))
+
 (define (dedot-exploded-path p)
   (reverse
    (let dedot ([p (reverse p)] [ups 0])
@@ -161,9 +163,6 @@
        [(equal? (car p) "..") (dedot (cdr p) (+ ups 1))]
        [(= ups 0) (cons (car p) (dedot (cdr p) 0))]
        [else (dedot (cdr p) (- ups 1))]))))
-
-(define (simple-form-path p)
-  (apply build-path (dedot-exploded-path (explode-path p))))
 
 (define (find-relative-path wrt p)
   (unless (path-string? wrt)
@@ -182,26 +181,6 @@
           [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
           [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
       (apply build-path ps)))
-
-;; Like `build-module-path` in that `.` and `..` is normalized at the
-;; start of `path` and as exposed at the end of `base`
-(define (build-normalized-path orig-base path)
-  (unless (path-string? orig-base) (arg-error 'build-normalized-path "path string" orig-base))
-  (unless (path-string? path) (arg-error 'build-normalized-path "path string" path))
-  (let loop ([base orig-base] [elems (explode-path path)])
-    (cond
-      [(null? elems) base]
-      [(string=? base ".") (loop (car elems) (cdr elems))]
-      [(string=? (car elems) ".") (loop base (cdr elems))]
-      [(string=? (car elems) "..")
-       (define l (split-path base))
-       (loop (car l)
-             (cond
-               [(not (car l)) (error "build-normalized-path: too many ups" (list orig-base path))]
-               [(equal? (cdr l) ".") elems]
-               [(equal? (cdr l) "..") (cons ".." elems)]
-               [else (cdr elems)]))]
-      [else (loop (build-path base (car elems)) (cdr elems))])))
 
 (define (path-replace-suffix path-in suffix)
   (unless (path-string? path-in) (arg-error 'path-replace-suffix "path string" path-in))

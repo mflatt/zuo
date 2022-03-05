@@ -325,7 +325,7 @@
                      (cons (input-file-target
                             (let ([path (symbol->string dep-key)])
                               (if (relative-path? path)
-                                  (build-normalized-path target-dir path)
+                                  (build-path target-dir path)
                                   path)))
                            more-sha1s)))
                '()
@@ -422,7 +422,7 @@
   (if dir
       (lambda (path)
         (if (relative-path? path)
-            (build-normalized-path dir path)
+            (build-path dir path)
             path))
       (lambda (path) path)))
 

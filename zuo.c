@@ -3528,70 +3528,6 @@ static zuo_t *zuo_current_directory() {
   return obj;
 }
 
-static zuo_t *zuo_build_path(zuo_t *paths) {
-  zuo_t *pre, *post;
-  zuo_string_t *path;
-  zuo_uint_t len;
-  int add_sep;
-
-  pre = _zuo_car(paths);
-  check_path_string("build-path", pre);
-
-  paths = _zuo_cdr(paths);
-
-  while (1) {
-    if (paths == z.o_null)
-      return pre;
-
-    post = _zuo_car(paths);
-    paths = _zuo_cdr(paths);
-  
-    check_path_string("build-path", post);
-  
-    if (zuo_path_is_absolute(ZUO_STRING_PTR(post)))
-      zuo_fail1w("build-path", "additional path is not relative", post);
-
-    /* add separator beteween `pre` and `post`? */
-    len = ZUO_STRING_LEN(pre);
-    if (ZUO_IS_PATH_SEP(((zuo_string_t *)pre)->s[len-1]))
-      add_sep = 0;
-    else {
-      len += 1;
-      add_sep = 1;
-    }
-    len += ZUO_STRING_LEN(post);
-
-    path = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
-    path->len = len;
-    path->s[len] = 0;
-    len = ZUO_STRING_LEN(pre);
-    memcpy(&path->s, ZUO_STRING_PTR(pre), len);
-    if (add_sep)
-      path->s[len++] = ZUO_PATH_SEP;
-    memcpy(&path->s[len], ZUO_STRING_PTR(post), ZUO_STRING_LEN(post));
-
-    pre = (zuo_t *)path;
-  }  
-}
-
-static zuo_t *zuo_build_path2(zuo_t *pre, zuo_t *post) {
-  return zuo_build_path(zuo_cons(pre, zuo_cons(post, z.o_null)));
-}
-
-static zuo_t *zuo_platform_slashes(zuo_t *str) {
-#ifdef ZUO_UNIX
-  return str;
-#endif
-#ifdef ZUO_WINDOWS
-  zuo_intptr_t i;
-  str = zuo_sized_string(ZUO_STRING_PTR(str), ZUO_STRING_LEN(str));
-  for (i = ZUO_STRING_LEN(str); i--; )
-    if (ZUO_STRING_PTR(str)[i] == '/')
-      ZUO_STRING_PTR(str)[i] = '\\';
-  return str;
-#endif
-}
-
 static zuo_t *zuo_split_path(zuo_t *p) {
   zuo_int_t i;
   int non_sep, tail_seps;
@@ -3621,27 +3557,135 @@ static zuo_t *zuo_split_path(zuo_t *p) {
   return zuo_cons(z.o_false, p);
 }
 
-static zuo_t *zuo_normalize_input_path(zuo_t *path) {
-  /* normalize slashes and drop "." elements (leaving ".." elements alone) */
-  zuo_t *l = z.o_null;
-  while (1) {
-    zuo_t *p = zuo_split_path(path);
-    if (_zuo_car(p) == z.o_false) {
-      path = _zuo_cdr(p);
-      break;
+static zuo_t *zuo_build_raw_path2(zuo_t *pre, zuo_t *post) {
+  zuo_string_t *path;
+  zuo_uint_t len;
+  int add_sep;
+
+  /* add separator beteween `pre` and `post`? */
+  len = ZUO_STRING_LEN(pre);
+  if (ZUO_IS_PATH_SEP(((zuo_string_t *)pre)->s[len-1]))
+    add_sep = 0;
+  else {
+    len += 1;
+    add_sep = 1;
+  }
+  len += ZUO_STRING_LEN(post);
+  
+  path = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
+  path->len = len;
+  path->s[len] = 0;
+  len = ZUO_STRING_LEN(pre);
+  memcpy(&path->s, ZUO_STRING_PTR(pre), len);
+  if (add_sep)
+    path->s[len++] = ZUO_PATH_SEP;
+  memcpy(&path->s[len], ZUO_STRING_PTR(post), ZUO_STRING_LEN(post));
+  
+  return (zuo_t *)path;
+}
+
+static zuo_t *zuo_build_path2(zuo_t *base, zuo_t *rel) {
+  /* resolves "." and ".." elements of `rel` while adding to `base`,
+     potentially also resolving ".." or "." at the end of `base` as
+     needed to normalize the addition; also, if `base` is just ".",
+     possibly after resolving ".."s, then "." is not added to the
+     start of `rel` */
+  zuo_t *exploded = z.o_null;
+  int ups;
+
+  do {
+    zuo_t *l, *p;
+    l = zuo_split_path(rel);
+    exploded = zuo_cons(_zuo_cdr(l), exploded);
+    rel = _zuo_car(l);
+  } while (rel != z.o_false);
+
+  /* count extra ".."s to add to front */
+  ups = 0;
+
+  while (exploded != z.o_null) {
+    zuo_t *elem = _zuo_car(exploded);
+
+    if (!strcmp(ZUO_STRING_PTR(elem), ".")) {
+      /* drop element */
+      exploded = _zuo_cdr(exploded);
+    } else if (!strcmp(ZUO_STRING_PTR(elem), "..")) {
+      /* elem is ".." */
+      zuo_t *l = zuo_split_path(base);
+      zuo_t *base_elem = _zuo_cdr(l);
+      if (!strcmp(ZUO_STRING_PTR(base_elem), ".")) {
+        base = _zuo_car(l);
+        if (base == z.o_false) {
+          ups++;
+          exploded = _zuo_cdr(exploded);
+        }
+      } else if (!strcmp(ZUO_STRING_PTR(base_elem), "..")) {
+        /* shift ".." to `exploded` */
+        exploded = zuo_cons(base_elem, exploded);
+        base = _zuo_car(l);
+      } else {
+        base = _zuo_car(l);
+        exploded = _zuo_cdr(exploded);
+      }
+      if (base == z.o_false)
+        base = zuo_string(".");
+    } else {
+      if (!strcmp(ZUO_STRING_PTR(base), "."))
+        base = elem;
+      else
+        base = zuo_build_raw_path2(base, elem);
+      exploded = _zuo_cdr(exploded);
     }
-    if (strcmp(ZUO_STRING_PTR(_zuo_cdr(p)), ".") != 0)
-      l = zuo_cons(_zuo_cdr(p), l);
-    path = _zuo_car(p);
   }
-  while (l != z.o_null) {
-    if (strcmp(ZUO_STRING_PTR(path), ".") == 0)
-      path = _zuo_car(l);
+
+  while ((ups--) > 0) {
+    if (!strcmp(ZUO_STRING_PTR(base), "."))
+      base = zuo_string("..");
     else
-      path = zuo_build_path2(path, _zuo_car(l));
-    l = _zuo_cdr(l);
+      base = zuo_build_raw_path2(zuo_string(".."), base);
   }
-  return path;
+
+  return base;
+}
+
+static zuo_t *zuo_build_path_multi(const char *who, zuo_t *paths,
+                                   zuo_t *(*build_path2)(zuo_t *, zuo_t *)) {
+  zuo_t *pre, *post;
+  zuo_string_t *path;
+  zuo_uint_t len;
+  int add_sep;
+
+  pre = _zuo_car(paths);
+  check_path_string(who, pre);
+
+  paths = _zuo_cdr(paths);
+
+  while (1) {
+    if (paths == z.o_null)
+      return pre;
+
+    post = _zuo_car(paths);
+    paths = _zuo_cdr(paths);
+  
+    check_path_string(who, post);
+  
+    if (zuo_path_is_absolute(ZUO_STRING_PTR(post)))
+      zuo_fail1w(who, "additional path is not relative", post);
+
+    pre = build_path2(pre, post);
+  }
+}
+
+static zuo_t *zuo_build_raw_path(zuo_t *paths) {
+  return zuo_build_path_multi("build-raw-path", paths, zuo_build_raw_path2);
+}
+
+static zuo_t *zuo_build_path(zuo_t *paths) {
+  return zuo_build_path_multi("build-path", paths, zuo_build_path2);
+}
+
+static zuo_t *zuo_normalize_input_path(zuo_t *path) {
+  return zuo_build_path2(zuo_string("."), path);
 }
 
 static zuo_t *zuo_path_to_complete_path(zuo_t *path) {
@@ -3667,10 +3711,10 @@ zuo_t *zuo_library_path_to_file_path(zuo_t *path) {
                                          zuo_cons(zuo_string(".zuo"),
                                                   z.o_null))));
 
-  return zuo_build_path2(Z.o_library_path, zuo_platform_slashes(strobj));
+  return zuo_build_path2(Z.o_library_path, strobj);
 }
 
-zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int *_ups, int keep_suffix) {
+zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int *_ups, int strip_ups) {
   zuo_int_t i = 0, len = ZUO_STRING_LEN(rel_mod_path);
   unsigned char *s = (unsigned char *)ZUO_STRING_PTR(rel_mod_path);
   int bad = 0, ups = 1, ups_until = 0, saw_non_dot = 0, suffix = 0;
@@ -3716,13 +3760,15 @@ zuo_t *zuo_parse_relative_module_path(const char *who, zuo_t *rel_mod_path, int 
 
   *_ups = ups;
 
-  return zuo_sized_string((char *)s + ups_until,
-                          len - ups_until - (keep_suffix ? 0 : suffix));
+  if (strip_ups)
+    return zuo_sized_string((char *)s + ups_until, len - ups_until - suffix);
+  else
+    return rel_mod_path;
 }
 
-zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
-  const char *who = "module-path-join";
-  int saw_slash = 0, ups = 0, keep_suffix;
+zuo_t *zuo_build_module_path(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
+  const char *who = "build-module-path";
+  int saw_slash = 0, ups = 0, strip_ups;
   zuo_t *rel_str;
 
   check_module_path(who, rel_mod_path);
@@ -3736,9 +3782,9 @@ zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
   if (zuo_path_is_absolute(ZUO_STRING_PTR(rel_mod_path)))
     return rel_mod_path;
 
-  keep_suffix = (base_mod_path->tag == zuo_string_tag);
+  strip_ups = (base_mod_path->tag == zuo_symbol_tag);
 
-  rel_str = zuo_parse_relative_module_path(who, rel_mod_path, &ups, keep_suffix);
+  rel_str = zuo_parse_relative_module_path(who, rel_mod_path, &ups, strip_ups);
 
   if (base_mod_path->tag == zuo_symbol_tag) {
     zuo_t *mod_path = ((zuo_symbol_t *)base_mod_path)->str;
@@ -3761,28 +3807,10 @@ zuo_t *zuo_module_path_join(zuo_t *base_mod_path, zuo_t *rel_mod_path) {
 
     return mod_path;
   } else {
-    zuo_t *mod_path = base_mod_path;
-    while (ups > 0) {
-      zuo_t *l;
-      if (mod_path == z.o_false)
-        break;
-      l = zuo_split_path(mod_path);
-      mod_path = _zuo_car(l);
-      if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), "..") == 0)
-        ups++;
-      else if (strcmp(ZUO_STRING_PTR(_zuo_cdr(l)), ".") != 0)
-        ups--;
-    }
-    rel_str = zuo_platform_slashes(rel_str);
-    /* if `ups` is non-zero, then `mod_path` must be false */
-    while (ups > 0) {
-      rel_str = zuo_build_path2(zuo_string(".."), rel_str);
-      ups--;
-    }
-    if (mod_path == z.o_false)
-      return rel_str;
-    else
-      return zuo_build_path2(mod_path, rel_str);
+    base_mod_path = _zuo_car(zuo_split_path(base_mod_path));
+    if (base_mod_path == z.o_false)
+      base_mod_path = zuo_string(".");
+    return zuo_build_path2(base_mod_path, rel_str);
   }
 }
 
@@ -6250,9 +6278,10 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVE3("opaque-ref", zuo_opaque_ref);
 
   ZUO_TOP_ENV_SET_PRIMITIVEN("build-path", zuo_build_path, -2);
+  ZUO_TOP_ENV_SET_PRIMITIVEN("build-raw-path", zuo_build_raw_path, -2);
   ZUO_TOP_ENV_SET_PRIMITIVE1("split-path", zuo_split_path);
   ZUO_TOP_ENV_SET_PRIMITIVE1("relative-path?", zuo_relative_path_p);
-  ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("build-module-path", zuo_build_module_path);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_make_variable);
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
@@ -6485,10 +6514,10 @@ int zuo_main(int argc, char **argv) {
     lib_path = zuo_string(zuo_lib_path);
     if (zuo_relative_path_p(lib_path) == z.o_true)
       lib_path = zuo_build_path2(_zuo_car(zuo_split_path(exe_path)),
-                                         lib_path);
+                                 lib_path);
   } else
     lib_path = z.o_false;
-
+  
   if (load_file == NULL) {
     load_file = "main.zuo";
     load_path = zuo_string(load_file);

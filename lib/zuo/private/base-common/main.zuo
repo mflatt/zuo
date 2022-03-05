@@ -8,8 +8,8 @@
          "define.zuo"
          "opt-lambda.zuo"
          "quasiquote.zuo"
-         "more-syntax.zuo"
          "../more.zuo"
+         "more-syntax.zuo"
          "struct.zuo")
 
 (provide (all-from-out "and-or.zuo"
@@ -20,6 +20,6 @@
                        "define.zuo"
                        "opt-lambda.zuo"
                        "quasiquote.zuo"
-                       "more-syntax.zuo"
                        "../more.zuo"
+                       "more-syntax.zuo"
                        "struct.zuo"))
