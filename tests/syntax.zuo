@@ -13,8 +13,8 @@
 
 (check (syntax-e (quote-syntax x)) 'x)
 (check (syntax-e 'x) 'x)
-(check-fail (syntax-e #f) "not a syntax object")
-(check-fail (syntax-e '(x y)) "not a syntax object")
+(check-arg-fail (syntax-e #f) "not a syntax object")
+(check-arg-fail (syntax-e '(x y)) "not a syntax object")
 
 (check (syntax->datum 'x) 'x)
 (check (syntax->datum (quote-syntax x)) 'x)
@@ -24,12 +24,12 @@
 (check (datum->syntax 'x 'y) 'y)
 (check (datum->syntax (quote-syntax x) 'y) 'y)
 (check (syntax-e (datum->syntax (quote-syntax x) 'y)) 'y)
-(check-fail (datum->syntax '(x) 'y) "not a syntax object")
+(check-arg-fail (datum->syntax '(x) 'y) "not a syntax object")
 
 (check (bound-identifier=? 'x 'x))
 (check (bound-identifier=? (quote-syntax x) (quote-syntax x)))
 (check (not (bound-identifier=? (quote-syntax x) (quote-syntax y))))
 (check (not (bound-identifier=? 'x (quote-syntax x))))
-(check-fail (bound-identifier=? '(x) 'x) "not a syntax object")
-(check-fail (bound-identifier=? 'x '(x)) "not a syntax object")
+(check-arg-fail (bound-identifier=? '(x) 'x) "not a syntax object")
+(check-arg-fail (bound-identifier=? 'x '(x)) "not a syntax object")
 

@@ -84,3 +84,10 @@
 (check (andmap (lambda (k)
                  (eq? (kernel-eval k) (hash-ref (kernel-env) k #f)))
                (hash-keys (kernel-env))))
+
+(check (kernel-eval
+        (let loop ([i 10000])
+          (if (= i 0)
+              "ok"
+              `(kernel-eval ',(loop (- i 1))))))
+       "ok")

@@ -77,3 +77,6 @@
 (check-sub #f)
 (check-sub #f)
 (check-sub #t)
+
+(check-arg-fail (cleanable-file 10) not-path)
+(check-arg-fail (cleanable-cancel 10) "cleanable handle")

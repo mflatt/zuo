@@ -12,6 +12,7 @@
 (check (directory-exists? tmp-dir))
 (check (file-exists? tmp-dir) #f)
 (check (link-exists? tmp-dir) #f)
+(check-arg-fail (stat 10) not-path)
 
 (define now (current-time))
 
@@ -27,6 +28,10 @@
 (check (file-exists? exists2.txt))
 (check (directory-exists? exists2.txt) #f)
 (check (link-exists? exists2.txt) #f)
+
+(check-arg-fail (file-exists? 10) not-path)
+(check-arg-fail (directory-exists? 10) not-path)
+(check-arg-fail (link-exists? 10) not-path)
 
 (let ([s (stat exists.txt #f)])
   (check (hash? s))
@@ -48,6 +53,7 @@
 (let ([l (ls tmp-dir)])
   (check (pair? (member "exists.txt" l)))
   (check (pair? (member "exists2.txt" l))))
+(check-arg-fail (ls 10) not-path)
 
 (rm exists2.txt)
 (check (stat exists2.txt #t) #f)
@@ -59,6 +65,7 @@
 (check (directory-exists? sub-dir) #f)
 (check (mkdir sub-dir) (void))
 (check (directory-exists? sub-dir))
+(check-arg-fail (mkdir 10) not-path)
 
 (define sub-sub-dir (build-path sub-dir "subsub"))
 (check (directory-exists? sub-sub-dir) #f)
@@ -87,16 +94,21 @@
   (check (pair? (member "cherry" l)))
   (check (pair? (member "eclair" l)))
   (check (not (member "banana" l))))
+(check-arg-fail (mv 10 "x") not-path)
+(check-arg-fail (mv "x" 10) not-path)
 
 (check-fail (rm ,sub-dir) "failed")
+(check-arg-fail (rm 10) not-path)
 
 (rm* sub-dir)
 (check (directory-exists? sub-sub-dir) #f)
 (check (directory-exists? sub-dir) #f)
+(check-arg-fail (rm* 10) not-path)
 
 (mkdir* sub-sub-dir)
 (check (directory-exists? sub-sub-dir))
 (check (directory-exists? sub-dir))
+(check-arg-fail (mkdir* 10) not-path)
 
 (when (eq? 'unix (hash-ref (runtime-env) 'system-type))
   (let ([fd (fd-open-output (build-path sub-dir "high") :can-update)])
@@ -137,5 +149,9 @@
   (check (get (build-path sub-dir "high")) "HIGH")
   
   (void))
+
+(check-arg-fail (readlink 10) not-path)
+(check-arg-fail (ln 10 "a") not-path)
+(check-arg-fail (ln "a" 10) not-path)
 
 (rm* sub-dir)

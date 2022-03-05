@@ -2609,7 +2609,7 @@ static zuo_t *zuo_bitwise_and(zuo_t *n, zuo_t *m) {
 }
 
 static zuo_t *zuo_bitwise_ior(zuo_t *n, zuo_t *m) {
-  check_ints(n, m, "bitwise-or");
+  check_ints(n, m, "bitwise-ior");
   return zuo_integer(ZUO_UINT_I(n) | ZUO_UINT_I(m));
 }
 
@@ -2788,6 +2788,11 @@ static zuo_t *zuo_append(zuo_t *objs) {
 
 static zuo_t *zuo_variable_p(zuo_t *var) {
   return (var->tag == zuo_variable_tag) ? z.o_true : z.o_false;
+}
+
+static zuo_t *zuo_make_variable(zuo_t *name) {
+  check_symbol("variable", name);
+  return zuo_variable(name);
 }
 
 static zuo_t *zuo_variable_ref(zuo_t *var) {
@@ -6218,7 +6223,7 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("relative-path?", zuo_relative_path_p);
   ZUO_TOP_ENV_SET_PRIMITIVE2("module-path-join", zuo_module_path_join);
 
-  ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_variable);
+  ZUO_TOP_ENV_SET_PRIMITIVE1("variable", zuo_make_variable);
   ZUO_TOP_ENV_SET_PRIMITIVE1("variable-ref", zuo_variable_ref);
   ZUO_TOP_ENV_SET_PRIMITIVE2("variable-set!", zuo_variable_set);
 

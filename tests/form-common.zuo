@@ -171,9 +171,9 @@
 (check `(1 ,@4) '(1 . 4))
 (check `unquote 'unquote)
 (check `(1 . unquote) '(1 . unquote))
-(check-fail* 'unquote "misplaced syntax")
-(check-fail* 'unquote-splicing "misplaced syntax")
-(check-fail* '`(1 . ,@(list 2 3)) "misplaced splicing unquote")
+(check-fail* 'unquote #f "misplaced syntax")
+(check-fail* 'unquote-splicing #f "misplaced syntax")
+(check-fail* '`(1 . ,@(list 2 3)) #f "misplaced splicing unquote")
 
 (check (module-path? (quote-module-path)))
 (check (pair? (member (cdr (split-path (quote-module-path))) '("form.zuo" "form-hygienic.zuo"))))

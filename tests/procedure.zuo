@@ -20,7 +20,7 @@
 (check-fail (apply +) arity)
 (check-fail (apply '(+ 1 2)) arity)
 (check-fail (apply apply (cons + '(1 2))) arity)
-(check-fail (apply + 1) "not a list")
+(check-arg-fail (apply + 1) "not a list")
 
 (check (call/cc (lambda (k) (+ 1 (k 'ok)))) 'ok)
 (check (let ([f (call/cc (lambda (k) k))])
@@ -59,4 +59,4 @@
          (list (k 30)
                (k 40)))
        (list 61 81))
-(check-fail (call/comp 1) "not a procedure")
+(check-arg-fail (call/comp 1) "not a procedure")

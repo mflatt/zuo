@@ -375,11 +375,11 @@ Just like @realracket*[caar cadr cdar cddr] from @racketmodname[racket].}
 
 
 @deftogether[(
-@defproc[(map [proc procedure?] [lst list?] ...+)
+@defproc[(map [proc procedure?] [lst list?])
          list?]
-@defproc[(for-each [proc procedure?] [lst list?] ...+)
+@defproc[(for-each [proc procedure?] [lst list?])
          void?]
-@defproc[(foldl [proc procedure?] [init any/c] [lst list?] ...+)
+@defproc[(foldl [proc procedure?] [init any/c] [lst list?])
          any/c]
 @defproc[(andmap [proc procedure?] [lst list?])
           any/c]
@@ -392,9 +392,14 @@ Just like @realracket*[caar cadr cdar cddr] from @racketmodname[racket].}
 )]{
 
 Like @realracket*[map for-each foldl andmap ormap filter] from
-@racketmodname[racket], except that @racket[andmap] and @racket[ormap]
-are more restricted and do not apply @racket[proc] to the last
-argument in tail position.}
+@racketmodname[racket], but restricted to a single list.}
+
+@defproc[(zip [lst1 list?] [lst2 list?])
+         (listof list?)]{
+
+Returns a list of two-element lists, where the first element is from
+@racket[lst1] and the second is from @racket[lst2]. The lists must be
+of the same length.}
 
 @deftogether[(
 @defproc[(member [v any/c] [lst list?])

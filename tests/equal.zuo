@@ -43,10 +43,10 @@
 
 (check-fail (= 1 'apple) not-integer)
 (check-fail (= 'apple 1) not-integer)
-(check-fail (string=? 1 "apple") "not a string")
-(check-fail (string=? "apple" 1) "not a string")
-(check-fail (string-ci=? 1 "apple") "not a string")
-(check-fail (string-ci=? "apple" 1) "not a string")
+(check-arg-fail (string=? 1 "apple") not-string)
+(check-arg-fail (string=? "apple" 1) not-string)
+(check-arg-fail (string-ci=? 1 "apple") not-string)
+(check-arg-fail (string-ci=? "apple" 1) not-string)
 
 (check (eq? (void) (void)))
 (check (void? (void)))

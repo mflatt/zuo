@@ -3,6 +3,7 @@
 (provide check
          check-fail
          check-fail*
+         check-arg-fail
          check-output
 
          run-zuo*
@@ -13,6 +14,7 @@
          arity
          not-integer
          not-string
+         not-path
 
          tmp-dir)
 
@@ -56,7 +58,7 @@
          (or (string=? (substring err i (+ i (string-length msg))) msg)
              (loop (+ i 1))))))
 
-(define (check-fail* e msg)
+(define (check-fail* e who msg)
   (run-zuo
    e
    (lambda (status out err)
@@ -67,12 +69,30 @@
      (unless (contains? err msg)
        (error (~a "check-fail: didn't find expected message: " (~s e)
                   "\n  expected: " (~s msg)
-                  "\n  stderr: " (~s err)))))))
+                  "\n  stderr: " (~s err))))
+     (when who
+       (let* ([who (symbol->string who)]
+              [len (string-length who)])
+         (unless (and (> (string-length err) len)
+                      (string=? (substring err 0 len) who))
+           (error (~a "check-fail: didn't find expected who: " (~s e)
+                      "\n  expected: " who
+                      "\n  stderr: " (~s err)))))))))
 
 (define-syntax (check-fail stx)
   (unless (and (list? stx) (= 3 (length stx))) (bad-syntax stx))
   (list (quote-syntax check-fail*)
         (list (quote-syntax quasiquote) (cadr stx))
+        #f
+        (cadr (cdr stx))))
+
+(define-syntax (check-arg-fail stx)
+  (unless (and (list? stx) (= 3 (length stx))
+               (pair? (cadr stx)) (identifier? (car (cadr stx))))
+    (bad-syntax stx))
+  (list (quote-syntax check-fail*)
+        (list (quote-syntax quasiquote) (cadr stx))
+        (list (quote-syntax quote) (car (cadr stx)))
         (cadr (cdr stx))))
 
 (define (check-output* e stdout stderr)
@@ -112,6 +132,7 @@
 (define arity "wrong number of arguments")
 (define not-integer "not an integer")
 (define not-string "not a string")
+(define not-path "not a path string")
 
 (define tmp-dir (build-path (car (split-path (quote-module-path))) ".." "build" "tmp"))
 (mkdir* tmp-dir)

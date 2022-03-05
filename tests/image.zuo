@@ -26,3 +26,5 @@
 
 (try-dump "zuo")
 (try-dump "zuo/hygienic")
+
+(check-arg-fail (dump-image-and-exit "oops") "open output file")

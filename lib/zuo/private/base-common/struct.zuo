@@ -21,10 +21,6 @@
     (unless (and (list? fields)
                  (andmap identifier? fields))
       (bad-syntax stx))
-    (define indexes (let loop ([fields fields] [i 0])
-                      (if (null? fields)
-                          '()
-                          (cons i (loop (cdr fields) (+ i 1))))))
     (define key `(,(quote-syntax quote)
                   ,(string->uninterned-symbol (symbol->string (syntax-e name)))))
     (define name? (string->symbol (datum->syntax name (~a (syntax-e name) "?"))))
@@ -37,7 +33,11 @@
       (,(quote-syntax define) (,name? v) (,(quote-syntax and)
                                           (,(quote-syntax opaque-ref) ,key v #f)
                                           #t))
-      ,@(map (lambda (field index)
+      ,@(let loop ([fields fields] [index 0])
+          (cond
+            [(null? fields) '()]
+            [else
+             (let ([field (car fields)])
                (let ([ref (datum->syntax field (string->symbol (~a (syntax-e name)
                                                                    "-"
                                                                    (syntax-e field))))]
@@ -56,11 +56,12 @@
                                                  (,(quote-syntax quote) ,(car head))
                                                  ,(symbol->string (syntax-e name))
                                                  v))))))
-                 `(,(quote-syntax begin)
-                   ,(mk `(,ref v) `(,(quote-syntax list-ref) c ,index))
-                   ,(mk `(,set v a) `(,(quote-syntax replace) c ,index a ,key)))))
-             fields
-             indexes))))
+                 (cons
+                  `(,(quote-syntax begin)
+                    ,(mk `(,ref v) `(,(quote-syntax list-ref) c ,index))
+                    ,(mk `(,set v a) `(,(quote-syntax replace) c ,index a ,key)))
+                  (loop (cdr fields)
+                        (+ index 1)))))])))))
 
 (define replace
   (lambda (l pos v key)

@@ -12,7 +12,8 @@
          foldl
          andmap
          ormap
-         filter)
+         filter
+         zip)
 
 (define list*
   (lambda (val . vals)
@@ -22,94 +23,99 @@
 
 (define list-ref
   (lambda (l n)
-    (unless (and (integer? n) (>= n 0))
-      (error "list-ref: not an index" n))
-    (letrec ([ref (lambda (n l)
-                    (cond
-                      [(not (pair? l)) (error "list-ref: encountered a non-pair" l)]
-                      [(= n 0) (car l)]
-                      [else (ref (- n 1) (cdr l))]))])
-      (ref n l))))
+    (unless (and (integer? n) (>= n 0)) (arg-error 'list-ref "index" n))
+    (letrec ([list-ref (lambda (n l)
+                         (cond
+                           [(not (pair? l)) (error "list-ref: encountered a non-pair" l)]
+                           [(= n 0) (car l)]
+                           [else (list-ref (- n 1) (cdr l))]))])
+      (list-ref n l))))
 
 (define list-tail
   (lambda (l n)
-    (unless (and (integer? n) (>= n 0))
-      (error "list-tail: not an index" n))
-    (letrec ([ref (lambda (n l)
-                    (cond
-                      [(= n 0) l]
-                      [(pair? l) (ref (- n 1) (cdr l))]
-                      [else (error "list-tail: encountered a non-pair" l)]))])
-      (ref n l))))
-
-(define map
-  (lambda (f lst . lsts)
-    (unless (procedure? f) (error "map: not a procedure" f))
-    (unless (list? lst) (error "map: not a list" lst))
-    (cond
-      [(null? lsts)
-       (letrec ([map (lambda (lst)
-                       (if (null? lst)
-                           '()
-                           (cons (f (car lst)) (map (cdr lst)))))])
-         (map lst))]
-      [else
-       (letrec ([check (lambda (lsts)
-                         (unless (null? lsts)
-                           (if (list? (car lsts))
-                               (check (cdr lsts))
-                               (error "map: not a list" (car lsts)))))])
-         (check lsts))
-       (letrec ([maps (lambda (lsts)
-                        (if (null? (car lsts))
-                            '()
-                            (cons (apply f (map car lsts))
-                                  (maps (map cdr lsts)))))])
-         (maps (cons lst lsts)))])))
-
-(define for-each
-  (lambda (f lst . lsts)
-    (void (apply map (cons f (cons lst lsts))))))
+    (unless (and (integer? n) (>= n 0)) (arg-error 'list-tail "index" n))
+    (letrec ([list-tail (lambda (n l)
+                          (cond
+                            [(= n 0) l]
+                            [(pair? l) (list-tail (- n 1) (cdr l))]
+                            [else (error "list-tail: encountered a non-pair" l)]))])
+      (list-tail n l))))
 
 (define foldl
-  (lambda (f init lst . lsts)
-    (unless (procedure? f) (error "foldl: not a procedure" f))
-    (unless (list? lst) (error "foldl: not a list" lst))
-    (cond
-      [(null? lsts)
-       (letrec ([fold (lambda (accum lst)
-                        (if (null? lst)
-                            accum
-                            (fold (f (car lst) accum) (cdr lst))))])
-         (fold init lst))]
-      [else
-       (letrec ([check (lambda (lsts)
-                         (unless (null? lsts)
-                           (if (list? (car lsts))
-                               (check (cdr lsts))
-                               (error "foldl: not a list" (car lsts)))))])
-         (check lsts))
-       (letrec ([fold (lambda (accum lsts)
-                        (if (null? (car lsts))
-                            accum
-                            (fold (apply f (append (map car lsts) (list accum)))
-                                  (map cdr lsts))))])
-         (fold init (cons lst lsts)))])))
+  (lambda (f init lst)
+    (unless (procedure? f) (arg-error 'foldl "procedure" f))
+    (unless (list? lst) (arg-error 'foldl "list" lst))
+    (letrec ([foldl (lambda (accum lst)
+                      (if (null? lst)
+                          accum
+                          (foldl (f (car lst) accum) (cdr lst))))])
+      (foldl init lst))))
+
+;; Other functions could be written with `foldl`, but we write them
+;; directly so that a more helpful name shows up stack traces
+
+(define map
+  (lambda (f lst)
+    (unless (procedure? f) (arg-error 'map "procedure" f))
+    (unless (list? lst) (arg-error 'map "list" lst))
+    (letrec ([map (lambda (lst)
+                    (if (null? lst)
+                        '()
+                        (cons (f (car lst)) (map (cdr lst)))))])
+      (map lst))))
+
+(define for-each
+  (lambda (f lst)
+    (unless (procedure? f) (arg-error 'for-each "procedure" f))
+    (unless (list? lst) (arg-error 'for-each "list" lst))
+    (letrec ([for-each (lambda (lst)
+                         (unless (null? lst)
+                           (f (car lst))
+                           (for-each (cdr lst))))])
+      (for-each lst))))
 
 (define andmap
   (lambda (f lst)
-    (unless (procedure? f) (error "andmap: not a procedure" f))
-    (unless (list? lst) (error "andmap: not a list" lst))
-    (foldl (lambda (v a) (and a (f v))) #t lst)))
+    (unless (procedure? f) (arg-error 'andmap "procedure" f))
+    (unless (list? lst) (arg-error 'andmap "list" lst))
+    (letrec ([andmap (lambda (lst)
+                       (cond
+                         [(null? lst) #t]
+                         [(null? (cdr lst)) (f (car lst))]
+                         [else (and (f (car lst)) (andmap (cdr lst)))]))])
+      (andmap lst))))
 
 (define ormap
   (lambda (f lst)
-    (unless (procedure? f) (error "ormap: not a procedure" f))
-    (unless (list? lst) (error "ormap: not a list" lst))
-    (foldl (lambda (v a) (or a (f v))) #f lst)))
+    (unless (procedure? f) (arg-error 'ormap "procedure" f))
+    (unless (list? lst) (arg-error 'ormap "list" lst))
+    (letrec ([ormap (lambda (lst)
+                      (cond
+                        [(null? lst) #f]
+                        [(null? (cdr lst)) (f (car lst))]
+                        [else (or (f (car lst)) (ormap (cdr lst)))]))])
+      (ormap lst))))
 
 (define filter
   (lambda (f lst)
-    (unless (procedure? f) (error "filter: not a procedure" f))
-    (unless (list? lst) (error "filter: not a list" lst))
-    (reverse (foldl (lambda (v a) (if (f v) (cons v a) a)) '() lst))))
+    (unless (procedure? f) (arg-error 'filter "procedure" f))
+    (unless (list? lst) (arg-error 'filter "list" lst))
+    (letrec ([filter (lambda (lst)
+                       (if (null? lst)
+                           '()
+                           (if (f (car lst))
+                               (cons (car lst) (filter (cdr lst)))
+                               (filter (cdr lst)))))])
+      (filter lst))))
+
+(define zip
+  (lambda (lst1 lst2)
+    (unless (list? lst1) (arg-error 'zip "list" lst1))
+    (unless (list? lst2) (arg-error 'zip "list" lst2))
+    (unless (= (length lst1) (length lst2)) (arg-error 'zip "lists are of different lengths" (list lst1 lst2)))
+    (letrec ([zip (lambda (lst1 lst2)
+                    (if (null? lst1)
+                        '()
+                        (cons (list (car lst1) (car lst2))
+                              (zip (cdr lst1) (cdr lst2)))))])
+      (zip lst1 lst2))))

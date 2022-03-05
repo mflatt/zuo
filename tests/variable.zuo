@@ -19,3 +19,5 @@
               (variable-set! a 'home))
             "variable already has a value")
 (check-fail (variable-set! 'alice 'home) "not a variable")
+
+(check-arg-fail (variable 10) "not a symbol")
