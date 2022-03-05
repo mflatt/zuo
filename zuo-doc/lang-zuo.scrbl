@@ -725,11 +725,12 @@ value.}
 
 @section{Reading and Writing Objects}
 
-@defproc[(read-from-string-all [str string?] [start integer? 0]) list?]{
+@defproc[(string-read [str string?] [start integer? 0] [where any/c #f]) list?]{
 
 Reads all S-expressions in @racket[str], starting at index
 @racket[start] and returning a list of the S-expressions (in order as
-they appeared in the string).}
+they appeared in the string). The @racket[where] argument, if not
+@racket[#f], is used to report the source of errors.}
 
 
 @deftogether[(

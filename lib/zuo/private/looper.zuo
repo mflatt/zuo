@@ -102,7 +102,7 @@
                  s))))
       (hash 'read-and-eval
             (lambda (str start mod-path)
-              (let ([es (read-from-string-all str start)])
+              (let ([es (string-read str start mod-path)])
                 (if (= 1 (length es))
                     (kernel-eval (convert (car es)))
                     (error "looper: only one expression allowed"))))))))

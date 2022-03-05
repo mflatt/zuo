@@ -101,7 +101,7 @@ in @racketmodname[zuo/kernel] (and the values originate there):
 
   process process-status process-wait string->shell shell->strings
 
-  read-from-string-all ~v ~a ~s alert error arity-error arg-error 
+  string-read ~v ~a ~s alert error arity-error arg-error 
 
   kernel-env kernel-eval module->hash dump-image-and-exit exit
   suspend-signal resume-signal

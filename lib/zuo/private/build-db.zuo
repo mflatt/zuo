@@ -59,11 +59,11 @@
   (define tc-path (tc-file-path dir))
   (define db-content
     (if (file-exists? db-path)
-        (read-from-string-all (file->string db-path))
+        (string-read (file->string db-path) 0 db-path)
         '()))
   (define tc-content
     (if (file-exists? tc-path)
-        (read-from-string-all (file->string tc-path))
+        (string-read (file->string tc-path) 0 tc-path)
         '()))
   (define dep-sha1s-l (hash->list (cdr ts)))
   (define new-db-content (reassoc (list* name (car ts) dep-sha1s-l) db-content))
@@ -102,7 +102,7 @@
        (suspend-signal) ; don't lose the file as a result of Ctl-C
        (define c-handle (cleanable-file path))
        (define content (if (file-exists? path)
-                           (read-from-string-all (file->string path))
+                           (string-read (file->string path) 0 path)
                            '()))
        (define new
          (foldl (lambda (name+val table)

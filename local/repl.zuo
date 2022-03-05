@@ -16,7 +16,7 @@
   (define (read-and-eval s)
     (for-each (lambda (e)
                 (alert (~v (kernel-eval e))))
-              (read-from-string-all s 0)))
+              (string-read s)))
   (cond
     [line-end
      (read-and-eval (substring pending 0 line-end))

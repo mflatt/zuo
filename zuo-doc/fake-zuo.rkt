@@ -171,7 +171,7 @@
     arg-error
     display displayln
 
-    read-from-string-all
+    string-read
     module->hash
     module-path-join
     kernel-env

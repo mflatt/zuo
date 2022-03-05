@@ -869,7 +869,7 @@
        [make-read-and-eval
         (lambda (make-initial-state)
           (lambda (str start mod-path)
-            (let* ([es (read-from-string-all (substring str start (string-length str)))]
+            (let* ([es (string-read (substring str start (string-length str)))]
                    [mod-scope (make-scope "module")]
                    [ctx (identifier 'module (set-add core-sc mod-scope))]
                    [es (map (lambda (e) (datum->syntax ctx e)) es)]

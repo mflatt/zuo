@@ -4,7 +4,7 @@
 
 (define (make-read-and-eval make-initial-state)
   (lambda (str start mod-path)
-    (let* ([es (read-from-string-all str start)]
+    (let* ([es (string-read str start mod-path)]
            [ctx (make-module-context mod-path)]
            [es (map (lambda (e) (datum->syntax ctx e)) es)]
            [parse (make-parse ctx mod-path)]

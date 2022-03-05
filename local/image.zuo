@@ -64,7 +64,7 @@
                        cmd))
         ;; register each source module as a discovered dependency:
         (for-each (lambda (p) (build/recur p token))
-                  (read-from-string-all (file->string deps-file)))
+                  (string-read (file->string deps-file) 0 deps-file))
         ;; state of the output file after building:
         (file-sha1 path token))))))
 
