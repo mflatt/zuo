@@ -80,9 +80,6 @@ typedef HANDLE zuo_raw_handle_t;
 #endif
 static const char *zuo_lib_path = ZUO_LIB_PATH;
 
-/* for read and print: */
-#define ZUO_RECUR_LIMIT 100
-
 #define MIN_HEAP_SIZE (8*1024*1024)
 
 #define ALLOC_ALIGN(i) (((i) + (sizeof(zuo_intptr_t) - 1)) & ~(sizeof(zuo_intptr_t) -1))
@@ -1405,184 +1402,233 @@ static void out_string(zuo_out_t *out, const char *s) {
   }
 }
 
-static void zuo_out(zuo_out_t *out, zuo_t *obj, int depth, zuo_print_mode_t mode) {
-  if (obj == z.o_undefined)
-    out_string(out, "#<undefined>");
-  else if (obj == z.o_null) {
-    if (mode == zuo_print_mode)
-      out_string(out, "'");
-    out_string(out, "()");
-  } else if (obj == z.o_false)
-    out_string(out, "#f");
-  else if (obj == z.o_true)
-    out_string(out, "#t");
-  else if (obj == z.o_eof)
-    out_string(out, "#<eof>");
-  else if (obj == z.o_void)
-    out_string(out, "#<void>");
-  else if (obj->tag == zuo_integer_tag) {
-    zuo_int_t i = ZUO_INT_I(obj), di, n, w, add_back = 0;
-    if (i < 0) {
-      out_char(out, '-');
-      i = (zuo_int_t)(0-(zuo_uint_t)i);
+static void zuo_out(zuo_out_t *out, zuo_t *obj, zuo_print_mode_t mode) {
+  /* recur to zuo_out directly only for atomic thigs, otherwise use `stack` */
+  zuo_t *stack = z.o_null;
+  /* slight hack: use various singletons for recur mode */
+# define ZUO_OUT_RECUR       z.o_false
+# define ZUO_OUT_PAIR_RECUR  z.o_true
+# define ZUO_OUT_HASH1_RECUR z.o_eof
+# define ZUO_OUT_HASH_RECUR  z.o_null
+
+  while (1) {
+    if (obj == z.o_undefined)
+      out_string(out, "#<undefined>");
+    else if (obj == z.o_null) {
+      if (mode == zuo_print_mode)
+        out_string(out, "'");
+      out_string(out, "()");
+    } else if (obj == z.o_false)
+      out_string(out, "#f");
+    else if (obj == z.o_true)
+      out_string(out, "#t");
+    else if (obj == z.o_eof)
+      out_string(out, "#<eof>");
+    else if (obj == z.o_void)
+      out_string(out, "#<void>");
+    else if (obj->tag == zuo_integer_tag) {
+      zuo_int_t i = ZUO_INT_I(obj), di, n, w, add_back = 0;
       if (i < 0) {
-        /* min int */
-        i = -(i+1);
-        add_back = 1;
-      }
-    }
-    di = i / 10;
-    for (n = 1, w = 1; di >= n; n *= 10, w++);
-    while (n >= 1) {
-      out_char(out, '0' + (i / n));
-      i = i - ((i / n) * n);
-      n /= 10;
-      i += add_back;
-      add_back = 0;
-    }
-  } else if (obj->tag == zuo_string_tag) {
-    zuo_string_t *str = (zuo_string_t *)obj;
-    if (mode == zuo_display_mode) {
-      int i;
-      for (i = 0; i < str->len; i++)
-        out_char(out, str->s[i]);
-    } else {
-      int i;
-      out_string(out, "\"");
-      for (i = 0; i < str->len; i++) {
-        int c = str->s[i];
-        if ((c == '"') || (c == '\\')) {
-          out_char(out, '\\');
-          out_char(out, c);
-        } else if (c == '\n') {
-          out_char(out, '\\');
-          out_char(out, 'n');
-        } else if (c == '\r') {
-          out_char(out, '\\');
-          out_char(out, 'r');
-        } else if (isprint(c)) {
-          out_char(out, c);
-        } else {
-          out_char(out, '\\');
-          out_char(out, 'x');
-          if (c > 0x90)
-            out_char(out, 'a' + ((c >> 4) - 10));
-          else
-            out_char(out, '0' + (c >> 4));
-          if ((c & 0xF) > 0x09)
-            out_char(out, 'a' + ((c & 0xF) - 10));
-          else
-            out_char(out, '0' + (c & 0xF));
+        out_char(out, '-');
+        i = (zuo_int_t)(0-(zuo_uint_t)i);
+        if (i < 0) {
+          /* min int */
+          i = -(i+1);
+          add_back = 1;
         }
       }
-      out_string(out, "\"");
-    }
-  } else if (obj->tag == zuo_symbol_tag) {
-    if ((mode == zuo_display_mode)
-        || (obj == zuo_symbol_from_string(ZUO_STRING_PTR(((zuo_symbol_t *)obj)->str), z.o_false))) {
-      if (mode == zuo_print_mode)
-        out_char(out, '\'');
-      zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
-    } else {
-      out_string(out, "#<symbol:");
-      zuo_out(out, ((zuo_symbol_t *)obj)->str, depth, zuo_display_mode);
-      out_string(out, ">");
-    }
-  } else if (depth >= ZUO_RECUR_LIMIT) {
-    out_string(out, "...");
-  } else if (obj->tag == zuo_pair_tag) {
-    zuo_pair_t *p = (zuo_pair_t *)obj;
-    out_char(out, '(');
-    if (mode == zuo_print_mode) {
-      zuo_t *p2 = (zuo_t *)p;
-      while (p2->tag == zuo_pair_tag)
-        p2 = ((zuo_pair_t *)p2)->cdr;
-      if (p2 == z.o_null)
-        out_string(out, "list ");
-      else if (_zuo_cdr(p)->tag != zuo_pair_tag)
-        out_string(out, "cons ");
-      else
-        out_string(out, "list* ");
-    }
-    zuo_out(out, p->car, depth+1, mode);
-    while (p->cdr->tag == zuo_pair_tag) {
-      p = (zuo_pair_t *)p->cdr;
-      out_char(out, ' ');
-      zuo_out(out, p->car, depth+1, mode);
-    }
-    if (p->cdr != z.o_null) {
-      if (mode != zuo_print_mode) {
-        out_char(out, ' ');
-        out_char(out, '.');
+      di = i / 10;
+      for (n = 1, w = 1; di >= n; n *= 10, w++);
+      while (n >= 1) {
+        out_char(out, '0' + (i / n));
+        i = i - ((i / n) * n);
+        n /= 10;
+        i += add_back;
+        add_back = 0;
       }
-      out_char(out, ' ');
-      zuo_out(out, p->cdr, depth+1, mode);
-    }
-    out_char(out, ')');
-  } else if (obj->tag == zuo_primitive_tag) {
-    out_string(out, "#<procedure:");
-    zuo_out(out, ((zuo_primitive_t *)obj)->name, depth+1, zuo_display_mode);
-    out_string(out, ">");
-  } else if (obj->tag == zuo_closure_tag) {
-    zuo_t *dd = ZUO_CDR(ZUO_CDR(((zuo_closure_t *)obj)->lambda));
-    out_string(out, "#<procedure");
-    if (ZUO_CAR(dd)->tag == zuo_string_tag) {
-      out_string(out, ":");
-      zuo_out(out, ZUO_CAR(dd), depth+1, zuo_display_mode);
-    }
-    out_string(out, ">");
-  } else if (obj == z.o_apply) {
-    out_string(out, "#<procedure:apply>");
-  } else if (obj == z.o_call_cc) {
-    out_string(out, "#<procedure:call/cc>");
-  } else if (obj == z.o_call_prompt) {
-    out_string(out, "#<procedure:call/prompt>");
-  } else if (obj->tag == zuo_opaque_tag) {
-    out_string(out, "#<");
-    zuo_out(out, ((zuo_opaque_t *)obj)->tag, depth+1, zuo_display_mode);
-    out_string(out, ">");
-  } else if (obj->tag == zuo_trie_node_tag) {
-    zuo_t *keys = zuo_trie_keys(obj, z.o_null);
-    if (mode == zuo_print_mode) {
-      out_string(out, "(hash");
-      if (keys != z.o_null)
-        out_string(out, " ");
-    } else
-      out_string(out, "#hash(");
-    while (keys != z.o_null) {
-      zuo_t *key = ZUO_CAR(keys);
-      if (mode != zuo_print_mode)
-        out_string(out, "(");
-      zuo_out(out, key, depth+1, mode);
-      if (mode == zuo_print_mode)
-        out_string(out, " ");
+    } else if (obj->tag == zuo_string_tag) {
+      zuo_string_t *str = (zuo_string_t *)obj;
+      if (mode == zuo_display_mode) {
+        int i;
+        for (i = 0; i < str->len; i++)
+          out_char(out, str->s[i]);
+      } else {
+        int i;
+        out_string(out, "\"");
+        for (i = 0; i < str->len; i++) {
+          int c = str->s[i];
+          if ((c == '"') || (c == '\\')) {
+            out_char(out, '\\');
+            out_char(out, c);
+          } else if (c == '\n') {
+            out_char(out, '\\');
+            out_char(out, 'n');
+          } else if (c == '\r') {
+            out_char(out, '\\');
+            out_char(out, 'r');
+          } else if (isprint(c)) {
+            out_char(out, c);
+          } else {
+            out_char(out, '\\');
+            out_char(out, 'x');
+            if (c > 0x90)
+              out_char(out, 'a' + ((c >> 4) - 10));
+            else
+              out_char(out, '0' + (c >> 4));
+            if ((c & 0xF) > 0x09)
+              out_char(out, 'a' + ((c & 0xF) - 10));
+            else
+              out_char(out, '0' + (c & 0xF));
+          }
+        }
+        out_string(out, "\"");
+      }
+    } else if (obj->tag == zuo_symbol_tag) {
+      if ((mode == zuo_display_mode)
+          || (obj == zuo_symbol_from_string(ZUO_STRING_PTR(((zuo_symbol_t *)obj)->str), z.o_false))) {
+        if (mode == zuo_print_mode)
+          out_char(out, '\'');
+        zuo_out(out, ((zuo_symbol_t *)obj)->str, zuo_display_mode);
+      } else {
+        out_string(out, "#<symbol:");
+        zuo_out(out, ((zuo_symbol_t *)obj)->str, zuo_display_mode);
+        out_string(out, ">");
+      }
+    } else if (obj->tag == zuo_pair_tag) {
+      zuo_pair_t *p = (zuo_pair_t *)obj;
+      out_char(out, '(');
+      if (mode == zuo_print_mode) {
+        zuo_t *p2 = (zuo_t *)p;
+        while (p2->tag == zuo_pair_tag)
+          p2 = ((zuo_pair_t *)p2)->cdr;
+        if (p2 == z.o_null)
+          out_string(out, "list ");
+        else if (ZUO_CDR(p)->tag != zuo_pair_tag)
+          out_string(out, "cons ");
+        else
+          out_string(out, "list* ");
+      }
+      stack = zuo_cons(zuo_cons(ZUO_OUT_PAIR_RECUR, p->cdr), stack);
+      stack = zuo_cons(zuo_cons(ZUO_OUT_RECUR, p->car), stack);
+    } else if (obj->tag == zuo_primitive_tag) {
+      out_string(out, "#<procedure:");
+      zuo_out(out, ((zuo_primitive_t *)obj)->name, zuo_display_mode);
+      out_string(out, ">");
+    } else if (obj->tag == zuo_closure_tag) {
+      zuo_t *dd = ZUO_CDR(ZUO_CDR(((zuo_closure_t *)obj)->lambda));
+      out_string(out, "#<procedure");
+      if (ZUO_CAR(dd)->tag == zuo_string_tag) {
+        out_string(out, ":");
+        zuo_out(out, ZUO_CAR(dd), zuo_display_mode);
+      }
+      out_string(out, ">");
+    } else if (obj == z.o_apply) {
+      out_string(out, "#<procedure:apply>");
+    } else if (obj == z.o_call_cc) {
+      out_string(out, "#<procedure:call/cc>");
+    } else if (obj == z.o_call_prompt) {
+      out_string(out, "#<procedure:call/prompt>");
+    } else if (obj->tag == zuo_opaque_tag) {
+      out_string(out, "#<");
+      if ((((zuo_opaque_t *)obj)->tag->tag == zuo_string_tag)
+          || (((zuo_opaque_t *)obj)->tag->tag == zuo_symbol_tag))
+        zuo_out(out, ((zuo_opaque_t *)obj)->tag, zuo_display_mode);
       else
-        out_string(out, " . ");
-      zuo_out(out, zuo_trie_lookup(obj, key), depth+1, mode);
-      if (mode != zuo_print_mode)
-        out_string(out, ")");
-      keys = ZUO_CDR(keys);
-      if (keys != z.o_null)
-        out_string(out, " ");
+        out_string(out, "opaque");
+      out_string(out, ">");
+    } else if (obj->tag == zuo_trie_node_tag) {
+      zuo_t *keys = zuo_trie_keys(obj, z.o_null);
+      if (mode == zuo_print_mode) {
+        out_string(out, "(hash");
+        if (keys != z.o_null)
+          out_string(out, " ");
+      } else
+        out_string(out, "#hash(");
+      stack = zuo_cons(zuo_cons(ZUO_OUT_HASH1_RECUR, zuo_cons(keys, obj)), stack);
+    } else if (obj->tag == zuo_handle_tag) {
+      out_string(out, "#<handle>");
+    } else if (obj->tag == zuo_cont_tag) {
+      out_string(out, "#<continuation>");
+    } else if (obj->tag == zuo_variable_tag) {
+      out_string(out, "#<variable:");
+      zuo_out(out, ((zuo_variable_t *)obj)->name, zuo_display_mode);
+      out_string(out, ">");
+    } else {
+      out_string(out, "#<garbage>");
     }
-    out_string(out, ")");
-  } else if (obj->tag == zuo_handle_tag) {
-    out_string(out, "#<handle>");
-  } else if (obj->tag == zuo_cont_tag) {
-    out_string(out, "#<continuation>");
-  } else if (obj->tag == zuo_variable_tag) {
-    out_string(out, "#<variable:");
-    zuo_out(out, ((zuo_variable_t *)obj)->name, depth+1, zuo_display_mode);
-    out_string(out, ">");
-  } else {
-    out_string(out, "#<garbage>");
+
+    while (1) {
+      if (stack == z.o_null)
+        return;
+      else {
+        zuo_pair_t *op = (zuo_pair_t *)ZUO_CAR(stack);
+        if (op->car == ZUO_OUT_RECUR) {
+          stack = ZUO_CDR(stack);
+          obj = op->cdr;
+          break;
+        } else if (op->car == ZUO_OUT_PAIR_RECUR) {
+          obj = op->cdr;
+          if (obj->tag == zuo_pair_tag) {
+            zuo_pair_t *p = (zuo_pair_t *)obj;
+            out_char(out, ' ');
+            obj = p->car;
+            op->cdr = p->cdr; /* reuse stack frame */
+            break;
+          } else if (obj == z.o_null) {
+            stack = _zuo_cdr(stack);
+            out_char(out, ')');
+          } else {
+            if (mode != zuo_print_mode) {
+              out_char(out, ' ');
+              out_char(out, '.');
+            }
+            out_char(out, ' ');
+            op->cdr = z.o_null; /* reuse stack frame */
+            break;
+          }
+        } else if ((op->car == ZUO_OUT_HASH1_RECUR)
+                   || (op->car == ZUO_OUT_HASH_RECUR)) {
+          zuo_pair_t *p = (zuo_pair_t *)op->cdr;
+          zuo_t *keys = p->car;
+          zuo_t *ht = p->cdr;
+          if (op->car == ZUO_OUT_HASH_RECUR) {
+            /* close key--value pair */
+            if (mode != zuo_print_mode)
+              out_string(out, ")");
+          }
+          if (keys != z.o_null) {
+            zuo_t *key = ZUO_CAR(keys);
+            if (op->car == ZUO_OUT_HASH_RECUR) {
+              /* space after previous pair */
+              out_string(out, " ");
+            }
+            if (mode != zuo_print_mode)
+              out_string(out, "(");
+            zuo_out(out, key, mode); /* a symbol */
+            if (mode == zuo_print_mode)
+              out_string(out, " ");
+            else
+              out_string(out, " . ");
+            obj = zuo_trie_lookup(ht, key);
+            op->car = ZUO_OUT_HASH_RECUR; /* reuse stack frame */
+            p->car = ZUO_CDR(keys);
+            break;
+          } else {
+            stack = _zuo_cdr(stack);
+            out_string(out, ")");
+          }
+        } else {
+          zuo_panic("unrecognized operation on stack");
+        }
+      }
+    }
   }
 }
 
 static void zuo_fout(FILE *fout, zuo_t *obj, zuo_print_mode_t mode) {
   zuo_out_t out;
   out_init(&out);
-  zuo_out(&out, obj, 0, mode);
+  zuo_out(&out, obj, mode);
   fwrite(out.s, 1, out.len, fout);
   out_done(&out);
 }
@@ -1593,13 +1639,13 @@ static zuo_t *zuo_to_string(zuo_t *objs, zuo_print_mode_t mode) {
   out_init(&out);
 
   while (objs->tag == zuo_pair_tag) {
-    zuo_out(&out, ZUO_CAR(objs), 0, mode);
+    zuo_out(&out, ZUO_CAR(objs), mode);
     objs = ZUO_CDR(objs);
     if ((mode != zuo_display_mode) && (objs != z.o_null))
       out_char(&out, ' ');
   }
   if (objs != z.o_null)
-    zuo_out(&out, objs, 0, mode);
+    zuo_out(&out, objs, mode);
 
   out_char(&out, 0);
   
@@ -1736,30 +1782,16 @@ static void check_hash(const char *who, zuo_t *obj) {
 /*======================================================================*/
 
 static const char *symbol_chars = "~!@#$%^&*-_=+:<>?/.";
-static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth);
 
-static void zuo_read_fail(const unsigned char *s, zuo_int_t *_o, const char *msg) {
+static void zuo_read_fail2(const unsigned char *s, zuo_int_t *_o,
+                           const char *msg, const char *msg2) {
   zuo_error_color();
-  fprintf(stderr, "read: %s at position %d", msg, (int)*_o);
+  fprintf(stderr, "read: %s%s at position %d", msg, msg2, (int)*_o);
   zuo_fail("");
 }
 
-static void skip_whitespace(unsigned const char *s, zuo_int_t *_o, int depth) {
-  while (1) {
-    while (isspace(s[*_o]))
-      (*_o)++;
-    if (s[*_o] == ';') {
-      while ((s[*_o] != '\n') && (s[*_o] != 0))
-        (*_o)++;
-    } else if (s[*_o] == '#' && s[(*_o) + 1] == ';') {
-      zuo_t *discard;
-      (*_o) += 2;
-      discard = zuo_in(s, _o, depth+1);
-      if (discard == z.o_eof)
-        zuo_read_fail(s, _o, "end of file after comment hash-semicolon");      
-    } else
-      break;
-  }
+static void zuo_read_fail(const unsigned char *s, zuo_int_t *_o, const char *msg) {
+  zuo_read_fail2(s, _o, msg, "");
 }
 
 static int hex_value(unsigned const char *s, zuo_int_t *_o, int offset) {
@@ -1789,205 +1821,269 @@ static int peek_input(const unsigned char *s, zuo_int_t *_o, const char *want) {
   return 1;
 }
 
-static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int depth) {
+static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int skip_whitespace_only) {
+  /* use `stack` insteda of recurring */
+  zuo_t *stack = z.o_null, *obj;
   int c;
+  /* slight hack: use various singletons for recur mode */
+# define ZUO_IN_DISCARD_RECUR       z.o_undefined
+# define ZUO_IN_QUOTE_RECUR         z.o_true
+# define ZUO_IN_PAREN_LIST_RECUR    z.o_false
+# define ZUO_IN_PAREN_PAIR_RECUR    z.o_null
+# define ZUO_IN_PAREN_END_RECUR     z.o_eof
+# define ZUO_IN_BRACKET_LIST_RECUR  z.o_void
+# define ZUO_IN_BRACKET_PAIR_RECUR  z.o_empty_hash
+# define ZUO_IN_BRACKET_END_RECUR   z.o_apply
 
-  if (depth >= ZUO_RECUR_LIMIT)
-    zuo_read_fail(s, _o, "too nested");
-  
-  skip_whitespace(s, _o, depth);
-  c = s[*_o];
-  if (c == 0)
-    return z.o_eof;
-  else if ((c == '(') || (c == '[')) {
-    int closer = ((c == '(') ? ')' : ']');
-    zuo_t *car, *top_p;
-    zuo_pair_t *p;
-    (*_o)++;
-    skip_whitespace(s, _o, depth);
-    if (s[*_o] == closer) {
-      (*_o)++;
+  while (1) {
+    /* skip whitespace */
+    while (1) {
+      while (isspace(s[*_o]))
+        (*_o)++;
+      if (s[*_o] == ';') {
+        while ((s[*_o] != '\n') && (s[*_o] != 0))
+          (*_o)++;
+      } else if (s[*_o] == '#' && s[(*_o) + 1] == ';') {
+        (*_o) += 2;
+        stack = zuo_cons(zuo_cons(ZUO_IN_DISCARD_RECUR, z.o_null), stack);
+      } else
+        break;
+    }
+
+    if ((stack == z.o_null) && skip_whitespace_only)
       return z.o_null;
-    }
-    car = zuo_in(s, _o, depth+1);
-    top_p = zuo_cons(car, z.o_null);
-    p = (zuo_pair_t *)top_p;
-    while (1) {
-      skip_whitespace(s, _o, depth);
-      if (s[*_o] == 0) {
-        zuo_read_fail(s, _o, "missing closer");
-      } else if (s[*_o] == '.') {
-        zuo_t *cdr;
-        (*_o)++;
-        cdr = zuo_in(s, _o, depth+1);
-        p->cdr = cdr;
-      } else if (s[*_o] == closer) {
-        (*_o)++;
-        break;
+
+    c = s[*_o];
+
+    if ((stack != z.o_null) && (ZUO_CAR(ZUO_CAR(stack)) == ZUO_IN_PAREN_END_RECUR)) {
+      if (c != ')')
+        zuo_read_fail(s, _o, "expected closer after dot");
+      (*_o)++;
+      obj = ZUO_CAR(ZUO_CDR(ZUO_CAR(stack)));
+      stack = ZUO_CDR(stack);
+    } else if ((stack != z.o_null) && (ZUO_CAR(ZUO_CAR(stack)) == ZUO_IN_BRACKET_END_RECUR)) {
+      if (c != ']')
+        zuo_read_fail(s, _o, "expected closer after dot");
+      (*_o)++;
+      obj = ZUO_CAR(ZUO_CDR(ZUO_CAR(stack)));
+      stack = ZUO_CDR(stack);
+    } else if (c == 0)
+      obj = z.o_eof;
+    else if ((c == '(') || (c == '[')) {
+      (*_o)++;
+      obj = z.o_undefined; /* => skip whitespace next */
+      stack = zuo_cons(zuo_cons(((c == '(')
+                                 ? ZUO_IN_PAREN_LIST_RECUR
+                                 : ZUO_IN_BRACKET_LIST_RECUR),
+                                zuo_cons(z.o_null, z.o_null)),
+                       stack);
+    } else if ((c == ')') || (c == ']')) {
+      zuo_t *want_list = ((c == ')') ? ZUO_IN_PAREN_LIST_RECUR : ZUO_IN_BRACKET_LIST_RECUR);
+      zuo_t *want_pair = ((c == ')') ? ZUO_IN_PAREN_PAIR_RECUR : ZUO_IN_BRACKET_PAIR_RECUR);
+      if ((stack != z.o_null)
+          && ((ZUO_CAR(ZUO_CAR(stack)) == want_list)
+              || (ZUO_CAR(ZUO_CAR(stack)) == want_pair))) {
+        obj = ZUO_CAR(ZUO_CDR(ZUO_CAR(stack)));
+        stack = ZUO_CDR(stack);
       } else {
-        zuo_t *cadr, *cdr;
-        cadr = zuo_in(s, _o, depth+1);
-        cdr = zuo_cons(cadr, z.o_null);
-        p->cdr = cdr;
-        p = (zuo_pair_t *)cdr;
+        zuo_read_fail(s, _o, "unbalanced closer");
+        obj = z.o_undefined;
       }
-    }
-    return top_p;
-  } else if ((c == ')') || (c == ']')) {
-    zuo_read_fail(s, _o, "unbalanced closer");
-    return z.o_undefined;
-  } else if (c == '#') {
-    (*_o)++;
-    if (peek_input(s, _o, "true")) {
-      (*_o) += 4;
-      return z.o_true;
-    } else if (peek_input(s, _o, "false")) {
-      (*_o) += 5;
-      return z.o_false;
-    } else if (peek_input(s, _o, "t")) {
-      (*_o) += 1;
-      return z.o_true;
-    } else if (peek_input(s, _o, "f")) {
-      (*_o) += 1;
-      return z.o_false;
-    } else if (peek_input(s, _o, ";")) {
-      zuo_t *discard;
-      (*_o) += 1;
-      discard = zuo_in(s, _o, depth+1);
-      if (discard == z.o_eof)
-        zuo_read_fail(s, _o, "end of file after comment hash-semicolon");
-      return zuo_in(s, _o, depth+1);
-    } else {
-      zuo_read_fail(s, _o, "bad hash mark");
-      return z.o_undefined;
-    }
-  } else if (isdigit(c) || ((c == '-') && isdigit(s[(*_o)+1]))) {
-    zuo_uint_t n;
-    int neg = (c == '-');
-    if (neg) (*_o)++;
-    n = s[*_o] - '0';
-    (*_o)++;
-    while (isdigit(s[*_o])) {
-      zuo_uint_t new_n = (10 * n) + (s[*_o] - '0');
-      if (new_n < n)
-        zuo_read_fail(s, _o, "integer overflow");
-      n = new_n;
       (*_o)++;
-    }
-    if (neg) {
-      n = 0 - n;
-      if ((zuo_int_t)n > 0)
-        zuo_read_fail(s, _o, "integer overflow");
-      return zuo_integer((zuo_int_t)n);
-    } else {
-      if ((zuo_int_t)n < 0)
-        zuo_read_fail(s, _o, "integer overflow");
-      return zuo_integer((zuo_int_t)n);
-    }
-  } else if (c == '\'') {
-    zuo_t *v;
-    (*_o)++;
-    v = zuo_in(s, _o, depth+1);
-    if (v == z.o_eof)
-      zuo_read_fail(s, _o, "end of file after quote");
-    return zuo_cons(zuo_symbol("quote"), zuo_cons(v, z.o_null));
-  } else if (c == '`') {
-    zuo_t *v;
-    (*_o)++;
-    v = zuo_in(s, _o, depth+1);
-    if (v == z.o_eof)
-      zuo_read_fail(s, _o, "end of file after quasiquote");
-    return zuo_cons(zuo_symbol("quasiquote"), zuo_cons(v, z.o_null));
-  } else if (c == ',') {
-    zuo_t *v;
-    int splicing = 0;
-    (*_o)++;
-    if (s[*_o] == '@') {
-      splicing = 1;
+    } else if (c == '#') {
       (*_o)++;
-    }
-    v = zuo_in(s, _o, depth+1);
-    if (v == z.o_eof)
-      zuo_read_fail(s, _o, "end of file after unquote");
-    return zuo_cons((splicing
-                     ? zuo_symbol("unquote-splicing")
-                     : zuo_symbol("unquote")),
-                    zuo_cons(v, z.o_null));
-  } else if ((c == '.') && !(isalpha(c) || strchr(symbol_chars, c))) {
-    zuo_read_fail(s, _o, "misplaced `.`");
-    return z.o_undefined;
-  } else if (isalpha(c) || strchr(symbol_chars, c)) {
-    zuo_t *sym;
-    zuo_int_t start = *_o, len;
-    char *s2;
-    while (1) {
-      c = s[*_o];
-      if ((c != 0) && (isalpha(c) || isdigit(c) || strchr(symbol_chars, c)))
+      if (peek_input(s, _o, "true")) {
+        (*_o) += 4;
+        obj = z.o_true;
+      } else if (peek_input(s, _o, "false")) {
+        (*_o) += 5;
+        obj = z.o_false;
+      } else if (peek_input(s, _o, "t")) {
+        (*_o) += 1;
+        obj = z.o_true;
+      } else if (peek_input(s, _o, "f")) {
+        (*_o) += 1;
+        obj = z.o_false;
+      } else {
+        zuo_read_fail(s, _o, "bad hash mark");
+        obj = z.o_undefined;
+      }
+    } else if (isdigit(c) || ((c == '-') && isdigit(s[(*_o)+1]))) {
+      zuo_uint_t n;
+      int neg = (c == '-');
+      if (neg) (*_o)++;
+      n = s[*_o] - '0';
+      (*_o)++;
+      while (isdigit(s[*_o])) {
+        zuo_uint_t new_n = (10 * n) + (s[*_o] - '0');
+        if (new_n < n)
+          zuo_read_fail(s, _o, "integer overflow");
+        n = new_n;
         (*_o)++;
+      }
+      if (neg) {
+        n = 0 - n;
+        if ((zuo_int_t)n > 0)
+          zuo_read_fail(s, _o, "integer overflow");
+        obj = zuo_integer((zuo_int_t)n);
+      } else {
+        if ((zuo_int_t)n < 0)
+          zuo_read_fail(s, _o, "integer overflow");
+        obj = zuo_integer((zuo_int_t)n);
+      }
+    } else if (c == '\'') {
+      zuo_t *v;
+      (*_o)++;
+      stack = zuo_cons(zuo_cons(ZUO_IN_QUOTE_RECUR, zuo_symbol("quote")), stack);
+      obj = z.o_undefined;
+    } else if (c == '`') {
+      zuo_t *v;
+      (*_o)++;
+      stack = zuo_cons(zuo_cons(ZUO_IN_QUOTE_RECUR, zuo_symbol("quasiquote")), stack);
+      obj = z.o_undefined;
+    } else if (c == ',') {
+      zuo_t *v;
+      int splicing = 0;
+      (*_o)++;
+      if (s[*_o] == '@') {
+        splicing = 1;
+        (*_o)++;
+      }
+      stack = zuo_cons(zuo_cons(ZUO_IN_QUOTE_RECUR, (splicing
+                                                     ? zuo_symbol("unquote-splicing")
+                                                     : zuo_symbol("unquote"))),
+                       stack);
+      obj = z.o_undefined;
+    } else if ((c == '.') && !(isalpha(s[*_o+1]) || strchr(symbol_chars, s[*_o+1]))) {
+      if ((stack != z.o_null) && (ZUO_CAR(ZUO_CAR(stack)) == ZUO_IN_PAREN_LIST_RECUR))
+        ZUO_CAR(ZUO_CAR(stack)) = ZUO_IN_PAREN_PAIR_RECUR;
+      else if ((stack != z.o_null) && (ZUO_CAR(ZUO_CAR(stack)) == ZUO_IN_BRACKET_LIST_RECUR))
+        ZUO_CAR(ZUO_CAR(stack)) = ZUO_IN_BRACKET_PAIR_RECUR;
       else
-        break;
+        zuo_read_fail(s, _o, "misplaced `.`");
+      (*_o)++;
+      obj = z.o_undefined;
+    } else if (isalpha(c) || strchr(symbol_chars, c)) {
+      zuo_t *sym;
+      zuo_int_t start = *_o, len;
+      char *s2;
+      while (1) {
+        c = s[*_o];
+        if ((c != 0) && (isalpha(c) || isdigit(c) || strchr(symbol_chars, c)))
+          (*_o)++;
+        else
+          break;
+      }
+      len = (*_o) - start;
+      s2 = malloc(len+1);
+      memcpy(s2, s + start, len);
+      s2[len] = 0;
+      sym = zuo_symbol(s2);
+      free(s2);
+      obj = sym;
+    } else if (c == '"') {
+      zuo_int_t sz = 32;
+      zuo_int_t len = 0;
+      char *s2 = malloc(sz);
+      (*_o)++;
+      while (1) {
+        if (sz == len) {
+          char *s3 = malloc(sz * 2);
+          memcpy(s3, s2, sz);
+          free(s2);
+          s2 = s3;
+          sz = sz * 2;
+        }
+        c = s[*_o];
+        if (c == 0) {
+          zuo_read_fail(s, _o, "missing closing doublequote");
+        } else if (c == '"') {
+          (*_o)++;
+          break;
+        } else if (c == '\\') {
+          int c2 = s[(*_o)+1];
+          if ((c2 == '\\') || (c2 == '"')) {
+            s2[len++] = c2;
+            (*_o) += 2;
+          } else if (c2 == 'n') {
+            s2[len++] = '\n';
+            (*_o) += 2;
+          } else if (c2 == 'r') {
+            s2[len++] = '\r';
+            (*_o) += 2;
+          } else if (c2 == 'x') {
+            s2[len++] = (hex_value(s, _o, 2) << 4) + hex_value(s, _o, 3);
+            (*_o) += 4;
+          } else
+            zuo_read_fail(s, _o, "bad character after backslash");
+        } else if (c == '\n') {
+          zuo_read_fail(s, _o, "newline in string literal");
+        } else if (c == '\r') {
+          zuo_read_fail(s, _o, "carriage return in string literal");
+        } else {
+          s2[len++] = c;
+          (*_o)++;
+        }
+      }
+      obj = zuo_sized_string(s2, len);
+      free(s2);
+    } else {
+      char s[2];
+      s[0] = c;
+      s[1] = 0;
+      zuo_fail1w("read", "unrecognized character", zuo_string(s));
+      obj = z.o_null;
     }
-    len = (*_o) - start;
-    s2 = malloc(len+1);
-    memcpy(s2, s + start, len);
-    s2[len] = 0;
-    sym = zuo_symbol(s2);
-    free(s2);
-    return sym;
-  } else if (c == '"') {
-    zuo_t *obj;
-    zuo_int_t sz = 32;
-    zuo_int_t len = 0;
-    char *s2 = malloc(sz);
-    (*_o)++;
+
     while (1) {
-      if (sz == len) {
-        char *s3 = malloc(sz * 2);
-        memcpy(s3, s2, sz);
-        free(s2);
-        s2 = s3;
-        sz = sz * 2;
-      }
-      c = s[*_o];
-      if (c == 0) {
-        zuo_read_fail(s, _o, "missing closing doublequote");
-      } else if (c == '"') {
-        (*_o)++;
+      if (obj == z.o_undefined)
         break;
-      } else if (c == '\\') {
-        int c2 = s[(*_o)+1];
-        if ((c2 == '\\') || (c2 == '"')) {
-          s2[len++] = c2;
-          (*_o) += 2;
-        } else if (c2 == 'n') {
-          s2[len++] = '\n';
-          (*_o) += 2;
-        } else if (c2 == 'r') {
-          s2[len++] = '\r';
-          (*_o) += 2;
-        } else if (c2 == 'x') {
-          s2[len++] = (hex_value(s, _o, 2) << 4) + hex_value(s, _o, 3);
-          (*_o) += 4;
-        } else
-          zuo_read_fail(s, _o, "bad character after backslash");
-      } else if (c == '\n') {
-        zuo_read_fail(s, _o, "newline in string literal");
-      } else if (c == '\r') {
-        zuo_read_fail(s, _o, "carriage return in string literal");
-      } else {
-        s2[len++] = c;
-        (*_o)++;
+      else if (stack == z.o_null)
+        return obj;
+      else {
+        zuo_pair_t *op = (zuo_pair_t *)ZUO_CAR(stack);
+
+        if (op->car == ZUO_IN_QUOTE_RECUR) {
+          if (obj == z.o_eof)
+            zuo_read_fail2(s, _o, "end of file after ",
+                           ZUO_STRING_PTR(((zuo_symbol_t *)op->cdr)->str));
+          obj = zuo_cons(op->cdr, zuo_cons(obj, z.o_null));
+          stack = ZUO_CDR(stack);
+        } else if (op->car == ZUO_IN_DISCARD_RECUR) {
+          if (obj == z.o_eof)
+            zuo_read_fail(s, _o, "end of file after comment hash-semicolon");
+          stack = ZUO_CDR(stack);
+          break;
+        } else if ((op->car == ZUO_IN_PAREN_LIST_RECUR)
+                   || (op->car == ZUO_IN_BRACKET_LIST_RECUR)) {
+          if (obj == z.o_eof) {
+            zuo_read_fail(s, _o, "missing closer");
+            return z.o_undefined;
+          } else {
+            zuo_t *pr = zuo_cons(obj, z.o_null);
+            if (ZUO_CAR(op->cdr) == z.o_null)
+              ZUO_CAR(op->cdr) = pr;
+            else
+              ZUO_CDR(ZUO_CDR(op->cdr)) = pr;
+            ZUO_CDR(op->cdr) = pr;
+            break;
+          }
+        } else if ((op->car == ZUO_IN_PAREN_PAIR_RECUR)
+                   || (op->car == ZUO_IN_BRACKET_PAIR_RECUR)) {
+          if (obj == z.o_eof) {
+            zuo_read_fail(s, _o, "end of file after dot");
+            return z.o_undefined;
+          } else {
+            ZUO_CDR(ZUO_CDR(op->cdr)) = obj;
+            if (op->car == ZUO_IN_PAREN_PAIR_RECUR)
+              op->car = ZUO_IN_PAREN_END_RECUR;
+            else
+              op->car = ZUO_IN_BRACKET_END_RECUR;
+            break;
+          }
+        }
       }
     }
-    obj = zuo_sized_string(s2, len);
-    free(s2);
-    return obj;
-  } else {
-    char s[2];
-    s[0] = c;
-    s[1] = 0;
-    zuo_fail1w("read", "unrecognized character", zuo_string(s));
-    return z.o_null;
   }
 }
 
@@ -2045,7 +2141,7 @@ static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
   const char *expect = "#lang ";
   char *r;
 
-  skip_whitespace(s, &o, 0);
+  zuo_in(s, &o, 1);
   for (i = 0; expect[i]; i++) {
     if (s[o+i] != expect[i])
       zuo_read_fail(s, &o, "expected #lang followed by a space");

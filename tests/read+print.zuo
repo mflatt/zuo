@@ -60,3 +60,12 @@
 (check-fail (arity-error "hello" 'oops) "not a list")
 (check-output (arity-error "hello" '(1 () "apple")) "" "hello: wrong number of arguments: 1 '() \"apple\"\n")
 
+(check (~s (let loop ([i 10000])
+             (if (= i 0)
+                 '()
+                 (list (loop (- i 1))))))
+       (apply ~a
+              (let loop ([i 10000] [accum '()])
+                (if (= i 0)
+                    (cons "()" accum)
+                    (cons "(" (loop (- i 1) (cons ")" accum)))))))
