@@ -1694,7 +1694,7 @@ static void done_dump_name(zuo_t *showed_name, int repeats) {
   }
 }
 
-static void zuo_stack_dump() {
+static void zuo_stack_trace() {
   zuo_t *k = Z.o_interp_k, *meta_k = Z.o_interp_meta_k;
   zuo_t *showed_name  = z.o_false;
   int repeats = 0;
@@ -1729,12 +1729,19 @@ static void zuo_exit_int(int v) {
   exit(v);
 }
 
+static void zuo_sync_in_case_of_fail() {
+  /* make sure state consulted by zuo_fail() is in "no context" mode */
+  Z.o_interp_k = z.o_done_k;
+  Z.o_interp_meta_k = z.o_null;
+  Z.o_cleanable_table = z.o_undefined;
+}
+
 static void zuo_fail(const char *str) {
   if (str[0] != 0)
     zuo_error_color();
   fprintf(stderr, "%s\n", str);
   zuo_normal_color(2);
-  zuo_stack_dump();
+  zuo_stack_trace();
   zuo_exit_int(1);
 }
 
@@ -2975,7 +2982,7 @@ static void interp_step() {
     zuo_probe_counter++;
     if ((zuo_probe_counter % 1000) == 0) {
       fprintf(stderr, "probe %d:\n", zuo_probe_counter);
-      zuo_stack_dump();
+      zuo_stack_trace();
     }
   }
 
@@ -4932,6 +4939,9 @@ static zuo_t *zuo_resume_signal() {
 static void zuo_clean_all() {
   zuo_t *keys, *l;
 
+  if (Z.o_cleanable_table == z.o_undefined)
+    return; /* must be an error during startup */
+
   zuo_suspend_signal();
 
   keys = zuo_trie_keys(Z.o_cleanable_table, z.o_null);
@@ -6171,8 +6181,7 @@ static void zuo_primitive_init(int will_load_image) {
   z.o_intern_table = zuo_trie_node();
   z.o_top_env = zuo_trie_node();
 
-  Z.o_interp_k = z.o_done_k; /* in case of a failure that triggers a stack trace */
-  Z.o_interp_meta_k = z.o_null;
+  zuo_sync_in_case_of_fail();
   
 # if EMBEDDED_IMAGE
   will_load_image = 1;
@@ -6303,9 +6312,10 @@ static void zuo_primitive_init(int will_load_image) {
 
 static void zuo_image_init(char *boot_image) {
 # if EMBEDDED_IMAGE
-  if (!boot_image)
+  if (!boot_image) {
     zuo_fasl_restore((char *)emedded_boot_image, emedded_boot_image_len * sizeof(zuo_int32_t));
-  else {
+    zuo_sync_in_case_of_fail();
+  } else {
 # endif
     if (boot_image) {
       /* The image supplies constants and tables */
@@ -6313,6 +6323,7 @@ static void zuo_image_init(char *boot_image) {
       zuo_t *dump = zuo_drain(in, -1);
       zuo_close_handle(in);
       zuo_fasl_restore(ZUO_STRING_PTR(dump), ZUO_STRING_LEN(dump));
+      zuo_sync_in_case_of_fail();
     } else {
       /* Create remaining constants and tables */
       z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));

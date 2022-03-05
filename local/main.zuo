@@ -84,7 +84,9 @@
                               (cp a b))
                             (mkdir* install-prefix)
                             (mkdir* (build-path install-prefix "bin"))
-                            (say-copy cp (target-name zuo-to-install) (build-path install-prefix "bin" "zuo"))
+                            (define dest-exe (build-path install-prefix "bin" "zuo"))
+                            (when (file-exists? dest-exe) (rm dest-exe)) ; needed for macOS
+                            (say-copy cp (target-name zuo-to-install) dest-exe)
                             (mkdir* (build-path install-prefix "lib"))
                             (say-copy cp*
                                       (build-path srcdir "lib" "zuo")
