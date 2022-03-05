@@ -80,14 +80,13 @@ typedef HANDLE zuo_raw_handle_t;
 #endif
 static const char *zuo_lib_path = ZUO_LIB_PATH;
 
-#define MIN_HEAP_SIZE (8*1024*1024)
-
-#define ALLOC_ALIGN(i) (((i) + (sizeof(zuo_intptr_t) - 1)) & ~(sizeof(zuo_intptr_t) -1))
-
-#define MAX_PRIM_ARITY 10
-
 #ifdef ZUO_EMBEDDED
 # include "zuo.h"
+#endif
+
+/* configurable lower bound on how much space to use: */
+#ifndef ZUO_MIN_HEAP_SIZE
+# define ZUO_MIN_HEAP_SIZE (8*1024*1024)
 #endif
 
 /*======================================================================*/
@@ -224,6 +223,9 @@ typedef struct {
   zuo_t *name;
 } zuo_primitive_t;
 
+/* only try to count up to this high for arity checking: */
+#define ZUO_MAX_PRIM_ARITY 10
+
 typedef struct {
   zuo_t obj;
   zuo_t *lambda;
@@ -299,6 +301,13 @@ static struct {
     zuo_t *o_apply;
     zuo_t *o_call_cc;
     zuo_t *o_call_prompt;
+    zuo_t *o_kernel_eval;
+
+    /* private primitives */
+    zuo_t *o_kernel_read_from_string;
+    zuo_t *o_module_to_hash_star;
+    zuo_t *o_get_read_and_eval;
+    zuo_t *o_register_module;
 
     /* symbol table, root environment, and modules */
     zuo_t *o_intern_table;
@@ -371,7 +380,9 @@ void zuo_check_sanity() {
 /* memory manager                                                       */
 /*======================================================================*/
 
-static zuo_int_t heap_size = MIN_HEAP_SIZE;
+#define ALLOC_ALIGN(i) (((i) + (sizeof(zuo_intptr_t) - 1)) & ~(sizeof(zuo_intptr_t) -1))
+
+static zuo_int_t heap_size = ZUO_MIN_HEAP_SIZE;
 static void *to_space = NULL;
 static zuo_int_t allocation_offset = 0;
 static zuo_int_t total_allocation = 0;
@@ -534,8 +545,8 @@ static void zuo_finish_gc(void *old_space, old_space_t *old_old_spaces) {
 
   total_allocation = allocation_offset;
   gc_threshold = total_allocation * 2;
-  if (gc_threshold < MIN_HEAP_SIZE)
-    gc_threshold = MIN_HEAP_SIZE;
+  if (gc_threshold < ZUO_MIN_HEAP_SIZE)
+    gc_threshold = ZUO_MIN_HEAP_SIZE;
 }
 
 static void zuo_collect() {
@@ -976,12 +987,17 @@ static zuo_t *zuo_cons(zuo_t *car, zuo_t *cdr) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_sized_string(const char *str, zuo_intptr_t len) {
+static zuo_t *zuo_uninitialized_string(zuo_intptr_t len) {
   zuo_string_t *obj = (zuo_string_t *)zuo_new(zuo_string_tag, ZUO_STRING_ALLOC_SIZE(len));
   obj->len = len;
-  memcpy(&obj->s, str, len);
-  obj->s[len] = 0;
   return (zuo_t *)obj;
+}
+
+static zuo_t *zuo_sized_string(const char *str, zuo_intptr_t len) {
+  zuo_t *obj = zuo_uninitialized_string(len);
+  memcpy(ZUO_STRING_PTR(obj), str, len);
+  ZUO_STRING_PTR(obj)[len] = 0;
+  return obj;
 }
 
 static zuo_t *zuo_string(const char *str) {
@@ -1514,6 +1530,14 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, zuo_print_mode_t mode) {
       out_string(out, "#<procedure:");
       zuo_out(out, ((zuo_primitive_t *)obj)->name, zuo_display_mode);
       out_string(out, ">");
+    } else if (obj == z.o_apply) {
+      out_string(out, "#<procedure:apply>");
+    } else if (obj == z.o_call_cc) {
+      out_string(out, "#<procedure:call/cc>");
+    } else if (obj == z.o_call_prompt) {
+      out_string(out, "#<procedure:call/prompt>");
+    } else if (obj == z.o_kernel_eval) {
+      out_string(out, "#<procedure:kernel-eval>");
     } else if (obj->tag == zuo_closure_tag) {
       zuo_t *dd = ZUO_CDR(ZUO_CDR(((zuo_closure_t *)obj)->lambda));
       out_string(out, "#<procedure");
@@ -1522,12 +1546,6 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, zuo_print_mode_t mode) {
         zuo_out(out, ZUO_CAR(dd), zuo_display_mode);
       }
       out_string(out, ">");
-    } else if (obj == z.o_apply) {
-      out_string(out, "#<procedure:apply>");
-    } else if (obj == z.o_call_cc) {
-      out_string(out, "#<procedure:call/cc>");
-    } else if (obj == z.o_call_prompt) {
-      out_string(out, "#<procedure:call/prompt>");
     } else if (obj->tag == zuo_opaque_tag) {
       out_string(out, "#<");
       if ((((zuo_opaque_t *)obj)->tag->tag == zuo_string_tag)
@@ -1932,17 +1950,14 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int skip_whitespace_
         obj = zuo_integer((zuo_int_t)n);
       }
     } else if (c == '\'') {
-      zuo_t *v;
       (*_o)++;
       stack = zuo_cons(zuo_cons(ZUO_IN_QUOTE_RECUR, zuo_symbol("quote")), stack);
       obj = z.o_undefined;
     } else if (c == '`') {
-      zuo_t *v;
       (*_o)++;
       stack = zuo_cons(zuo_cons(ZUO_IN_QUOTE_RECUR, zuo_symbol("quasiquote")), stack);
       obj = z.o_undefined;
     } else if (c == ',') {
-      zuo_t *v;
       int splicing = 0;
       (*_o)++;
       if (s[*_o] == '@') {
@@ -2087,7 +2102,9 @@ static zuo_t *zuo_in(const unsigned char *s, zuo_int_t *_o, int skip_whitespace_
   }
 }
 
-static zuo_t *zuo_read_all_str(const char *s, zuo_int_t len, zuo_int_t start) {
+static zuo_t *zuo_read_all_str(zuo_t *str, zuo_int_t start) {
+  const char *s = ZUO_STRING_PTR(str);
+  zuo_int_t len = ZUO_STRING_LEN(str);
   zuo_int_t o = start;
   zuo_t *first = z.o_null, *last = NULL, *p;
   zuo_int_t i;
@@ -2128,18 +2145,18 @@ static zuo_t *zuo_read_all(zuo_t *obj, zuo_t *start_i) {
       zuo_fail1w(who, "starting index is out of bounds", start_i);
   }
 
-  return zuo_read_all_str(ZUO_STRING_PTR(obj), len, start);
+  return zuo_read_all_str(obj, start);
 }
 
 static int zuo_is_symbol_module_char(int c) {
   return (c != 0) && (isalpha(c) || isdigit(c) || strchr("-_+/", c));
 }
 
-static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
+static zuo_t *zuo_read_language(const char *s_in, zuo_int_t *_post) {
   const unsigned char *s = (const unsigned char *)s_in;
   zuo_int_t o = 0, i, j;
   const char *expect = "#lang ";
-  char *r;
+  zuo_t *r;
 
   zuo_in(s, &o, 1);
   for (i = 0; expect[i]; i++) {
@@ -2154,9 +2171,8 @@ static char *zuo_read_language(const char *s_in, zuo_int_t *_post) {
   if (!j || !((s[o+i+j] == 0) || isspace(s[o+i+j])))
     zuo_read_fail(s, &o, "expected module library path after #lang");
 
-  r = malloc(j+1);
-  memcpy(r, s+o+i, j);
-  r[j] = 0;
+  r = zuo_sized_string((char *)s+o+i, j);
+  r = zuo_symbol_from_string(ZUO_STRING_PTR(r), r);
 
   *_post = o+i+j;
 
@@ -2271,7 +2287,8 @@ static zuo_t *zuo_procedure_p(zuo_t *obj) {
            || (obj->tag == zuo_cont_tag)
            || (obj == z.o_apply)
            || (obj == z.o_call_cc)
-           || (obj == z.o_call_prompt))
+           || (obj == z.o_call_prompt)
+           || (obj == z.o_kernel_eval))
           ? z.o_true
           : z.o_false);
 }
@@ -2709,6 +2726,8 @@ static void zuo_fail_arity(zuo_t *rator, zuo_t *args) {
     name = zuo_string("call/cc");
   else if (rator == z.o_call_prompt)
     name = zuo_string("call/prompt");
+  else if (rator == z.o_kernel_eval)
+    name = zuo_string("kernel-eval");
   else if (rator->tag == zuo_closure_tag) {
     zuo_t *body = _zuo_cdr(_zuo_cdr(((zuo_closure_t *)rator)->lambda));
     if (_zuo_cdr(body) != z.o_null)
@@ -2805,26 +2824,6 @@ static zuo_t *zuo_kernel_env() {
 /*======================================================================*/
 /* interpreter                                                          */
 /*======================================================================*/
-
-static zuo_t *zuo_dump() {
-  return zuo_cons(Z.o_interp_e,
-                  zuo_cons(Z.o_interp_env,
-                           zuo_cons(zuo_cons(Z.o_interp_k, Z.o_interp_meta_k),
-                                    zuo_cons(Z.o_interp_v,
-                                             Z.o_interp_in_proc))));
-}
-
-static void zuo_undump(zuo_t *d) {
-  Z.o_interp_e = _zuo_car(d);
-  d = _zuo_cdr(d);
-  Z.o_interp_env = _zuo_car(d);
-  d = _zuo_cdr(d);
-  Z.o_interp_k = _zuo_car(_zuo_car(d));
-  Z.o_interp_meta_k = _zuo_cdr(_zuo_car(d));
-  d = _zuo_cdr(d);
-  Z.o_interp_v = _zuo_car(d);
-  Z.o_interp_in_proc = _zuo_cdr(d);
-}
 
 static void bad_form(zuo_t *e) {
   zuo_error_color();
@@ -3058,7 +3057,7 @@ static void continue_step() {
             break;
           } else if (rator->tag == zuo_primitive_tag) {
             zuo_primitive_t *f = (zuo_primitive_t *)rator;
-            if (f->arity_mask & ((zuo_uint_t)1 << ((count >= MAX_PRIM_ARITY) ? MAX_PRIM_ARITY : count)))
+            if (f->arity_mask & ((zuo_uint_t)1 << ((count >= ZUO_MAX_PRIM_ARITY) ? ZUO_MAX_PRIM_ARITY : count)))
               Z.o_interp_v = f->dispatcher(f->proc, args);
             else
               zuo_fail_arity(rator, args);
@@ -3095,6 +3094,19 @@ static void continue_step() {
               Z.o_interp_k = z.o_done_k;
             }
             /* no break => loop to apply again */
+          } else if (rator == z.o_kernel_eval) {
+            if (count != 1)
+              zuo_fail_arity(z.o_kernel_eval, args);
+
+            Z.o_interp_e = _zuo_car(args);
+            check_syntax(Z.o_interp_e);
+            Z.o_interp_meta_k = zuo_cons(Z.o_interp_k,
+                                         Z.o_interp_meta_k);
+
+            Z.o_interp_v = z.o_undefined;
+            Z.o_interp_env = z.o_top_env;
+            Z.o_interp_k = z.o_done_k;
+            break;
           } else
             zuo_fail1("not a procedure for application", rator);
         }
@@ -3145,8 +3157,6 @@ static void continue_step() {
 zuo_t *zuo_kernel_eval(zuo_t *e) {
   check_syntax(e);
 
-  Z.o_stash = zuo_cons(zuo_dump(), Z.o_stash);
-
   Z.o_interp_e = e;
   Z.o_interp_v = z.o_undefined;
   Z.o_interp_env = z.o_top_env;
@@ -3161,9 +3171,6 @@ zuo_t *zuo_kernel_eval(zuo_t *e) {
       if (Z.o_interp_meta_k == z.o_null) {
         zuo_t *v = Z.o_interp_v;
         Z.o_interp_e = Z.o_interp_v = Z.o_interp_env = z.o_false;
-
-        zuo_undump(_zuo_car(Z.o_stash));
-        Z.o_stash = _zuo_cdr(Z.o_stash);
 
         return v;
       } else {
@@ -3837,25 +3844,25 @@ static zuo_t *zuo_fd_handle(zuo_raw_handle_t handle, zuo_handle_status_t status)
   return h;
 }
 
-static char *zuo_drain(zuo_raw_handle_t fd, zuo_int_t amount, zuo_int_t *_len) {
-  char *s;
+static zuo_t *zuo_drain(zuo_raw_handle_t fd, zuo_int_t amount) {
+  zuo_t *s;
   zuo_int_t sz = 256, offset = 0;
 
   if ((amount >= 0) && (sz > amount))
     sz = amount;
-  
-  s = malloc(sz+1);
+
+  s = zuo_uninitialized_string(sz);
   while ((amount < 0) || (offset < amount)) {
     zuo_int_t got;
     zuo_int_t amt = sz - offset;
     if (amt > 4096) amt = 4096;
 #ifdef ZUO_UNIX
-    got = read(fd, s + offset, amt);
+    got = read(fd, ZUO_STRING_PTR(s) + offset, amt);
 #endif
 #ifdef ZUO_WINDOWS
     {
       DWORD dgot;
-      if (!ReadFile(fd, s + offset, amt, &dgot, NULL)) {
+      if (!ReadFile(fd, ZUO_STRING_PTR(s) + offset, amt, &dgot, NULL)) {
         if (GetLastError() == ERROR_BROKEN_PIPE)
           got = 0;
         else
@@ -3873,24 +3880,23 @@ static char *zuo_drain(zuo_raw_handle_t fd, zuo_int_t amount, zuo_int_t *_len) {
     } else {
       offset += got;
       if (offset == sz) {
-        char *new_s;
+        zuo_t *new_s;
         zuo_int_t new_sz = sz*2;
         if ((amount >= 0) && (new_sz > amount))
           new_sz = amount;
-        new_s = malloc(new_sz+1);
-        memcpy(new_s, s, sz);
-        free(s);
+        new_s = zuo_uninitialized_string(new_sz);
+        memcpy(ZUO_STRING_PTR(new_s), ZUO_STRING_PTR(s), sz);
         sz = new_sz;
         s = new_s;
       }
     }
   }
 
-  s[offset] = 0;
-  *_len = offset;
+  ZUO_STRING_PTR(s)[offset] = 0;
+  ZUO_STRING_LEN(s) = offset;
 
   if ((offset == 0) && (amount > 0))
-    return NULL;
+    return z.o_eof;
 
   return s;
 }
@@ -3989,7 +3995,7 @@ static zuo_t *zuo_fd_open_output(zuo_t *path, zuo_t *options) {
   if (options == z.o_undefined) options = z.o_empty_hash;
 
   if (zuo_is_path_string(path)) {
-    zuo_t *exists, *picky;
+    zuo_t *exists;
 
     if (options->tag != zuo_trie_node_tag)
       zuo_fail_arg(who, "hash table", options);
@@ -4119,9 +4125,7 @@ zuo_t *zuo_fd_write(zuo_t *fd_h, zuo_t *str) {
 
 static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
   const char *who = "fd-read";
-  char *data;
-  zuo_int_t len, amt = -1;
-  zuo_t *str;
+  zuo_int_t amt = -1;
   
   if ((fd_h->tag != zuo_handle_tag)
       || ((zuo_handle_t *)fd_h)->u.h.status != zuo_handle_open_fd_in_status)
@@ -4134,13 +4138,7 @@ static zuo_t *zuo_fd_read(zuo_t *fd_h, zuo_t *amount) {
       zuo_fail_arg(who, "nonnegative integer or eof", amount);
   }
 
-  data = zuo_drain(ZUO_HANDLE_RAW(fd_h), amt, &len);
-  if (data == NULL)
-    return z.o_eof;
-  
-  str = zuo_sized_string(data, len);
-
-  return str;
+  return zuo_drain(ZUO_HANDLE_RAW(fd_h), amt);
 }
 
 static zuo_t *zuo_fd_terminal_p(zuo_t *fd_h, zuo_t *ansi) {
@@ -4200,7 +4198,105 @@ static zuo_t *zuo_handle_p(zuo_t *var) {
 /* modules                                                              */
 /*======================================================================*/
 
-static zuo_t *zuo_module_to_hash(zuo_t *module_path);
+static zuo_t *zuo_declare_kernel_module() {
+  /* We implement the `read-and-eval` or `zuo/kernel` and
+     `module->hash` here as hand-built closures. We can't make them
+     primitives, becase they need to use the `kernel-eval`
+     `apply` intrinsics. */
+  zuo_t *arg_id, *module_to_hash;
+
+  arg_id = zuo_symbol("arg");
+
+  {
+    zuo_t *read_and_eval_sym, *read_and_eval, *call, *mod;
+
+    /* read-and-eval = (lambda arg "read-and-eval"
+       .                 (kernel-eval (kernel-read-from-string arg))) */
+    read_and_eval_sym = zuo_symbol("read-and-eval");
+    call = zuo_cons(z.o_kernel_eval,
+                    zuo_cons(zuo_cons(z.o_kernel_read_from_string,
+                                      zuo_cons(arg_id, z.o_null)),
+                             z.o_null));
+    read_and_eval = zuo_closure(zuo_cons(z.o_lambda_symbol,
+                                         zuo_cons(arg_id,
+                                                  zuo_cons(((zuo_symbol_t *)read_and_eval_sym)->str,
+                                                           zuo_cons(call, z.o_null)))),
+                                z.o_empty_hash);
+
+    mod = zuo_trie_extend(z.o_empty_hash, read_and_eval_sym, read_and_eval);
+
+    z.o_modules = zuo_cons(zuo_cons(zuo_symbol("zuo/kernel"), mod), z.o_modules);
+  }
+
+  {
+    zuo_t *mod_ids, *args, *car_arg, *cdr_arg, *hash_p_arg, *module_to_hash_star_arg, *recur;
+    zuo_t *call, *apply, *reg_mod, *bind, *if_form, *body;
+    /* module->hash = (lambda (mod) "module->hash" 
+       .                (let ([arg (module->hash* mod)])
+       .                  (if (hash? arg)
+       .                      arg
+       .                      (register-module
+       .                       mod
+       .                       (apply (get-read-and-eval (car arg) (module->hash (car arg))) (cdr arg))))) */
+    mod_ids = zuo_cons(zuo_symbol("mod"), z.o_null);
+    args = zuo_cons(arg_id, z.o_null);
+    car_arg = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("car")), args);
+    cdr_arg = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("cdr")), args);
+    hash_p_arg = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("hash?")), args);
+    module_to_hash_star_arg = zuo_cons(z.o_module_to_hash_star, mod_ids);
+    recur = zuo_cons(z.o_false, zuo_cons(car_arg, z.o_null));
+    call = zuo_cons(z.o_get_read_and_eval, zuo_cons(car_arg, zuo_cons(recur, z.o_null)));
+    apply = zuo_cons(z.o_apply, zuo_cons(call, zuo_cons(cdr_arg, z.o_null)));
+    reg_mod = zuo_cons(z.o_register_module, zuo_cons(_zuo_car(mod_ids), zuo_cons(apply, z.o_null)));
+    if_form = zuo_cons(z.o_if_symbol, zuo_cons(hash_p_arg, zuo_cons(arg_id, zuo_cons(reg_mod, z.o_null))));
+    bind = zuo_cons(zuo_cons(arg_id, zuo_cons(module_to_hash_star_arg, z.o_null)), z.o_null);
+    body = zuo_cons(z.o_let_symbol, zuo_cons(bind, zuo_cons(if_form, z.o_null)));
+    module_to_hash = zuo_closure(zuo_cons(z.o_lambda_symbol,
+                                          zuo_cons(mod_ids,
+                                                   zuo_cons(zuo_string("module->hash"),
+                                                            zuo_cons(body, z.o_null)))),
+                                 z.o_empty_hash);
+    ((zuo_pair_t *)recur)->car = module_to_hash; /* tie loop for recursive call */
+  }
+  
+  return module_to_hash;
+}
+
+static zuo_t *zuo_kernel_read_from_string(zuo_t *args) {
+  /* This primitive primitive claims to be `read-and-eval` in errors,
+     but it's actually just the reading part */
+  const char *who = "read-and-eval";
+  zuo_t *str, *start_i, *mod_path;
+  zuo_int_t start;
+  zuo_t *es;
+
+  /* Check arguments in case someone calls `read-and-eval` directly,
+     instead of through `#lang` */
+
+  if (zuo_length_int(args) != 3)
+    zuo_arity_error(zuo_string("read-and-eval"), args);
+
+  str = _zuo_car(args);
+  start_i = _zuo_car(_zuo_cdr(args));
+  mod_path = _zuo_car(_zuo_cdr(_zuo_cdr(args)));
+
+  check_string(who, str);
+  check_integer(who, start_i);
+  check_module_path(who, mod_path);
+
+  start = ZUO_INT_I(start_i);
+  if ((start < 0) || (start > ZUO_STRING_LEN(str)))
+    zuo_fail1w(who, "starting index is out of bounds", start_i);
+
+  es = zuo_read_all_str(str, start);
+
+  if (es == z.o_null)
+    zuo_fail("zuo/kernel: no S-expression in input");
+  if (_zuo_cdr(es) != z.o_null)
+    zuo_fail("zuo/kernel: more than one S-expression in input");
+
+  return _zuo_car(es);
+}
 
 static int zuo_module_path_equal(zuo_t *a, zuo_t *b) {
   if (a->tag == zuo_symbol_tag)
@@ -4211,57 +4307,23 @@ static int zuo_module_path_equal(zuo_t *a, zuo_t *b) {
     return zuo_string_eql(a, b) == z.o_true;
 }
 
-static zuo_t *zuo_eval_module(zuo_t *module_path, char *input_to_read_and_free, zuo_int_t input_len) {
-  char *input = input_to_read_and_free;
-  char *lang;
-  zuo_int_t post;
-  zuo_t *v;
-
-  Z.o_pending_modules = zuo_cons(module_path, Z.o_pending_modules);
-
-  lang = zuo_read_language(input, &post);
-  Z.o_stash = zuo_cons(module_path, Z.o_stash);
-
-  if (!strcmp(lang, "zuo/kernel")) {
-    zuo_t *es = zuo_read_all_str(input, input_len, post);
-    if (es == z.o_null)
-      zuo_fail("zuo/kernel: no S-expression in input");
-    if (_zuo_cdr(es) != z.o_null)
-      zuo_fail("zuo/kernel: more than one S-expression in input");
-    v = zuo_kernel_eval(_zuo_car(es));
-  } else {
-    zuo_t *env = zuo_module_to_hash(zuo_symbol(lang));
-    zuo_t *proc = zuo_trie_lookup(env, zuo_symbol("read-and-eval"));
-    if (proc->tag != zuo_closure_tag)
-      zuo_fail1("not a language module path", zuo_symbol(lang));
-    module_path = _zuo_car(Z.o_stash);
-    v = zuo_kernel_eval(zuo_cons(proc, zuo_cons(zuo_sized_string(input, input_len),
-                                                zuo_cons(zuo_integer(post),
-                                                         zuo_cons(zuo_cons(z.o_quote_symbol,
-                                                                           zuo_cons(module_path,
-                                                                                    z.o_null)),
-                                                                  z.o_null)))));
+static void zuo_log_module_start(zuo_t *module_path) {
+  if (zuo_logging) {
+    int i;
+    if (zuo_logging > 1) fprintf(stderr, "\n");
+    for (i = 1; i < zuo_logging; i++) fprintf(stderr, " ");
+    fprintf(stderr, "["); zuo_fdisplay(stderr, module_path);
+    fflush(stderr);
+    zuo_logging++;
   }
-  free(lang);
-
-  module_path = _zuo_car(Z.o_stash);
-  Z.o_stash = _zuo_cdr(Z.o_stash);
-
-  free(input);
-
-  if (v->tag != zuo_trie_node_tag)
-    zuo_fail1("module did not produce a hash table", module_path);
-
-  z.o_modules = zuo_cons(zuo_cons(module_path, v), z.o_modules);
-
-  ASSERT(zuo_module_path_equal(module_path, _zuo_car(Z.o_pending_modules)));
-  Z.o_pending_modules = _zuo_cdr(Z.o_pending_modules);
-
-  return v;
 }
 
-static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
-  zuo_t *file_path, *l, *mod;
+static zuo_t *zuo_module_to_hash_star(zuo_t *module_path) {
+  /* This primitive primitive implements the easy case of
+     `module->hash` when a module is declared. Otherwise, it bounces
+     back information needed to find the `#lang` module and eventually
+     call its `read- and-eval`.*/
+  zuo_t *file_path, *l;
 
   check_module_path("module->hash", module_path);
 
@@ -4280,32 +4342,44 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
 
   /* not already loaded */
 
+  Z.o_pending_modules = zuo_cons(module_path, Z.o_pending_modules);
+
   if (module_path->tag == zuo_symbol_tag)
     file_path = zuo_library_path_to_file_path(module_path);
   else
     file_path = module_path;
 
-  if (zuo_logging) {
-    int i;
-    if (zuo_logging > 1) fprintf(stderr, "\n");
-    for (i = 1; i < zuo_logging; i++) fprintf(stderr, " ");
-    fprintf(stderr, "["); zuo_fdisplay(stderr, module_path);
-    fflush(stderr);
-    zuo_logging++;
-  }
+  zuo_log_module_start(module_path);
 
   {
     zuo_raw_handle_t in;
-    char *input;
-    zuo_int_t in_len;
-    
+    zuo_t *str, *lang;
+    zuo_int_t post;
+
     in = zuo_fd_open_input_handle(file_path);
-    
-    input = zuo_drain(in, -1, &in_len);
+    str = zuo_drain(in, -1);
     zuo_close_handle(in);
 
-    mod = zuo_eval_module(module_path, input, in_len);
+    lang = zuo_read_language(ZUO_STRING_PTR(str), &post);
+
+    /* `car` is sent to `module->hash` recursively, and rest
+       are args to extracted `read-and-eval` */
+    return zuo_cons(lang, zuo_cons(str, zuo_cons(zuo_integer(post), zuo_cons(module_path, z.o_null))));
   }
+}
+
+static zuo_t *zuo_register_module(zuo_t *module_path, zuo_t *mod) {
+  /* Bookends the complicated case of `module->hash`, registering a
+     newly evaluated module. */
+  if (mod->tag != zuo_trie_node_tag)
+    zuo_fail1("module did not produce a hash table", module_path);
+
+  if ((Z.o_pending_modules == z.o_null)
+      || (module_path != _zuo_car(Z.o_pending_modules)))
+    zuo_fail1("attempting to register unexpected module", module_path);
+
+  z.o_modules = zuo_cons(zuo_cons(module_path, mod), z.o_modules);
+  Z.o_pending_modules = _zuo_cdr(Z.o_pending_modules);
 
   if (zuo_logging) {
     zuo_logging--;
@@ -4316,6 +4390,63 @@ static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
   }
 
   return mod;
+}
+
+static zuo_t *zuo_get_read_and_eval(zuo_t *lang, zuo_t *mod) {
+  /* The middle part of `module->hash`: makes sure the `#lang` module
+     really is a language module and returns its `read-and-eval` to be
+     applied. */
+  zuo_t *proc;
+  proc = zuo_trie_lookup(mod, zuo_symbol("read-and-eval"));
+  if (proc->tag != zuo_closure_tag)
+    zuo_fail1("not a language module path", lang);
+  return proc;
+}
+
+static zuo_t *zuo_module_to_hash(zuo_t *module_path) {
+  /* This is a convenience function to be used only to start evaluation */
+  return zuo_kernel_eval(zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("module->hash")),
+                                  zuo_cons(zuo_cons(z.o_quote_symbol,
+                                                    zuo_cons(module_path,
+                                                             z.o_null)),
+                                           z.o_null)));
+}
+
+static zuo_t *zuo_eval_module(zuo_t *module_path, zuo_t *input_str) {
+  /* This is a convenience function to be used only to start evaluation */
+  zuo_t *lang, *read_and_eval, *mod;
+  zuo_int_t post;
+
+  zuo_log_module_start(module_path);
+
+  Z.o_pending_modules = zuo_cons(module_path, Z.o_pending_modules);
+  Z.o_stash = zuo_cons(module_path, Z.o_stash);
+  Z.o_stash = zuo_cons(input_str, Z.o_stash);
+
+  lang = zuo_read_language(ZUO_STRING_PTR(input_str), &post);
+  Z.o_stash = zuo_cons(lang, Z.o_stash);
+
+  mod = zuo_module_to_hash(lang);
+
+  lang = _zuo_car(Z.o_stash);
+  Z.o_stash = _zuo_cdr(Z.o_stash);
+
+  read_and_eval = zuo_get_read_and_eval(lang, mod);
+
+  input_str = _zuo_car(Z.o_stash);
+  Z.o_stash = _zuo_cdr(Z.o_stash);
+  module_path = _zuo_car(Z.o_stash);
+
+  mod = zuo_kernel_eval(zuo_cons(read_and_eval,
+                                 zuo_cons(input_str,
+                                          zuo_cons(zuo_integer(post),
+                                                   zuo_cons(module_path,
+                                                            z.o_null)))));
+
+  module_path = _zuo_car(Z.o_stash);
+  Z.o_stash = _zuo_cdr(Z.o_stash);
+
+  return zuo_register_module(module_path, mod);
 }
 
 /*======================================================================*/
@@ -4656,7 +4787,7 @@ static zuo_t *zuo_cp(zuo_t *src_path, zuo_t *dest_path) {
 #ifdef ZUO_UNIX
   int src_fd, dest_fd;
   struct stat st_buf;
-  zuo_int_t buf_size = 4096, len, amt;
+  zuo_int_t len, amt;
   char *buf;
 
   src_fd = open(ZUO_STRING_PTR(src_path), O_RDONLY);
@@ -6010,9 +6141,6 @@ static void zuo_primitive_init(int will_load_image) {
   z.o_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_call_cc = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_call_prompt = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_done_k = zuo_cont(zuo_done_cont, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined);
   z.o_intern_table = zuo_trie_node();
   z.o_top_env = zuo_trie_node();
@@ -6134,14 +6262,17 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVEa("exit", zuo_exit);
 
   ZUO_TOP_ENV_SET_PRIMITIVEb("read-from-string-all", zuo_read_all);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("kernel-eval", zuo_kernel_eval);
-  ZUO_TOP_ENV_SET_PRIMITIVE1("module->hash", zuo_module_to_hash);
   ZUO_TOP_ENV_SET_PRIMITIVE1("module-path?", zuo_module_path_p);
   ZUO_TOP_ENV_SET_PRIMITIVE0("kernel-env", zuo_kernel_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE0("runtime-env", zuo_runtime_env);
 
   ZUO_TOP_ENV_SET_PRIMITIVE1("dump-image-and-exit", zuo_dump_image_and_exit);
+
+  z.o_kernel_read_from_string = zuo_primitive1(zuo_kernel_read_from_string, z.o_void);
+  z.o_module_to_hash_star = zuo_primitive1(zuo_module_to_hash_star, z.o_void);
+  z.o_get_read_and_eval = zuo_primitive2(zuo_get_read_and_eval, z.o_void);
+  z.o_register_module = zuo_primitive2(zuo_register_module, z.o_void);
 }
 
 static void zuo_image_init(char *boot_image) {
@@ -6153,17 +6284,20 @@ static void zuo_image_init(char *boot_image) {
     if (boot_image) {
       /* The image supplies constants and tables */
       zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_string(boot_image));
-      zuo_int_t len;
-      char *dump = zuo_drain(in, -1, &len);
+      zuo_t *dump = zuo_drain(in, -1);
       zuo_close_handle(in);
-      zuo_fasl_restore(dump, len);
-      free(dump);
+      zuo_fasl_restore(ZUO_STRING_PTR(dump), ZUO_STRING_LEN(dump));
     } else {
       /* Create remaining constants and tables */
       z.o_true = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_false = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_eof = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
       z.o_empty_hash = zuo_trie_node();
+
+      z.o_apply = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_call_cc = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_call_prompt = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
+      z.o_kernel_eval = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
     
       z.o_quote_symbol = zuo_symbol("quote");
       z.o_lambda_symbol = zuo_symbol("lambda");
@@ -6176,7 +6310,13 @@ static void zuo_image_init(char *boot_image) {
       ZUO_TOP_ENV_SET_VALUE("apply", z.o_apply);
       ZUO_TOP_ENV_SET_VALUE("call/cc", z.o_call_cc);
       ZUO_TOP_ENV_SET_VALUE("call/prompt", z.o_call_prompt);
+      ZUO_TOP_ENV_SET_VALUE("kernel-eval", z.o_kernel_eval);
       ZUO_TOP_ENV_SET_VALUE("eof", z.o_eof);
+
+      {
+        zuo_t *module_to_hash = zuo_declare_kernel_module();
+        ZUO_TOP_ENV_SET_VALUE("module->hash", module_to_hash);
+      }
     }
 # if EMBEDDED_IMAGE
   }
@@ -6343,10 +6483,9 @@ int zuo_main(int argc, char **argv) {
     zuo_t *mod_ht, *submods, *main_proc;
     
     if (load_file[0] == 0) {
-      zuo_int_t in_len;
       zuo_raw_handle_t in = zuo_fd_open_input_handle(zuo_symbol("stdin"));
-      char *input = zuo_drain(in, -1, &in_len);
-      mod_ht = zuo_eval_module(load_path, input, in_len);
+      zuo_t *input = zuo_drain(in, -1);
+      mod_ht = zuo_eval_module(load_path, input);
     } else
       mod_ht = zuo_module_to_hash(load_path);
 
@@ -6438,10 +6577,7 @@ zuo_ext_t *zuo_ext_apply(zuo_ext_t *proc, zuo_ext_t *args) {
 void zuo_ext_runtime_init(zuo_ext_t *lib_path, zuo_ext_t *runtime_env) { zuo_runtime_init(lib_path, runtime_env); }
 
 zuo_ext_t *zuo_ext_eval_module(zuo_ext_t *as_module_path, const char *content, long long len) {
-  char *str = malloc(len+1);
-  memcpy(str, content, len);
-  str[len] = 0;
-  return zuo_eval_module(as_module_path, str, (zuo_int_t)len);
+  return zuo_eval_module(as_module_path, zuo_sized_string(content, len));
 }
 
 void zuo_ext_stash_push(zuo_ext_t *v) { Z.o_stash = zuo_cons(v, Z.o_stash); }
