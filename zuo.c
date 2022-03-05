@@ -3460,10 +3460,10 @@ static int zuo_path_is_absolute(const char *p) {
   return p[0] == '/';
 #endif
 #ifdef ZUO_WINDOWS
-  return ((p[0] == '/')
-          || (p[0] == '\\')
+  return (ZUO_IS_PATH_SEP(p[0])
           || (isalpha(p[0])
-              && (p[1] == ':')));
+              && (p[1] == ':')
+	      && ZUO_IS_PATH_SEP(p[2])));
 #endif
 }
 
@@ -3529,13 +3529,41 @@ static zuo_t *zuo_current_directory() {
 }
 
 static zuo_t *zuo_split_path(zuo_t *p) {
-  zuo_int_t i;
+  zuo_int_t i, skip = 0;
   int non_sep, tail_seps;
   
   check_path_string("split-path", p);
 
+#ifdef ZUO_WINDOWS
+  if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[0])
+      && ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[1])) {
+    /* Treat a UNC drive the same as a root "/" */
+#   define ZUO_IS_NON_SEP(c) ((c) && !ZUO_IS_PATH_SEP(c))
+    if (ZUO_IS_NON_SEP(ZUO_STRING_PTR(p)[2])) {
+      for (i = 3; ZUO_IS_NON_SEP(ZUO_STRING_PTR(p)[i]); i++) { }
+      if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[i])
+	  && ZUO_IS_NON_SEP(ZUO_STRING_PTR(p)[i+1])) {
+	for (i++; ZUO_IS_NON_SEP(ZUO_STRING_PTR(p)[i]); i++) { }
+	if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[i]))
+	  skip = i;
+      }
+    }
+  } else if (isalpha(ZUO_STRING_PTR(p)[0])
+	     && (ZUO_STRING_PTR(p)[1] == ':')
+	     && ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[2])) {
+    skip = 2;
+  }
+  /* Some things we are not handling about Windows paths:
+     - When a path has trailing whitespace, it's not supposed to
+       count as part of the last path element
+     - When a path starts `\\?\c:\`, then slashes are not supposed
+       to count as paht separators
+     - When a path starts `\\?\UNC\`, then the next two elements
+       are supposed to be part of the drive */
+#endif
+  
   non_sep = tail_seps = 0;
-  for (i = ZUO_STRING_LEN(p); i--; ) {
+  for (i = ZUO_STRING_LEN(p); i-- > skip; ) {
     if (ZUO_IS_PATH_SEP(ZUO_STRING_PTR(p)[i])) {
       if (non_sep) {
         i++;
@@ -3549,7 +3577,7 @@ static zuo_t *zuo_split_path(zuo_t *p) {
   }
 
   if (tail_seps > 0) {
-    if (tail_seps == ZUO_STRING_LEN(p))
+    if (tail_seps == (ZUO_STRING_LEN(p) - skip))
       tail_seps--;
     p = zuo_sized_string(ZUO_STRING_PTR(p), ZUO_STRING_LEN(p)-tail_seps);
   }
@@ -3585,11 +3613,13 @@ static zuo_t *zuo_build_raw_path2(zuo_t *pre, zuo_t *post) {
 }
 
 static zuo_t *zuo_build_path2(zuo_t *base, zuo_t *rel) {
-  /* resolves "." and ".." elements of `rel` while adding to `base`,
+  /* Resolves "." and ".." elements of `rel` while adding to `base`,
      potentially also resolving ".." or "." at the end of `base` as
      needed to normalize the addition; also, if `base` is just ".",
      possibly after resolving ".."s, then "." is not added to the
-     start of `rel` */
+     start of `rel`.
+     We don't check that `rel` is actually relative at this layer, and
+     internally we allow "adding" an absolute path to "."  as `base`.*/
   zuo_t *exploded = z.o_null;
   int ups;
 
@@ -3685,6 +3715,7 @@ static zuo_t *zuo_build_path(zuo_t *paths) {
 }
 
 static zuo_t *zuo_normalize_input_path(zuo_t *path) {
+  /* Using "." is meant to work even if `path` is absolute: */
   return zuo_build_path2(zuo_string("."), path);
 }
 
