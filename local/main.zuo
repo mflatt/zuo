@@ -38,9 +38,8 @@
             (lambda (path token)
               (rule (list image_zuo.c
                           (input-data-target 'config config)
-			  (quote-module-path)
-			  (quote-path "compile.zuo"))
-                    (file-sha1 path token)
+                          (quote-module-path)
+                          (quote-path "compile.zuo"))
                     (lambda ()
                       (define l (split-path path))
                       (when (car l) (mkdir* (car l)))
@@ -48,8 +47,7 @@
                                  (target-path image_zuo.c)
                                  (list (~a "-DZUO_LIB_PATH=" lib-path))
                                  config
-                                 thread-process-wait)
-                      (file-sha1 path token))))))
+                                 thread-process-wait))))))
 
   (define (add-exe name)
     (if (eq? (hash-ref (runtime-env) 'system-type) 'windows)

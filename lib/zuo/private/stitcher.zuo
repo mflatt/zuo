@@ -198,6 +198,10 @@
                                 (recur (car (cdr (cdr s))))
                                 (recur (car (cdr (cdr (cdr s))))))
                           (bad-syntax s))]
+                     [(if (eq? (car s) 'hash) (null? (cdr s)) #f) ; ad hoc optimization
+                      (hash)]
+                     [(if (eq? (car s) 'void) (null? (cdr s)) #f) ; ad hoc optimization
+                      (void)]
                      [else (letrec ([do-app (lambda (s)
                                               (if (null? s)
                                                   '()

@@ -9,8 +9,9 @@
          input-file-target
          input-data-target
 
-         target-path
          target-name
+         target-path
+         target-shell
 
          target?
          token?
@@ -27,6 +28,7 @@
 
          find-target
          make-at-dir
+         quote-make-input-target
          provide-targets)
 
 ;; ------------------------------------------------------------
@@ -39,14 +41,14 @@
 
 (struct target (key       ; shortcut: `string->symbol` of the path
                 name      ; a symbol or path relative to the current directory
-                get-rule  ; (token -> rule), where `path` is relative to current directory
+                get-rule  ; (name token -> rule), where `path` is relative to current directory
                 kind      ; 'normal, 'input, or 'phony
                 options)) ; 'precious?, etc.
 
 ;; A rule is a result from `get-rule`:
 (struct rule (deps        ; list of targets
-              sha1        ; current SHA-1
-              build))     ; (token -> new-sha1), called when deps SHA-1s different than recorded
+              build       ; (-> any), called when deps SHA-1s different than recorded
+              sha1))      ; #f => computed via `file-sha1`
 
 ;; A phony target returns a phony-rule, instead:
 (struct phony-rule (deps
@@ -84,16 +86,16 @@
 ;; public constructor
 (define make-rule
   (let ([rule
-         (lambda (deps sha1 [build #f])
+         (lambda (deps [build #f] [sha1 #f])
            (let ([norm-deps (and (list? deps) (map coerce-to-target deps))])
              (unless (and norm-deps (andmap target? norm-deps))
                (arg-error 'rule "list of targets" deps))
-             (unless (sha1? sha1)
-               (arg-error 'rule "sha1?" sha1))
              (unless (or (not build)
                          (procedure? build))
                (arg-error 'rule "procedure or #f" build))
-             (rule norm-deps sha1 build)))])
+             (unless (or (not sha1) (sha1? sha1))
+               (arg-error 'rule "sha1 or #f" sha1))
+             (rule norm-deps build sha1)))])
     rule))
 
 ;; An input-file target has no dependencies
@@ -102,10 +104,9 @@
   (target (string->symbol path)
           path
           (lambda (path token)
-            (let ([sha1 (file-sha1 path token)])
-              (if (equal? sha1 no-sha1)
-                  (error "missing input file" path)
-                  (make-rule '() sha1))))
+            (rule '()
+                  (lambda () (error "missing input file" path))
+                  #f))
           'input
           (hash)))
 
@@ -119,7 +120,7 @@
   (unless (symbol? name) (arg-error 'input-data-target "symbol" name))
   (target (symbol->key name)
           name
-          (lambda (path token) (make-rule '() (string-sha1 (~s v))))
+          (lambda (path token) (make-rule '() #f (string-sha1 (~s v))))
           'input
           (hash)))
 
@@ -137,19 +138,27 @@
 (define (get-phony-rule->get-rule get-phony-rule)
   (lambda (path token)
     (define r (get-phony-rule token))
-    (unless (phony-rule? r)<
+    (unless (phony-rule? r)
       (error "build: target result is not a phony rule" r))
     (rule (phony-rule-deps r)
-          phony-sha1
           (lambda ()
             ((phony-rule-build r))
-            phony-sha1))))
+            phony-sha1)
+          phony-sha1)))
 
 (define (target-path t)
+  (unless (target? t) (arg-error 'target-path "target" t))
   (let ([n (target-name t)])
     (if (symbol? n)
         (error "target-path: target does not have a path name" t)
         n)))
+
+(define (target-shell t)
+  (unless (target? t) (arg-error 'target-path "target" t))
+  (let ([n (target-name t)])
+    (if (symbol? n)
+        (error "target-shell: target does not have a path name" t)
+        (string->shell n))))
 
 ;; ------------------------------------------------------------
 ;; Build state and loop
@@ -232,7 +241,7 @@
     [(eq? (target-kind t) 'input)
      ;; no dependencies, not need for a thread to build, etc.
      (define r ((target-get-rule t) (target-name t) #f))
-     (define sha1 (rule-sha1 r))
+     (define sha1 (or (rule-sha1 r) (file-sha1/state (target-path t) state)))
      (update-target-state state t (list sha1))]
     [else (build-unbuilt t state top?)]))
 
@@ -264,8 +273,9 @@
   (unless (rule? r)
     (error "build: target result is not a rule" r))
   (define deps (rule-deps r))
-  (define sha1 (rule-sha1 r))
+  (define sha1 (or (rule-sha1 r) (file-sha1 path tok)))
   (define to-build (rule-build r))
+  (define build-to-sha1? (and (rule-sha1 r) #t))
 
   ;; if we recorded any data targets, we need to fix up the keys
   (define prev-dep-sha1s (foldl (lambda (dep-key dep-sha1s)
@@ -294,12 +304,13 @@
            deps))
 
   ;; extract results, assemble in a hash table: <rel-path> -> <sha1>
-  (define dep-sha1s
+  (define dep-reported-sha1s
     (foldl (lambda (dep dep-sha1s)
              (add-dependent-target-state dep dep-sha1s target-dir new-state))
            (hash)
-           (append deps
-                   (hash-ref (build-state-target-accum new-state) (target-key t) '()))))
+           deps))
+  (define dep-sha1s
+    (cdr (merge-target-accumulated new-state t (cons #f dep-reported-sha1s))))
 
   ;; calling the build step for `t` might generate more dependencies, but those
   ;; extra dependencies are supposed to be determined only by the ones declared
@@ -370,12 +381,15 @@
      (let ([ch (channel)])
        (thread (lambda ()
                  (acquire-resource newer-state) ; limits process parallelism
-                 (let* ([sha1 (to-build)]) ; build!
+                 (let* ([maybe-sha1 (to-build)] ; build!
+                        [sha1 (if build-to-sha1?
+                                  maybe-sha1
+                                  (file-sha1 path tok))])
                    (unless (sha1? sha1)
-                     (error "build: target-build result is not a SHA-1" sha1))
+                     (error "build: target-build result is not a sha1" sha1))
                    (when path-handle (cleanable-cancel path-handle))
                    (channel-put ch (if (eq? sha1 phony-sha1)
-                                       (list no-sha1)
+                                       (cons no-sha1 (hash))
                                        (cons sha1 dep-sha1s)))
                    (release-resource newer-state))))
        ;; meanwhile, record a channel as the start's current build state
@@ -397,13 +411,18 @@
                (hash-set opts 'jobs v)
                (error "not a positive integer" n)))]
    :args
-   ([target (~a (target-name (car targets)))])
+   ([target (if (null? targets) #f (~a (target-name (car targets))))])
    (lambda (opts)
-     (build (or (find-target target targets)
-                (error (~a "unknown target: " target)))
+     (build (if target
+                (or (find-target target targets)
+                    (error (~a "unknown target: " target)))
+                (error "no targets to build"))
             opts))))
 
 (define (find-target name targets)
+  (unless (path-string? name) (arg-error 'find-target "path string"))
+  (unless (and (list? targets) (andmap target? targets))
+    (arg-error 'find-target "list of targets"))
   (define len (string-length name))
   (define (matches? t-name)
     (let* ([t-name (~a t-name)]
@@ -425,6 +444,11 @@
             (build-path dir path)
             path))
       (lambda (path) path)))
+
+(define-syntax (quote-make-input-target stx)
+  (unless (and (list? stx) (= (length stx) 1)) (bad-syntax stx))
+  (quote-syntax (lambda (file)
+                  (input-file-target (build-path (path-only (quote-module-path)) file)))))
 
 ;; Exports `targets`, which is a function that takes an `at-dir`
 ;; function, while also setting up a `main` submodule to call
@@ -517,8 +541,11 @@
   (unless (or (not token) (token? token)) (error 'file-sha1 "build-token" token))
   (let ([state (and token (channel-get (token-ch token)))])
     (when state (channel-put (token-ch token) state))
-    (or (file-sha1/cached path (and state (build-state-time-cache state)))
-        no-sha1)))
+    (file-sha1/state path state)))
+
+(define (file-sha1/state path state)
+  (or (file-sha1/cached path (and state (build-state-time-cache state)))
+      no-sha1))
 
 ;; translate a data key as loaded from a previous-run to a key as
 ;; instantiated for this run

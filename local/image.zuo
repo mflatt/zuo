@@ -44,7 +44,7 @@
 
 (define (image-target cmd)
   (target
-   (hash-ref cmd 'output) ; the output file
+   (hash-ref cmd 'output) ; the output file; `target` uses SHA-1 on this
    (lambda (path token)
      ;; when a target is demanded, we report dependencies and more via `rule`
      (rule
@@ -52,8 +52,6 @@
       (list (quote-path ".." "zuo.c") ; original "zuo.c" that is converted to embed libraries
             (quote-module-path)       ; this script
             (input-data-target 'config (hash-remove cmd 'output))) ; configuration
-      ;; current state of the output file as a SHA-1 hash:
-      (file-sha1 path token)
       ;; rebuild function (called if the output file is out of date):
       (lambda ()
         ;; get `embed-image` to tell us which module files it used:
@@ -64,9 +62,7 @@
                        cmd))
         ;; register each source module as a discovered dependency:
         (for-each (lambda (p) (build/recur p token))
-                  (string-read (file->string deps-file) 0 deps-file))
-        ;; state of the output file after building:
-        (file-sha1 path token))))))
+                  (string-read (file->string deps-file) 0 deps-file)))))))
 
 (define (embed-image cmd)
   (define given-libs (hash-ref cmd 'libs '()))

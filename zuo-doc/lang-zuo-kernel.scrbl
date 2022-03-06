@@ -89,8 +89,8 @@ in @racketmodname[zuo/kernel] (and the values originate there):
 
   opaque opaque-ref
 
-  path-string? build-path split-path relative-path?
-  module-path? module-path-join
+  path-string? build-path build-raw-path split-path relative-path?
+  module-path? build-module-path
 
   variable? variable variable-ref variable-set!
 

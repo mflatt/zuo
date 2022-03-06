@@ -147,8 +147,9 @@
     explode-path
     simple-form-path
     find-relative-path
-    build-normalized-path
+    build-raw-path
     path-replace-suffix
+    path-only
     rm* cp* mkdir*
     :error :truncate :must-truncate :append :update :can-update
     cleanable-file
@@ -173,7 +174,7 @@
 
     string-read
     module->hash
-    module-path-join
+    build-module-path
     kernel-env
     kernel-eval
 
@@ -202,6 +203,7 @@
     build/command-line
     build/recur
     make-at-dir
+    quote-make-input-target
     provide-targets
     find-target
 

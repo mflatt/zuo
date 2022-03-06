@@ -24,6 +24,7 @@
          simple-form-path
          find-relative-path
          path-replace-suffix
+         path-only
 
          mkdir*
          rm*
@@ -154,33 +155,27 @@
 (define (simple-form-path p)
   (apply build-path (explode-path p)))
 
-(define (dedot-exploded-path p)
-  (reverse
-   (let dedot ([p (reverse p)] [ups 0])
-     (cond
-       [(null? p) (if (= ups 0) '() (cons ".." (dedot '() (- ups 1))))]
-       [(equal? (car p) ".") (dedot (cdr p) ups)]
-       [(equal? (car p) "..") (dedot (cdr p) (+ ups 1))]
-       [(= ups 0) (cons (car p) (dedot (cdr p) 0))]
-       [else (dedot (cdr p) (- ups 1))]))))
-
 (define (find-relative-path wrt p)
   (unless (path-string? wrt)
     (arg-error 'find-relative-path "path string" wrt))
   (unless (path-string? p)
     (arg-error 'find-relative-path "path string" p))
-  (unless (eq? (relative-path? wrt) (relative-path? p))
+  (define rel? (relative-path? wrt))
+  (unless (eq? rel? (relative-path? p))
     (error "find-relative-path: paths are not both relative or both absolute" (list wrt p)))
-  (define ps (dedot-exploded-path (explode-path p)))
-  (define wrts (dedot-exploded-path (explode-path wrt)))
-  (if (or (null? ps) (null? wrts) (equal? (car ps) (car wrts)))
-      (let loop ([ps ps] [wrts wrts])
-        (cond
-          [(null? wrts) (if (null? ps) #f (apply build-path ps))]
-          [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
-          [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
-          [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
-      (apply build-path ps)))
+  (define wrts (explode-path wrt))
+  (cond
+    [(string=? (car wrts) ".") p]
+    [else
+     (define ps (explode-path p))
+     (if (or rel? (equal? (car ps) (car wrts)))
+         (let loop ([ps (if (string=? (car ps) ".") (cdr ps) ps)] [wrts wrts])
+           (cond
+             [(null? wrts) (if (null? ps) "." (apply build-path ps))]
+             [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
+             [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
+             [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
+         p)]))
 
 (define (path-replace-suffix path-in suffix)
   (unless (path-string? path-in) (arg-error 'path-replace-suffix "path string" path-in))
@@ -199,6 +194,23 @@
   (if (car l)
       (build-path (car l) new-path)
       new-path))
+
+(define (path-only p)
+  (unless (path-string? p) (arg-error 'path-only "path string" p))
+  (let ([c (string-ref p (- (string-length p) 1))])
+    (cond
+      [(or (= c 47)  ; = (char "/")
+           (and (= c 92) ; = (char "\\")
+                (eq? 'windows (hash-ref (runtime-env) 'system-type))))
+       p]
+      [else
+       (define l (split-path p))
+       (if (or (and (not (car l))
+                    (not (relative-path? p)))
+               (string=? (cdr l) ".")
+               (string=? (cdr l) ".."))
+           p
+           (or (car l) "."))])))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

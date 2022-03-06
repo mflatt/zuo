@@ -607,9 +607,20 @@ all path separators the platform default (on Windows).}
 @defproc[(find-relative-path [base path-string?] [path path-string?]) path-string?]{
 
 Finds a path relative to @racket[base] that accesses the same file or
-directory as @racket[path]. If @racket[base] and @racket[path] are
-both absolute and they do not share a root element, the result can
-still be an absolute path.}
+directory as @racket[path]. Both @racket[base] and @racket[path] must
+be normalized in the sense of @racket[simple-form-path], otherwise
+@filepath{.} and @filepath{..} elements are treated normal path
+elements. If @racket[base] and @racket[path] are both absolute and
+they do not share a root element, the result can still be an absolute
+path.}
+
+@defproc[(path-only [path path-string?]) path-string?]{
+
+Returns @racket[path] without its final path element in the case that
+@racket[path] is not syntactically a directory. If @racket[path] has
+only a single, non-directory path element, @racket["."] is returned.
+If @racket[path] is syntactically a directory, then @racket[path] is
+returned unchanged.}
 
 @defproc[(path-replace-suffix [path path-string?] [suffix string?]) path-string?]{
 

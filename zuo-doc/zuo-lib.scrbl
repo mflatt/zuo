@@ -90,16 +90,19 @@ they are not specified when @racket[target] is called, because
 computing dependencies for a target may involve work that can be
 skipped if the target isn't needed. Instead, @racket[target] takes a
 @racket[_get-rule] procedure that will be called if the dependencies
-are needed. The @racket[_get-rule] procedure returns three things in a
-@racket[rule] record: a list of dependencies; the hash of an
-already-built version of the target, if one exists; and a
-@racket[_rebuild] procedure that is called if the returned hash, the
-hash of dependencies (rebuilt if needed), and recorded results from a
-previous build together determine that a rebuild is needed.
+are needed. The @racket[_get-rule] procedure returns up to three
+results in a @racket[rule] record: a list of dependencies; the hash of
+an already-built version of the target, if one exists, where
+@racket[file-sha1] is used by default; and a @racket[_rebuild]
+procedure that is called if the returned hash, the hash of
+dependencies (rebuilt if needed), and recorded results from a previous
+build together determine that a rebuild is needed.
 
-When a target's @racket[_rebuild] function is called, it returns a
-hash for the result of the build. It's possible that the result hash
-is the same the one returned by @racket[_get-rule]; that is, maybe a
+When a target's @racket[_rebuild] function is called, it optionally
+returns a hash for the result of the build if the target's
+@racket[rule] had one, otherwise @racket[file-sha1] is used to get a
+result hash. Either way, it's possible that the result hash is the
+same the one returned by @racket[_get-rule]; that is, maybe a
 dependency of the target changed, but the change turned out not to
 affect the built result. In that case, rebuilding for other targets
 that depend on this one can be short-circuited.
@@ -206,6 +209,11 @@ symbol for an input-data target or a @tech{phony} target.}
 The same as @racket[target-name] for a target whose name is a path,
 and an error for other targets.}
 
+@defproc[(target-shell [t target?]) string?]{
+
+Composes @racket[target-path] with @racket[string->shell]. Use this
+when getting a target name to include in a shell command.}
+
 
 @defproc[(input-file-target [path path-string?]) target?]{
 
@@ -248,8 +256,8 @@ caching and with @racket[build/recur] to report discovered targets.}
 
 @deftogether[(
 @defproc[(rule [dependencies (listof (or/c target? path-string?))]
-               [sha1 sha1?]
-               [rebuild (or/c (-> sha?) #f) #f])
+               [rebuild (or/c (-> (or/c sha1? any/c)) #f) #f]
+               [sha1 (or/c sha1? #f) #f])
          rule?]
 @defproc[(rule? [v any/c]) boolean?]
 )]{
@@ -257,8 +265,13 @@ caching and with @racket[build/recur] to report discovered targets.}
 The @racket[rule] procedure combines the three results expected from a
 procedure passed to @racket[target]. See @secref["make-target"].
 
-A path string can be reported as a dependency, in which case it is
-coerced to a target using @racket[input-file-target].}
+A path string can be reported as a dependency in
+@racket[dependencies], in which case it is coerced to a target using
+@racket[input-file-target]. If @racket[sha1] is @racket[#f],
+@racket[file-sha1] is used to compute the target's current hash, and
+@racket[rebuild] is not expected to return a hash. If @racket[sha1] is
+not @racket[#f], then if @racket[rebuild] is called, it must return a
+new hash.}
 
 
 @deftogether[(
@@ -272,7 +285,6 @@ The @racket[phony-rule] procedure combines the two results expected
 from a procedure passed to @racket[target] to create a @tech{phony}
 target. Compared to the non-phonu protocol, the result SHA-1 is
 omitted.}
-
 
 @defproc[(token? [v any/c]) boolean?]{
 
@@ -364,6 +376,15 @@ creates a @racketidfont{main} submodule that run
 A script using @racket[provide-targets] thus works as a makefile-like
 script or as an input to a larger build.}
 
+@defform[(quote-make-input-target)]{
+
+Produces a function useful to convert a module-relative path into an
+input file target. The function is equivalent to
+
+@racketblock[
+(lambda (file)
+  (input-file-target (build-path (path-only (quote-module-path)) file)))
+]}
 
 @section[#:tag "zuo-glob"]{Glob Matching}
 

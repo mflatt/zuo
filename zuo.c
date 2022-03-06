@@ -2980,7 +2980,7 @@ static void interp_step() {
 
   if (zuo_probe_each) {
     zuo_probe_counter++;
-    if ((zuo_probe_counter % 1000) == 0) {
+    if ((zuo_probe_counter % zuo_probe_each) == 0) {
       fprintf(stderr, "probe %d:\n", zuo_probe_counter);
       zuo_stack_trace();
     }
