@@ -20,6 +20,8 @@
 (require "filesystem.zuo")
 (require "cleanable.zuo")
 (require "image.zuo")
+(require "shell.zuo")
+(require "c.zuo")
 (require "cycle.zuo")
 (require "form.zuo")
 (require "form-hygienic.zuo")

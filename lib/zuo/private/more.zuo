@@ -44,8 +44,7 @@
          string-join
          string-trim
 
-         find-executable-path
-         shell)
+         find-executable-path)
 
 (define (void? v) (eq? v (void)))
 
@@ -393,11 +392,3 @@
                  (cons (hash-ref (runtime-env) 'dir)
                        (string-split PATH (if windows? ";" ":")))))]
     [else (try-exe exe)]))
-
-(define (shell command [options (hash)])
-  (cond
-    [(eq? (hash-ref (runtime-env) 'system-type) 'unix)
-     (apply process (append '("/bin/sh" "-c") (list command options)))]
-    [else
-     (let ([cmd (build-path (hash-ref (runtime-env) 'sys-dir) "cmd.exe")])
-       (process cmd (~a cmd " /c \"" command "\"") (hash-set options 'exact? #t)))]))

@@ -161,7 +161,6 @@
     find-executable-path
     shell->strings
     string->shell
-    shell
     
     error
     alert
@@ -206,6 +205,10 @@
     quote-make-input-target
     provide-targets
     find-target
+
+    shell
+    shell/wait
+    build-shell
 
     call-in-main-thread
     thread? thread channel? channel channel-put channel-get

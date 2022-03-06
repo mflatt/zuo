@@ -18,9 +18,9 @@ Racket's long names.
 
 The @racketmodname[zuo/base] language includes most of the bindings
 from @racketmodname[zuo], but not the ones that are from
-@racketmodname[zuo/cmdline], @racketmodname[zuo/build]
-@racketmodname[zuo/thread], @racketmodname[zuo/glob], or
-@racketmodname[zuo/config].
+@racketmodname[zuo/cmdline], @racketmodname[zuo/build],
+@racketmodname[zuo/shell], @racketmodname[zuo/thread],
+@racketmodname[zuo/glob], or @racketmodname[zuo/config].
 
 @section{Syntax and Evaluation Model}
 
@@ -1027,12 +1027,9 @@ handle will produce a result immediately.}
 Returns @racket['running] if the process represented by
 @racket[process] is still running, the exit value if the process has
 exited (@racket[0] normally means succes), erroring for any other kind
-of handle.}
+of handle.
 
-@defproc[(shell [command path-string?] [options hash? (hash)]) hash?]{
-
-Like @racket[process], but runs @racket[command] as a shell command
-(via @exec{/bin/sh} on Unix or @exec{cmd.exe} on Windows).}
+See also @racket[shell].}
 
 
 @defproc[(find-executable-path [name path-string?]) (or/c path-string? #f)]{

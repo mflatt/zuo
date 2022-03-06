@@ -16,6 +16,7 @@ The @racketmodname[zuo] language includes libraries added to
 
 @local-table-of-contents[]
 
+@; ------------------------------------------------------------
 
 @section[#:tag "zuo-cmdline"]{Command-Line Parsing}
 
@@ -60,6 +61,7 @@ or procedure is a new accumulated value. Finally, the body of an
 @racket[args-clause] must produce a function to receive the
 accumulated value.}
 
+@; ------------------------------------------------------------
 
 @section[#:tag "zuo-build"]{Building with Dependencies}
 
@@ -386,6 +388,8 @@ input file target. The function is equivalent to
   (input-file-target (build-path (path-only (quote-module-path)) file)))
 ]}
 
+@; ------------------------------------------------------------
+
 @section[#:tag "zuo-glob"]{Glob Matching}
 
 @defzuomodule[zuo/glob]
@@ -428,6 +432,7 @@ path-sensitive globbing.}
 
 Equivalent to @racket[((glob->matcher glob) str)].}
 
+@; ------------------------------------------------------------
 
 @section[#:tag "zuo-thread"]{Cooperative Threads}
 
@@ -478,6 +483,128 @@ Like @racket[process-wait], but can only be used in a @tech{threading
 context}, and counts as a blocking operation that can allow other
 threads to run.}
 
+@; ------------------------------------------------------------
+
+@section[#:tag "zuo-shell"]{Shell Commands}
+
+@defzuomodule[zuo/shell]
+
+@defproc[(shell [command path-string?] [options hash? (hash)]) hash?]{
+
+Like @racket[process], but runs @racket[command] as a shell command
+(via @exec{/bin/sh} on Unix or @exec{cmd.exe} on Windows).}
+
+@defproc[(shell/wait [command path-string?]
+                     [options hash? (hash)]
+                     [what string? "shell command"])
+         void?]{
+
+Like @racket[shell], but first @racket[displayln]s the command string,
+uses @racket[thread-process-wait] to wait on the shell process, and
+reports an error if the process has a non-@racket[0] exit code. The
+@racket[what] string is use when constructing an error.
+
+If @racket[options] includes @racket['quiet?] mapped to a true value,
+then @racket[command] is not shown using @racket[displayln], and
+@racket['quiet?] is removed before passing it one to
+@racket[process].}
+
+@defproc[(build-shell [shell-str string?] ...) string?]{
+
+Appends the @racket[shell-str]s with separating spaces to form a
+larger shell-command sequence. An empty-string @racket[shell-str] is
+dropped, instead of creating extra spaces.
+
+Note that @racket[build-shell] does @emph{not} attempt to protect any
+@racket[shell-str] as a literal. Use @racket[string->shell] to convert
+an individual path or literal string to a shell-command argument
+encoding that string.}
+
+@; ------------------------------------------------------------
+
+@section[#:tag "zuo-c"]{C Tools}
+
+@defzuomodule[zuo/c]
+
+The C-tool procedures provided by @racketmodname[zuo/c] accept a
+@deftech{tool configuration} hash table to describe a C compiler,
+linker, archiver, and associated flags. When potential configuration
+is missing, a default suitable for the current system is used. Values
+in a tool configuration hash table are shell-command fragments, not
+individual arguments. For example, it could make sense to configure
+@racket['CC] as @racket["libtool cc"], which would run @exec{libtool}
+in compilation mode, instead of trying to run a compile whose
+executable name includes a space.
+
+The following keys are recognized in a tool configuration:
+
+@itemlist[
+
+@item{@racket['CC]: a C compiler}
+
+@item{@racket['CPPFLAGS]: C preprocessor flags}
+
+@item{@racket['CFLAGS]: C compilation flags}
+
+@item{@racket['LDFLAGS]: C linker flags}
+
+@item{@racket['LIBS]: additional C libraries}
+
+@item{@racket['AR]: library archiver}
+
+@item{@racket['ARFLAGS]: library archiver flags}
+
+]
+
+
+@defproc[(c-compile [.o path-string?] [.c path-string?] [config hash?]) void?]{
+
+Compiles @racket[.c] to @racket[.o] using the @tech{tool configuration}
+@racket[config].}
+
+@defproc[(c-link [.exe path-string?] [ins (listof path-string?)] [config hash?]) void?]{
+
+Links the files @racket[ins] to create the executable @racket[.exe]
+using the @tech{tool configuration} @racket[config].}
+
+@defproc[(c-ar [.a path-string?] [ins (listof path-string?)] [config hash?]) void?]{
+
+Combines the object files @racket[ins] to create the archive
+@racket[.a] using the @tech{tool configuration} @racket[config].}
+
+@defproc[(.c->.o [.c path-string?]) path-string?]{
+
+Adjusts the filename @racket[.c] to be the conventional name of its
+compiled object file on the current system.}
+
+@defproc[(.exe [name path-string?]) path-string?]{
+
+Adds @filepath{.exe} to the end of @racket[name] if conventional on
+the current system.}
+
+@defproc[(.a [name path-string?]) path-string?]{
+
+Derives the conventional archive name for a library @racket[name] on
+the current system.}
+
+@defproc[(config-merge [config hash?] [key symbol?] [shell-str string?]) hash?]{
+
+Adds @racket[shell-str] to the shell-command fragment for @racket[key]
+in the @tech{tool configuration} @racket[config].}
+
+
+@defproc[(config-include [config hash?] [path path-string?] ...) hash?]{
+
+Adds the @racket[path]s as include directories in the @tech{tool
+configuration} @racket[config].}
+
+
+@defproc[(config-define [config hash?] [def string?] ...) hash?]{
+
+Adds the preprocessor definitions @racket[def]s to preprocessor flags
+in the @tech{tool configuration} @racket[config].}
+
+@; ------------------------------------------------------------
 
 @section[#:tag "zuo-config"]{Configuration Parsing}
 
