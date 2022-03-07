@@ -1113,7 +1113,7 @@ with only certain keys per platform:
 The abbreviated @racket['type] field contains @racket['file],
 @racket['dir], or @racket['link], with @racket['link] only on Unix and
 only when @racket[follow-links?] is @racket[#f].}
-<
+
 @defproc[(ls [dir path-string?]) list?]{
 
 Returns a list of path strings for files in @racket[dir].}
@@ -1206,6 +1206,10 @@ Zuo process. The hash table includes the following keys:
 @item{@racket['sys-dir] (Windows only): the path to the system directory}
 
 ]}
+
+@defproc[(system-type) symbol?]{
+
+Returns @racket[(hash-ref (runtime-env) 'system-type)].}
 
 @defproc[(current-time) pair?]{
 

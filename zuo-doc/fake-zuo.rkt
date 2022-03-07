@@ -30,6 +30,7 @@
     require
     provide
     module+
+    quote-module-path
     
     pair?
     null?
@@ -141,6 +142,7 @@
     stat
     ls rm mv mkdir rmdir ln readlink cp
     current-time
+    system-type
     file-exists?
     directory-exists?
     link-exists?

@@ -252,9 +252,10 @@ In the case of a file target, @racket[get-deps] receives @racket[name]
 back, because that's often more convenient for constructing a target
 when applying an @racket[_at-dir] function to create @racket[name].
 
-The token argument to @racket[get-deps] represents the target build in
-progress. It's useful with @racket[file-sha1] to take advantage of
-caching and with @racket[build/recur] to report discovered targets.}
+The @deftech{build token} argument to @racket[get-deps] represents the
+target build in progress. It's useful with @racket[file-sha1] to take
+advantage of caching and with @racket[build/recur] to report
+discovered targets.}
 
 @deftogether[(
 @defproc[(rule [dependencies (listof (or/c target? path-string?))]
@@ -377,6 +378,42 @@ creates a @racketidfont{main} submodule that run
 @racket[(build/command-line (@#,racketidfont{targets} (at-dir ".")))].
 A script using @racket[provide-targets] thus works as a makefile-like
 script or as an input to a larger build.}
+
+@defproc[(make-targets [specs list?]) list?]{
+
+Converts a @tt{make}-like specification into a list of targets for use
+with @racket[build]. In this @tt{make}-like specification, extra
+dependencies can be listed separately from a build rule, and
+dependencies can be written in terms of paths instead of @tech{target}
+objects.
+
+The @racket[specs] argument is a list of @defterm{lines}, where each
+line has one of the following shapes:
+
+@racketblock[
+  `[:target ,_path (,_dep-path-or-target ...) ,_build-proc]
+  `[:depend ,_path (,_dep-path-or-target ...)]
+  `[:depend ,(_path ...) (,_dep-path-or-target ...)]
+]
+
+A @racket[:target] line defines a build rule that is implemented by
+@racket[_build-proc], while a @racket[:depend] line adds extra
+dependencies for a @racket[_path] that also has a @racket[:target]
+line. A @racket[:depend] line with multiple @racket[_path]s is the
+same as a sequence of @racket[:depend] lines with the same
+@racket[_dep-path-or-target] list.
+
+A @racket[_build-proc] accepts a path and a @tech{build token}, just
+like a @racket[_get-deps] procedure for @racket[target], but
+@racket[_build-proc] should build the target like the @racket[_build]
+procedure for @racket[rule].
+
+A @racket[_dep-path-or-target] is normally a path string. If it is the
+same path as the @racket[_path] of a @racket[:target] line, then a
+dependency is established on that target. If
+@racket[_dep-path-or-target] is any other path string, it is coerced
+to an input-file target. A @racket[_dep-path-or-target] can also be a
+target (that is created outside the @racket[make-targets] call).}
 
 @; ------------------------------------------------------------
 

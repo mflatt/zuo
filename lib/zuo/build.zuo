@@ -28,7 +28,9 @@
 
          find-target
          make-at-dir
-         provide-targets)
+         provide-targets
+
+         make-targets)
 
 ;; ------------------------------------------------------------
 ;; Targets and rules
@@ -359,15 +361,13 @@
 
   ;; compare to recorded result, and rebuild if different
   (cond
-    [(or (and same-so-far?
-              (andmap (lambda (dep-key)
-                        (log-changed (equal? (hash-ref all-dep-sha1s dep-key #f)
-                                             (hash-ref prev-dep-sha1s dep-key #f))
-                                     dep-key
-                                     state))
-                      (hash-keys all-dep-sha1s)))
-         (and (= 0 (hash-count all-dep-sha1s))
-              (not (eq? sha1 phony-sha1))))
+    [(and same-so-far?
+          (andmap (lambda (dep-key)
+                    (log-changed (equal? (hash-ref all-dep-sha1s dep-key #f)
+                                         (hash-ref prev-dep-sha1s dep-key #f))
+                                 dep-key
+                                 state))
+                  (hash-keys all-dep-sha1s)))
      ;; no need to rebuild
      (when path-handle (cleanable-cancel path-handle))
      (when (and (or top? (hash-ref (target-options t) 'noisy? #f))
@@ -388,6 +388,8 @@
                                   (file-sha1 path tok))])
                    (unless (sha1? sha1)
                      (error "build: target-build result is not a sha1" sha1))
+                   (when (equal? sha1 no-sha1)
+                     (error "rule for target did not create it" path))
                    (when path-handle (cleanable-cancel path-handle))
                    (release-resource newer-state)
 
@@ -602,3 +604,69 @@
                      who)])
         (alert (~a who " changed")))))
   same?)
+
+;; ------------------------------------------------------------
+;; `make`-like target and dependency declaration
+
+(define (make-targets specs)
+  (unless (list? specs) (arg-error 'make-targets "list") specs)
+  (for-each (lambda (spec)
+              (unless (and (list? spec)
+                           (pair? spec)
+                           (or (and (eq? (car spec) ':target)
+                                    (= 4 (length spec))
+                                    (procedure? (list-ref spec 3))
+                                    (path-string? (list-ref spec 1)))
+                               (and (eq? (car spec) ':depend)
+                                    (= 3 (length spec))
+                                    (or (path-string? (list-ref spec 1))
+                                        (and (list? (list-ref spec 1))
+                                             (andmap path-string? (list-ref spec 1))))))
+                           (list? (list-ref spec 2))
+                           (andmap (lambda (dep) (or (path-string? dep) (target? dep)))
+                                   (list-ref spec 2)))
+                (error "make-targets: bad specification line" spec)))
+            specs)
+  (define (spec->key spec) (string->symbol (list-ref spec 1)))
+  (define deps (foldl (lambda (spec deps)
+                        (foldl (lambda (path deps)
+                                 (let ([key (string->symbol path)])
+                                   (hash-set deps key
+                                             (append (reverse (list-ref spec 2))
+                                                     (hash-ref deps key '())))))
+                               deps
+                               (let ([ps (list-ref spec 1)])
+                                 (if (string? ps)
+                                     (list ps)
+                                     ps))))
+                      (hash)
+                      specs))
+  (define target-specs (filter (lambda (spec) (eq? ':target (car spec))) specs))
+  (define target-vars (foldl (lambda (spec target-vars)
+                               (let ([key (spec->key spec)])
+                                 (when (hash-ref target-vars key #f)
+                                   (error "make-targets: duplicate target" (list-ref spec 1)))
+                                 (hash-set target-vars key (variable key))))
+                             (hash)
+                             target-specs))
+  (define dep->target (lambda (dep)
+                        (if (target? dep)
+                            dep
+                            (let ([var (hash-ref target-vars (string->symbol dep) #f)])
+                              (if var
+                                  (variable-ref var)
+                                  (input-file-target dep))))))
+  (define targets (foldl (lambda (spec targets)
+                           (let* ([key (spec->key spec)]
+                                  [var (hash-ref target-vars key)]
+                                  [t (make-target (list-ref spec 1)
+                                                  (lambda (path token)
+                                                    (make-rule
+                                                     (map dep->target (reverse (hash-ref deps key '())))
+                                                     (lambda ()
+                                                       ((list-ref spec 3) path token)))))])
+                             (variable-set! var t)
+                             (cons t targets)))
+                         '()
+                         target-specs))
+  (reverse targets))

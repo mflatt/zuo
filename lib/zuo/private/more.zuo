@@ -46,7 +46,8 @@
          string-join
          string-trim
 
-         find-executable-path)
+         find-executable-path
+         system-type)
 
 (define (void? v) (eq? v (void)))
 
@@ -400,3 +401,6 @@
                  (cons (hash-ref (runtime-env) 'dir)
                        (string-split PATH (if windows? ";" ":")))))]
     [else (try-exe exe)]))
+
+(define (system-type)
+  (hash-ref (runtime-env) 'system-type))
