@@ -178,7 +178,8 @@
                      target-state  ; key -> (cons sha1 dep-sha1s) | 'pending | channel
                      target-accum  ; key -> dep-sha1s
                      db            ; key -> (cons sha1 dep-sha1s) | #t [for db file itself]
-                     time-cache    ; key -> (cons timestamp sha1) 
+                     time-cache    ; key -> (cons timestamp sha1)
+                     saw-targets   ; key -> target [to detect multiple for same output]
                      resource-ch   ; channel with available resources enqueued
                      log?))        ; logging enabled?
 
@@ -192,6 +193,7 @@
      (lambda ()
        (define ch (channel))
        (define state (build-state ch
+                                  (hash)
                                   (hash)
                                   (hash)
                                   (hash)
@@ -215,12 +217,13 @@
 ;; Detects already built or cycles, but leaves in-progress (as
 ;; represented by a channel) alone
 (define (do-build t state top?)
-  (define current (target-state state t))
-  (cond
-    [(not current) (build-input-or-unbuilt t state top?)]
-    [(eq? current 'pending) (error "build: dependency cycle" (target-name t))]
-    [(channel? current) state]
-    [else state]))
+  (let ([state (ensure-consistent state t)])
+    (define current (target-state state t))
+    (cond
+      [(not current) (build-input-or-unbuilt t state top?)]
+      [(eq? current 'pending) (error "build: dependency cycle" (target-name t))]
+      [(channel? current) state]
+      [else state])))
 
 ;; Blocks until an in-progress target completes
 (define (force-build t state)
@@ -242,6 +245,7 @@
      ;; no dependencies, not need for a thread to build, etc.
      (define r ((target-get-rule t) (target-name t) #f))
      (define sha1 (or (rule-sha1 r) (file-sha1/state (target-path t) state)))
+     (when (equal? sha1 no-sha1) ((rule-build r)))
      (update-target-state state t (list sha1))]
     [else (build-unbuilt t state top?)]))
 
@@ -319,7 +323,7 @@
   ;; then we can assume that the extra dependencies generated previously are still
   ;; the extra dependencies this time
   (define same-so-far?
-    (and (log-changed (equal? sha1 prev-sha1) path state)
+    (and (log-changed (and (equal? sha1 prev-sha1) (not (equal? sha1 no-sha1))) path state)
          (andmap (lambda (dep-key)
                    (log-changed (equal? (hash-ref dep-sha1s dep-key)
                                         (hash-ref prev-dep-sha1s dep-key #f))
@@ -420,19 +424,19 @@
             opts))))
 
 (define (find-target name targets)
-  (unless (path-string? name) (arg-error 'find-target "path string"))
+  (unless (path-string? name) (arg-error 'find-target "path string" name))
   (unless (and (list? targets) (andmap target? targets))
-    (arg-error 'find-target "list of targets"))
+    (arg-error 'find-target "list of targets" targets))
   (define len (string-length name))
   (define (matches? t-name)
     (let* ([t-name (~a t-name)]
            [t-len (string-length t-name)])
       (and (>= t-len len)
            (let ([start (- t-len len)])
-             (string=? name (substring t-name start))
-             (or (= t-len len)
-                 (= (char "/") (string-ref t-name (- start 1)))
-                 (= (char "\\") (string-ref t-name (- start 1))))))))
+             (and (string=? name (substring t-name start))
+                  (or (= t-len len)
+                      (= (char "/") (string-ref t-name (- start 1)))
+                      (= (char "\\") (string-ref t-name (- start 1)))))))))
   (ormap (lambda (t) (and (matches? (target-name t)) t))
          targets))
 
@@ -535,6 +539,19 @@
 (define (previous-target-state state key)
   (or (hash-ref (build-state-db state) key #f)
       (cons no-sha1 (hash))))
+
+(define (ensure-consistent state t)
+  (let* ([saw (build-state-saw-targets state)]
+         [old-t (hash-ref saw (target-key t) #f)])
+    (cond
+      [old-t
+       (unless (or (eq? t old-t)
+                   (and (eq? (target-kind t) 'input)
+                        (eq? (target-kind old-t) 'input)))
+         (error "build: multiple targets for same output" (target-name t)))
+       state]
+      [else
+       (build-state-set-saw-targets state (hash-set saw (target-key t) t))])))
 
 (define (file-sha1 path token)
   (unless (path-string? path) (arg-error 'file-sha1 "path string" path))
