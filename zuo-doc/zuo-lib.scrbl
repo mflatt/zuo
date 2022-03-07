@@ -401,19 +401,20 @@ A @racket[:target] line defines a build rule that is implemented by
 dependencies for a @racket[_path] that also has a @racket[:target]
 line. A @racket[:depend] line with multiple @racket[_path]s is the
 same as a sequence of @racket[:depend] lines with the same
-@racket[_dep-path-or-target] list.
+@racket[_dep-path-or-target] list. A @racket[_path] is normally a path
+string, but it can be a symbol for a @tech{phony} target.
 
-A @racket[_build-proc] accepts a path and a @tech{build token}, just
-like a @racket[_get-deps] procedure for @racket[target], but
-@racket[_build-proc] should build the target like the @racket[_build]
-procedure for @racket[rule].
+A @racket[_build-proc] accepts a path (if not phony) and a @tech{build
+token}, just like a @racket[_get-deps] procedure for @racket[target],
+but @racket[_build-proc] should build the target like the
+@racket[_build] procedure for @racket[rule] (or @racket[phony-rule]).
 
 A @racket[_dep-path-or-target] is normally a path string. If it is the
 same path as the @racket[_path] of a @racket[:target] line, then a
 dependency is established on that target. If
 @racket[_dep-path-or-target] is any other path string, it is coerced
 to an input-file target. A @racket[_dep-path-or-target] can also be a
-target (that is created outside the @racket[make-targets] call).}
+target that is created outside the @racket[make-targets] call.}
 
 @; ------------------------------------------------------------
 
