@@ -3,7 +3,8 @@
 (require "base/and-or.zuo"
          "base/let.zuo"
          "base/define.zuo"
-         "list.zuo")
+         "list.zuo"
+         "base/more-syntax.zuo")
 
 (provide void?
          boolean?
@@ -25,6 +26,7 @@
          find-relative-path
          path-replace-suffix
          path-only
+         file-name-from-path
 
          mkdir*
          rm*
@@ -187,29 +189,35 @@
         [(= i 0) (~a path suffix)]
         [else
          (let ([i (- i 1)])
-           (if (= (string-ref path i) 46) ; 46 = (char ".")
+           (if (= (string-ref path i) (char "."))
                (~a (substring path 0 i) suffix)
                (loop i)))])))
   (if (car l)
       (build-path (car l) new-path)
       new-path))
 
-(define (path-only p)
-  (unless (path-string? p) (arg-error 'path-only "path string" p))
+(define (split-file-path who p dir-k dir-file-k)
+  (unless (path-string? p) (arg-error who "path string" p))
   (let ([c (string-ref p (- (string-length p) 1))])
     (cond
-      [(or (= c 47)  ; = (char "/")
-           (and (= c 92) ; = (char "\\")
+      [(or (= c (char "/"))
+           (and (= c (char "\\"))
                 (eq? 'windows (hash-ref (runtime-env) 'system-type))))
-       p]
+       (dir-k p)]
       [else
        (define l (split-path p))
        (if (or (and (not (car l))
                     (not (relative-path? p)))
                (string=? (cdr l) ".")
                (string=? (cdr l) ".."))
-           p
-           (or (car l) "."))])))
+           (dir-k p)
+           (dir-file-k l))])))
+
+(define (path-only p)
+  (split-file-path 'path-only p (lambda (d) d) (lambda (l) (or (car l) "."))))
+
+(define (file-name-from-path p)
+  (split-file-path 'file-name-from-path p (lambda (d) #f) (lambda (l) (cdr l))))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))
@@ -291,7 +299,7 @@
   (unless (string? s) (arg-error 'string->integer "string" s))
   (let ([len (string-length s)])
     (and (not (= len 0))
-         (let ([neg? (= (string-ref s 0) 45)]) ; 45 = (char "-")
+         (let ([neg? (= (string-ref s 0) (char "-"))])
            (and (not (and neg? (= len 1)))
                 (let string->integer ([n 0] [i (if neg? 1 0)])
                   (cond

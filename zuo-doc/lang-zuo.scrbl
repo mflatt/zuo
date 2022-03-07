@@ -622,17 +622,26 @@ only a single, non-directory path element, @racket["."] is returned.
 If @racket[path] is syntactically a directory, then @racket[path] is
 returned unchanged.}
 
+@defproc[(file-name-from-path [path path-string?]) (or/c path-string? #f)]{
+
+Returns the last element of @racket[path] in the case that
+@racket[path] is not syntactically a directory, @racket[#f]
+otherwise.}
+
 @defproc[(path-replace-suffix [path path-string?] [suffix string?]) path-string?]{
 
 Removes any @litchar{.} suffix from the last element of @racket[path],
 and then appends @racket[suffix] to the end of the path.}
 
-@defform[(quote-path path ...+)]{
+@defidform[at-source]{
 
-Expands to a path that refers to the @racket[path]s combined as
-relative to the enclosing module's directory. The expansion is
-equivalent to @racket[(build-path (car (split-path
-(quote-module-path))) path ...+)].}
+Expands to a function that acts like @racket[build-path] starting from
+the enclosing module's directory. That is, expands to a function
+equivalent to
+
+@racketblock[(lambda args
+               (apply build-path (cons (path-only (quote-module-path))
+                                       args)))]}
 
 
 @section{Opaque Records}

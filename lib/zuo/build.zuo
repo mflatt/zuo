@@ -28,7 +28,6 @@
 
          find-target
          make-at-dir
-         quote-make-input-target
          provide-targets)
 
 ;; ------------------------------------------------------------
@@ -230,12 +229,10 @@
   (define current (target-state state t))
   (cond
     [(channel? current)
-     ;; Waiting on the channel might block so relenquish state
+     ;; Waiting on the channel might block, so relinquish state
      (channel-put (build-state-ch state) state)
-     (let* ([ts (channel-get current)]
-            [state (channel-get (build-state-ch state))]
-            [ts (merge-target-accumulated state t ts)])
-       (update-target-state/record-sha1s state t ts))]
+     (channel-get current)
+     (channel-get (build-state-ch state))]
     [else state]))
 
 ;; Shortcut for plain inputs, otherwise starts a build
@@ -254,7 +251,7 @@
   (define path (target-name t))
   (define target-dir (dir-part path))
   (define dep-top? (and top? (symbol? path)))
-  
+
   ;; delete a target file if we don't finish:
   (define path-handle (and (path-string? path)
                            (not (hash-ref (target-options t) 'precious? #f))
@@ -359,7 +356,7 @@
              (add-dependent-target-state dep dep-sha1s target-dir newer-state))
            dep-sha1s
            more-deps))
-  
+
   ;; compare to recorded result, and rebuild if different
   (cond
     [(or (and same-so-far?
@@ -392,10 +389,18 @@
                    (unless (sha1? sha1)
                      (error "build: target-build result is not a sha1" sha1))
                    (when path-handle (cleanable-cancel path-handle))
-                   (channel-put ch (if (eq? sha1 phony-sha1)
-                                       (cons no-sha1 (hash))
-                                       (cons sha1 dep-sha1s)))
-                   (release-resource newer-state))))
+                   (release-resource newer-state)
+
+                   ;; record result:
+                   (let* ([state (channel-get (build-state-ch newer-state))]
+                          [ts (if (eq? sha1 phony-sha1)
+                                  (cons no-sha1 (hash))
+                                  (cons sha1 dep-sha1s))]
+                          [ts (merge-target-accumulated state t ts)]
+                          [state (update-target-state/record-sha1s state t ts)])
+                     (channel-put (build-state-ch state) state))
+
+                   (channel-put ch 'done))))
        ;; meanwhile, record a channel as the start's current build state
        (update-target-state newer-state t ch))]))
 
@@ -448,11 +453,6 @@
             (build-path dir path)
             path))
       (lambda (path) path)))
-
-(define-syntax (quote-make-input-target stx)
-  (unless (and (list? stx) (= (length stx) 1)) (bad-syntax stx))
-  (quote-syntax (lambda (file)
-                  (input-file-target (build-path (path-only (quote-module-path)) file)))))
 
 ;; Exports `targets`, which is a function that takes an `at-dir`
 ;; function, while also setting up a `main` submodule to call

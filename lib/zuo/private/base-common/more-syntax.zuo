@@ -7,7 +7,7 @@
          "syntax-error.zuo")
 
 (provide char
-         quote-path)
+         at-source)
 
 (define-syntax (char stx)
   (if (and (list? stx)
@@ -17,15 +17,20 @@
       (string-ref (cadr stx) 0)
       (bad-syntax stx)))
 
-(define (combine-path base . paths)
-  (apply build-path (cons (car (split-path base)) paths)))
+(define (combine-path base)
+  (lambda paths
+    (for-each (lambda (path)
+                (unless (and (path-string? path)
+                             (relative-path? path))
+                  (arg-error 'at-source "relative path string" path)))
+              paths)
+    (apply build-path (cons (car (split-path base)) paths))))
 
-(define-syntax (quote-path stx)
-  (if (and (list? stx)
-           (>= (length stx) 2)
-           (andmap path-string? (cdr stx))
-           (andmap relative-path? (cdr stx)))
-      (list* (quote-syntax combine-path)
-             (quote-syntax (quote-module-path))
-             (cdr stx))
-      (bad-syntax stx)))
+(define-syntax (at-source stx)
+  (if (list? stx)
+      (cons (quote-syntax (combine-path (quote-module-path)))
+            (cdr stx))
+      (if (identifier? stx)
+          (quote-syntax (combine-path (quote-module-path)))
+          (bad-syntax stx))))
+

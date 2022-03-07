@@ -111,7 +111,7 @@
     build-path
     split-path
     path->complete-path
-    quote-path
+    at-source
 
     variable?
     variable
@@ -202,7 +202,6 @@
     build/command-line
     build/recur
     make-at-dir
-    quote-make-input-target
     provide-targets
     find-target
 

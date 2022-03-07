@@ -76,12 +76,10 @@
 (check-arg-fail (relative-path? "") "not a path string")
 (check-arg-fail (relative-path? 0) "not a path string")
 
-(check (path-string? (quote-path "adjacent.txt")))
-(check-fail (quote-path) bad-stx)
-(check-fail (quote-path x) bad-stx)
-(check-fail (quote-path ,(hash-ref (runtime-env) 'dir)) bad-stx)
-(check-fail (quote-path . x) bad-stx)
-(check-fail (quote-path "adjacent.txt" c) bad-stx)
+(check (path-string? (at-source "adjacent.txt")))
+(check (at-source) (path-only (quote-module-path)))
+(check (procedure? at-source))
+(check-fail (at-source . x) bad-stx)
 
 (check (simple-form-path "a//b//c/d/../f/g")
        (if unix?
@@ -131,3 +129,14 @@
 (check (path-only "a/.") "a/.")
 (check (path-only "a/..") "a/..")
 (check-arg-fail (path-only 10) not-path)
+
+(check (file-name-from-path "hello.txt") "hello.txt")
+(check (file-name-from-path ".") #f)
+(check (file-name-from-path "greeting/hello.txt") "hello.txt")
+(check (file-name-from-path "in/greeting/hello.txt") "hello.txt")
+(check (file-name-from-path "/") #f)
+(check (file-name-from-path "a/") #f)
+(check (file-name-from-path "a\\") (if unix? "a\\" #f))
+(check (file-name-from-path "a/.") #f)
+(check (file-name-from-path "a/..") #f)
+(check-arg-fail (file-name-from-path 10) not-path)

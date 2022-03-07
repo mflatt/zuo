@@ -49,7 +49,7 @@
      ;; when a target is demanded, we report dependencies and more via `rule`
      (rule
       ;; dependencies:
-      (list (quote-path ".." "zuo.c") ; original "zuo.c" that is converted to embed libraries
+      (list (at-source ".." "zuo.c") ; original "zuo.c" that is converted to embed libraries
             (quote-module-path)       ; this script
             (input-data-target 'config (hash-remove cmd 'output))) ; configuration
       ;; rebuild function (called if the output file is out of date):
@@ -105,7 +105,7 @@
           (error "image dump failed"))
         image)))
 
-  (define zuo.c (fd-read (fd-open-input (quote-path ".." "zuo.c")) eof))
+  (define zuo.c (fd-read (fd-open-input (at-source ".." "zuo.c")) eof))
   (define out (if c-file
                   (fd-open-output c-file (hash 'exists 'truncate))
                   (fd-open-output 'stdout (hash))))

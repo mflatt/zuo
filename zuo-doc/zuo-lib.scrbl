@@ -378,16 +378,6 @@ creates a @racketidfont{main} submodule that run
 A script using @racket[provide-targets] thus works as a makefile-like
 script or as an input to a larger build.}
 
-@defform[(quote-make-input-target)]{
-
-Produces a function useful to convert a module-relative path into an
-input file target. The function is equivalent to
-
-@racketblock[
-(lambda (file)
-  (input-file-target (build-path (path-only (quote-module-path)) file)))
-]}
-
 @; ------------------------------------------------------------
 
 @section[#:tag "zuo-glob"]{Glob Matching}
