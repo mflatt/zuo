@@ -239,6 +239,7 @@
 
 ;; Shortcut for plain inputs, otherwise starts a build
 (define (build-input-or-unbuilt t state top?)
+  (when (build-state-log? state) (alert (~a "checking " (target-name t))))
   (cond
     [(eq? (target-kind t) 'input)
      ;; no dependencies, not need for a thread to build, etc.
