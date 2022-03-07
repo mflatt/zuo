@@ -59,13 +59,6 @@
                  (cons
                   `(,(quote-syntax begin)
                     ,(mk `(,ref v) `(,(quote-syntax list-ref) c ,index))
-                    ,(mk `(,set v a) `(,(quote-syntax replace) c ,index a ,key)))
+                    ,(mk `(,set v a) `(,(quote-syntax opaque) ,key (,(quote-syntax list-set) c ,index a))))
                   (loop (cdr fields)
                         (+ index 1)))))])))))
-
-(define replace
-  (lambda (l pos v key)
-    (opaque key (let loop ([l l] [pos pos])
-                  (if (= pos 0)
-                      (cons v (cdr l))
-                      (cons (car l) (loop (cdr l) (- pos 1))))))))

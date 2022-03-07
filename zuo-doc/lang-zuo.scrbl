@@ -357,11 +357,12 @@ representation.
 @defproc[(reverse [lst list?]) list?]           
 @defproc[(length [lst list?]) integer?]
 @defproc[(list-ref [lst pair?] [pos integer?]) any/c]
+@defproc[(list-set [lst pair?] [pos integer?] [v any/c]) any/c]
 @defproc[(list-tail [lst any/c] [pos integer?]) any/c]
 )]{
 
 Just like @realracket*[pair? null? cons car cdr list? list* append
-reverse list-ref list-tail] from @racketmodname[racket], except that
+reverse list-ref list-set list-tail] from @racketmodname[racket], except that
 @racket[list?] takes time proportional to the length of the list.}
 
 @deftogether[(

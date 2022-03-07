@@ -55,6 +55,11 @@
 (check (list-ref '(1 2 3 . 4) 2) 3)
 (check-arg-fail (list-ref '(1 . 2) 1) "encountered a non-pair")
 
+(check (list-set '(1) 0 'x) '(x))
+(check (list-set '(1 . 2) 0 'x) '(x . 2))
+(check (list-set '(1 2 3 . 4) 2 'x) '(1 2 x . 4))
+(check-arg-fail (list-set '(1 . 2) 1 'x) "encountered a non-pair")
+
 (check (list-tail '() 0) '())
 (check (list-tail 1 0) 1)
 (check (list-tail '(1 . 2) 1) 2)

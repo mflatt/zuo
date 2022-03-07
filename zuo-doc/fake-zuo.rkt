@@ -62,6 +62,8 @@
     member
     assoc
     remove
+    list-ref
+    list-set
 
     not
     eq?

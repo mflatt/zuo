@@ -86,7 +86,7 @@ static const char *zuo_lib_path = ZUO_LIB_PATH;
 
 /* configurable lower bound on how much space to use: */
 #ifndef ZUO_MIN_HEAP_SIZE
-# define ZUO_MIN_HEAP_SIZE (8*1024*1024)
+# define ZUO_MIN_HEAP_SIZE (32*1024*1024)
 #endif
 
 /*======================================================================*/
@@ -2339,6 +2339,56 @@ static zuo_t *zuo_cdr(zuo_t *obj) {
   if (obj->tag != zuo_pair_tag)
     zuo_fail_arg("cdr", "pair", obj);
   return ((zuo_pair_t *)obj)->cdr;
+}
+
+static zuo_t *zuo_list_ref(zuo_t *lst, zuo_t *index) {
+  const char *who = "list-ref";
+  zuo_int_t i;
+  if (index->tag == zuo_integer_tag)
+    i = ZUO_INT_I(index);
+  else
+    i = -1;
+  if (i < 0)
+    zuo_fail_arg(who, "not a nonnegative integer", index);
+  while ((i > 0) && (lst->tag == zuo_pair_tag)) {
+    lst = _zuo_cdr(lst);
+    i -= 1;
+  }
+  if (lst->tag != zuo_pair_tag)
+    zuo_fail1w(who, "encountered a non-pair", lst);
+  return _zuo_car(lst);
+}
+
+static zuo_t *zuo_list_set(zuo_t *lst, zuo_t *index, zuo_t *val) {
+  const char *who = "list-set";
+  zuo_t *first = z.o_null, *last = z.o_null, *pr;
+  zuo_int_t i;
+  if (index->tag == zuo_integer_tag)
+    i = ZUO_INT_I(index);
+  else
+    i = -1;
+  if (i < 0)
+    zuo_fail_arg(who, "not a nonnegative integer", index);
+  if ((i == 0) && (lst->tag == zuo_pair_tag)) {
+    return zuo_cons(val, _zuo_cdr(lst));
+  } else {
+    while ((i > 0) && (lst->tag == zuo_pair_tag)) {
+      pr = zuo_cons(_zuo_car(lst), z.o_null);
+      if (first == z.o_null)
+        first = pr;
+      else
+        ((zuo_pair_t *)last)->cdr = pr;
+      last = pr;
+      lst = _zuo_cdr(lst);
+      i -= 1;
+    }
+    if (lst->tag != zuo_pair_tag)
+      zuo_fail1w(who, "encountered a non-pair", lst);
+
+    ((zuo_pair_t *)last)->cdr = zuo_cons(val, _zuo_cdr(lst));
+
+    return first;
+  }
 }
 
 static zuo_int_t zuo_length_int(zuo_t *in_l) {
@@ -6262,6 +6312,8 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVE2("cons", zuo_cons);
   ZUO_TOP_ENV_SET_PRIMITIVE1("car", zuo_car);
   ZUO_TOP_ENV_SET_PRIMITIVE1("cdr", zuo_cdr);
+  ZUO_TOP_ENV_SET_PRIMITIVE2("list-ref", zuo_list_ref);
+  ZUO_TOP_ENV_SET_PRIMITIVE3("list-set", zuo_list_set);
   ZUO_TOP_ENV_SET_PRIMITIVEN("list", zuo_list, -1);
   ZUO_TOP_ENV_SET_PRIMITIVEN("append", zuo_append, -1);
   ZUO_TOP_ENV_SET_PRIMITIVE1("reverse", zuo_reverse);
