@@ -24,7 +24,7 @@
                              (relative-path? path))
                   (arg-error 'at-source "relative path string" path)))
               paths)
-    (apply build-path (cons (car (split-path base)) paths))))
+    (apply build-path (cons (or (car (split-path base)) ".") paths))))
 
 (define-syntax (at-source stx)
   (if (list? stx)

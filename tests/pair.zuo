@@ -78,8 +78,11 @@
 (check-arg-fail (cddr '(1 . 2)) "not a valid argument")
 
 (check (map (lambda (x) (+ x 1)) '(0 1 2)) '(1 2 3))
+(check (map (lambda (x y) (+ x y)) '(1 2 3) '(-10 -20 -30)) '(-9 -18 -27))
 (check-arg-fail (map 1 '()) "not a procedure")
 (check-arg-fail (map (lambda (a) a) 1) "not a list")
+(check-arg-fail (map (lambda (a) a) '(1) 1) "not a list")
+(check-arg-fail (map (lambda (a b) a) '(1) '(1 2)) "lists have different lengths")
 
 (check (for-each (lambda (x) x) '(1 2 3)) (void))
 (check-output (for-each alert '(1 2 3)) "1\n2\n3\n")
@@ -104,12 +107,6 @@
 (check (ormap (lambda (x) (< x 10)) '(1 "oops")))
 (check-arg-fail (ormap 10 '(1)) "not a procedure")
 (check-arg-fail (ormap (lambda (x) (< x 3)) '(1 2 3 . "oops")) "not a list")
-
-(check (zip '() '()) '())
-(check (zip '(1 2 3) '("a" "b" "c")) '((1 "a") (2 "b") (3 "c")))
-(check-arg-fail (zip '() 1) "not a list")
-(check-arg-fail (zip 1 '()) "not a list")
-(check-arg-fail (zip '(1) '()) "lists are of different lengths")
 
 (check (member "x" '()) #f)
 (check (member "x" '("x" y z)) '("x" y z))

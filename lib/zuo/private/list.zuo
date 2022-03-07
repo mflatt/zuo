@@ -12,8 +12,7 @@
          foldl
          andmap
          ormap
-         filter
-         zip)
+         filter)
 
 (define list*
   (lambda (val . vals)
@@ -55,14 +54,32 @@
 ;; directly so that a more helpful name shows up stack traces
 
 (define map
-  (lambda (f lst)
+  (lambda (f lst . lsts)
     (unless (procedure? f) (arg-error 'map "procedure" f))
     (unless (list? lst) (arg-error 'map "list" lst))
-    (letrec ([map (lambda (lst)
-                    (if (null? lst)
-                        '()
-                        (cons (f (car lst)) (map (cdr lst)))))])
-      (map lst))))
+    (cond
+      [(null? lsts)
+       (letrec ([map (lambda (lst)
+                       (if (null? lst)
+                           '()
+                           (cons (f (car lst)) (map (cdr lst)))))])
+         (map lst))]
+      [else
+       (letrec ([check (lambda (lsts)
+                         (unless (null? lsts)
+                           (unless (list? (car lsts))
+                             (arg-error 'map "list" (car lsts)))
+                           (unless (= (length lst) (length (car lsts)))
+                             (error "map: lists have different lengths" (cons lst lsts)))
+                           (check (cdr lsts))))])
+         (check lsts))
+       (let ([map1 map])
+         (letrec ([map (lambda (lsts)
+                         (if (null? (car lsts))
+                             '()
+                             (cons (apply f (map1 car lsts))
+                                   (map (map1 cdr lsts)))))])
+           (map (cons lst lsts))))])))
 
 (define for-each
   (lambda (f lst)
@@ -107,15 +124,3 @@
                                (cons (car lst) (filter (cdr lst)))
                                (filter (cdr lst)))))])
       (filter lst))))
-
-(define zip
-  (lambda (lst1 lst2)
-    (unless (list? lst1) (arg-error 'zip "list" lst1))
-    (unless (list? lst2) (arg-error 'zip "list" lst2))
-    (unless (= (length lst1) (length lst2)) (arg-error 'zip "lists are of different lengths" (list lst1 lst2)))
-    (letrec ([zip (lambda (lst1 lst2)
-                    (if (null? lst1)
-                        '()
-                        (cons (list (car lst1) (car lst2))
-                              (zip (cdr lst1) (cdr lst2)))))])
-      (zip lst1 lst2))))

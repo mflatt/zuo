@@ -422,13 +422,23 @@
                (hash-set opts 'jobs v)
                (error "not a positive integer" n)))]
    :args
-   ([target (if (null? targets) #f (~a (target-name (car targets))))])
+   target
    (lambda (opts)
-     (build (if target
-                (or (find-target target targets)
-                    (error (~a "unknown target: " target)))
-                (error "no targets to build"))
-            opts))))
+     (cond
+       [(null? target) (if (null? targets)
+                           (error "no targets to build")
+                           (build (car targets) opts))]
+       [else
+        (let ([ts (map (lambda (target)
+                         (or (find-target target targets)
+                             (error (~a "unknown target: " target))))
+                       target)])
+          (build (if (= (length ts) 1)
+                     (car ts)
+                     (make-target (string->uninterned-symbol "multi")
+                                  (lambda (token)
+                                    (make-phony-rule ts void))))
+                 opts))]))))
 
 (define (find-target name targets)
   (unless (path-string? name) (arg-error 'find-target "path string" name))
