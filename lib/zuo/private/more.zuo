@@ -27,6 +27,7 @@
          path-replace-suffix
          path-only
          file-name-from-path
+         path->complete-path
 
          mkdir*
          rm*
@@ -220,6 +221,12 @@
 
 (define (file-name-from-path p)
   (split-file-path 'file-name-from-path p (lambda (d) #f) (lambda (l) (cdr l))))
+
+(define (path->complete-path p)
+  (unless (path-string? p) (arg-error 'path->complete-path "path string" p))
+  (if (relative-path? p)
+      (build-path (hash-ref (runtime-env) 'dir) p)
+      p))
 
 (define (mkdir* p)
   (unless (path-string? p) (arg-error 'mkdir* "path string" p))

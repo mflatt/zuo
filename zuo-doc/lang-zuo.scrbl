@@ -622,6 +622,11 @@ Returns the last element of @racket[path] in the case that
 @racket[path] is not syntactically a directory, @racket[#f]
 otherwise.}
 
+@defproc[(path->complete-path [path path-string?]) path-string?]{
+
+Returns @racket[path] if it is absolute, otherwise returns
+@racket[(build-path (hash-ref (runtime-env) 'dir) path)].}
+
 @defproc[(path-replace-suffix [path path-string?] [suffix string?]) path-string?]{
 
 Removes any @litchar{.} suffix from the last element of @racket[path],

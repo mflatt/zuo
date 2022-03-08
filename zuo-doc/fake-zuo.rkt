@@ -113,7 +113,6 @@
 
     build-path
     split-path
-    path->complete-path
     at-source
 
     variable?
@@ -154,6 +153,8 @@
     build-raw-path
     path-replace-suffix
     path-only
+    file-name-from-path
+    path->complete-path
     rm* cp* mkdir*
     :error :truncate :must-truncate :append :update :can-update
     cleanable-file
