@@ -432,7 +432,7 @@ The @racket[specs] argument is a list of @defterm{lines}, where each
 line has one of the following shapes:
 
 @racketblock[
-  `[:target ,_path (,_dep-path-or-target ...) ,_build-proc]
+  `[:target ,_path (,_dep-path-or-target ...) ,_build-proc ,_option ...]
   `[:depend ,_path (,_dep-path-or-target ...)]
   `[:depend ,(_path ...) (,_dep-path-or-target ...)]
 ]
@@ -455,7 +455,10 @@ same path as the @racket[_path] of a @racket[:target] line, then a
 dependency is established on that target. If
 @racket[_dep-path-or-target] is any other path string, it is coerced
 to an input-file target. A @racket[_dep-path-or-target] can also be a
-target that is created outside the @racket[make-targets] call.}
+target that is created outside the @racket[make-targets] call.
+
+An @racket[_option] can be @racket[:precious] or @racket[:command] to
+set the corresponding option (see @racket[target]) in a target.}
 
 @; ------------------------------------------------------------
 
