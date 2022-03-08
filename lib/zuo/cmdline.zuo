@@ -112,6 +112,7 @@
              (hash-ref accum 'flags-expr)
              (hash-ref accum 'finish (quote-syntax (lambda () (lambda (cmd) cmd))))
              (hash-ref accum 'finish-spec (quote-syntax '(() ())))
+             (hash-ref accum 'usage #f)
              (cons (quote-syntax list) (reverse (hash-ref accum 'help '()))))]
       [(identifier? (car stx))
        (define head (syntax-e (car stx)))
@@ -144,6 +145,11 @@
             (syntax-error "command-line: bad syntax at `:program`" all-stx))
           (check-already accum 'program)
           (loop (cddr stx) #f #f (hash-set accum 'program (list (quote-syntax check-program) (cadr stx))))]
+         [(eq? head ':usage)
+          (unless (pair? (cdr stx))
+            (syntax-error "command-line: bad syntax at `:usage`" all-stx))
+          (check-already accum 'usage)
+          (loop (cddr stx) #f #f (hash-set accum 'usage (list (quote-syntax check-usage) (cadr stx))))]
          [else (expected-mode stx)])]
       [(not mode)
        (expected-mode stx)]
@@ -159,3 +165,8 @@
   (unless (string? prog)
     (error "command-line: result for `:program` is not a string" prog))
   prog)
+
+(define (check-usage usage)
+  (unless (string? usage)
+    (error "command-line: result for `:usage` is not a string" usage))
+  usage)

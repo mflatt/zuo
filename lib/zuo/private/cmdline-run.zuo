@@ -3,7 +3,7 @@
 (provide run-cmdline
          flag-parser)
 
-(define (run-cmdline program cmd args flags finish-handler finish-spec help-specs)
+(define (run-cmdline program cmd args flags finish-handler finish-spec usage help-specs)
 
   (define (finish cmd args)
     (define expected (+ (length (car finish-spec))
@@ -40,7 +40,7 @@
                                     (loop (append pend-flags (list arg)) args saw cmd))]
            [(or (string=? arg "--help")
                 (string=? arg "-h"))
-            (show-help program finish-spec help-specs flags)
+            (show-help program finish-spec usage help-specs flags)
             (exit 0)]
            [(and (> (string-length arg) 2)
                  (= (string-ref arg 0) (char "-"))
@@ -99,13 +99,15 @@
       (handler cmd)
       (error (~a " did not produce a procedure to receive accumulated state"))))
 
-(define (show-help program finish-spec help-specs flags)
+(define (show-help program finish-spec usage help-specs flags)
   (displayln
-   (~a "usage: " program " [<option> ...]"
-       (let ([s (spec->expected-string finish-spec)])
-         (if (string=? s "")
-             ""
-             (~a " " s)))))
+   (~a "usage: " program " "
+       (or usage
+           (~a "[<option> ...]"
+               (let ([s (spec->expected-string finish-spec)])
+                 (if (string=? s "")
+                     ""
+                     (~a " " s)))))))
   (display "\n<option> is one of\n\n")
   (let loop ([help-specs help-specs] [in-key #f])
     (unless (null? help-specs)

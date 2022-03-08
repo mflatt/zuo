@@ -47,6 +47,7 @@
          string-trim
 
          find-executable-path
+         process/args
          system-type)
 
 (define (void? v) (eq? v (void)))
@@ -401,6 +402,12 @@
                  (cons (hash-ref (runtime-env) 'dir)
                        (string-split PATH (if windows? ";" ":")))))]
     [else (try-exe exe)]))
+
+(define (process/args exe args [options (hash)])
+  (unless (path-string? exe) (arg-error 'process/args "path string" exe))
+  (unless (and (list? args) (andmap string? args)) (arg-error 'process/args "list of strings" args))
+  (unless (hash? options) (arg-error 'process/args "hash table" options))
+  (apply process (cons exe (append args (list options)))))
 
 (define (system-type)
   (hash-ref (runtime-env) 'system-type))

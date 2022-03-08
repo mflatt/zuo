@@ -22,9 +22,10 @@ The @racketmodname[zuo] language includes libraries added to
 
 @defzuomodule[zuo/cmdline]
 
-@defform[#:literals(:program :args-in :init :multi :once-each :once-any :args)
+@defform[#:literals(:program :usage :args-in :init :multi :once-each :once-any :args)
          (command-line flag-clause ... args-clause)
          #:grammar ([flag-clause (code:line :program expr)
+                                 (code:line :usage expr)
                                  (code:line :args-in expr)
                                  (code:line :init expr)
                                  (code:line :multi flag-spec ...)
@@ -39,7 +40,7 @@ The @racketmodname[zuo] language includes libraries added to
                     [help-spec string
                                (string-expr ...)]
                     [args-clause code:blank
-                                 (code:line :args form-formals
+                                 (code:line :args args-formals
                                                   proc-body ...)])]{
 
 Analogous to @realracket*[command-line] from
@@ -48,7 +49,9 @@ Analogous to @realracket*[command-line] from
 One small difference is that @racket[:args-in] is used to specify a
 list of incoming arguments instead of @racket[#:argv] for an incoming
 vector of arguments. The default @racket[:args-in] uses
-@racket[(hash-ref (runtime-env) 'args '())].
+@racket[(hash-ref (runtime-env) 'args '())]. Another difference is the
+addition of @racket[:usage], which supplies a usage-options string
+as an alternative to the one inferred from an @racket[:args] clause.
 
 A more significant difference is that @racketmodname[zuo] does not
 have mutable data structures, so an explicit accumulator must be
@@ -150,19 +153,21 @@ All relative paths are considered relative to the start-time current
 directory. This convention works well for running a Zuo script that's
 in a source directory while the current directory is the build
 directory, as long as the script references source files with
-@racket[quote-path] to make them relative to the script. For
+@racket[at-source] to make them relative to the script. For
 multi-directory builds, a good convention is for each directory to
-have a script that exports a @racketidfont{targets} procedure, where
-@racketidfont{targets} takes an @racket[_at-dir] procedure (perhaps
-constructed by @racket[make-at-dir]) to apply to each target path when
-building a list of targets.
+have a script that exports a @racketidfont{targets-at} procedure,
+where @racketidfont{targets-at} takes an @racket[_at-dir] procedure
+(supplied as just @racket[build-path] by default) to apply to each
+target path when building a list of targets, and a hash table of
+variables (analogous to variables that a makefile might provide to
+another makefile via @tt{make} arguments).
 
-As a further convenience following the @racketidfont{targets} model,
-the @racket[provide-targets] form takes an expression for producing
-such a @racketidfont{targets} procedure, and it both exports
-@racketidfont{targets} and creates a @racket[main] @tech{submodule}
-that calls @racket[build/command-line] on the list produced by
-@racket[(@#,racketidfont{targets} (at-dir "."))].
+As a further convenience following the @racketidfont{targets-at}
+model, the @racket[provide-targets] form takes an expression for
+producing such a @racketidfont{targets-at} procedure, and it both
+exports @racketidfont{targets-at} and creates a @racket[main]
+@tech{submodule} that calls @racket[build/command-line*] on with the
+@racketidfont{targets-at} procedure.
 
 @subsection{Recording Results}
 
@@ -255,7 +260,24 @@ when applying an @racket[_at-dir] function to create @racket[name].
 The @deftech{build token} argument to @racket[get-deps] represents the
 target build in progress. It's useful with @racket[file-sha1] to take
 advantage of caching and with @racket[build/recur] to report
-discovered targets.}
+discovered targets.
+
+The following keys are recognized in @racket[options]:
+
+@itemlist[
+
+@item{@racket['precious?] mapped to any value: if non-@racket[#f] for
+      a non-phony target, @racket[name] is not deleted if the
+      @racket[get-deps] function or its result's @racket[_build]
+      function fails.}
+
+@item{@racket['command?] mapped to any value: if non-@racket[#f], when
+      @racket[build/command-line] runs the target as the first one
+      name on the command line, all arguments from the command line
+      after the target name are provided @racket[_get-deps] as
+      additional arguments.}
+
+]}
 
 @deftogether[(
 @defproc[(rule [dependencies (listof (or/c target? path-string?))]
@@ -333,9 +355,35 @@ registered as a dependency of the target that received
 @defproc[(build/command-line [targets (listof target?)] [options hash? (hash)]) void?]{
 
 Parses command-line arguments to build one or more targets in
-@racket[targets], where the first one is build by default. The
+@racket[targets], where the first one is built by default. The
 @racket[options] argument is passed along to @racket[build], but may
-be adjusted via command-line flags such as @DFlag{jobs}.}
+be adjusted via command-line flags such as @DFlag{jobs}.
+
+If @racket[options] has a mapping for @racket['args], the value is
+used as the command-line arguments to parse instead of
+@racket[(hash-ref (system-env) 'args)]. If @racket[options] has a
+mapping for @racket['usage], the value is used as the usage options
+string.}
+
+
+@defproc[(build/command-line* [targets-at (procedure? hash? . -> . (listof target?))]
+                              [at-dir (path-string? ... . -> . path-string?) build-path]
+                              [options hash? (hash)])
+         void?]{
+
+Adds a layer of target-variable parsing to
+@racket[build/command-line]. Command-line arguments of the form
+@nonterm{name}@litchar{=}@nonterm{value} are parsed as variable
+assignments, where @racket{name} is formed by @litchar{a}-@litchar{z},
+@litchar{A}-@litchar{Z}, @litchar{_}, and @litchar{0}-@litchar{9}, but
+not starting @litchar{0}-@litchar{9}. These variables can appear
+anywhere in the command line and are removed from the argument list
+sent on to @racket[build/command-line], but no argument after a
+@racket{--} argument is parsed as a variable assignment.
+
+The @racket[targets-at] procedure is applied to @racket[at-dir] and a
+hash table of variables, where each variable name is converted to a
+symbol and the value is left exact as after @litchar{=}.}
 
 
 @defproc[(find-target [name string?] [targets (listof target?)]) (or/c target? #f)]{
@@ -363,19 +411,12 @@ The @racket[sha1?] predicate recognizes values that are either a
 The empty string represents a non-existent target or one that needs to
 be rebuilt.}
 
-@defproc[(make-at-dir [path path-string?]) (path-string? . -> . path-string?)]{
-
-Returns a function that adds @racket[path] as a prefix to a given
-path, normalizing in the same way as @racket[build-normalized-path].
-When @racket[path] is @racket["."], the result is the identity
-function on paths.}
-
-@defform[(provide-targets targets-proc-expr)]{
+@defform[(provide-targets targets-at-expr)]{
 
 Binds a generated identifier to the result of
-@racket[targets-proc-expr], provides it as @racketidfont{targets}, and
-creates a @racketidfont{main} submodule that run
-@racket[(build/command-line (@#,racketidfont{targets} (at-dir ".")))].
+@racket[targets-at-expr], provides it as @racketidfont{targets-at},
+and creates a @racketidfont{main} submodule that runs
+@racket[(build/command-line* @#,racketidfont{targets-at} build-path)].
 A script using @racket[provide-targets] thus works as a makefile-like
 script or as an input to a larger build.}
 

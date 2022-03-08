@@ -5,11 +5,11 @@
 ;; The `targets` function generates targets, and `to-dir` determines
 ;; the build directory --- so these targets could be used by another
 ;; build script that wants the output in a subdirectory, for example
-(define (targets at-dir)
+(define (targets at-dir [vars (hash)])
   ;; The `configure` script writes configuration info to "Makefile", so
   ;; use that if it's available, or use defaults otherwise
   (define Makefile (at-dir "Makefile"))
-  (define config
+  (define config-in
     (cond
       [(file-exists? Makefile) (config-file->hash Makefile)]
       ;; no `configure`-generated `Makefile`, so use defaults
@@ -21,6 +21,10 @@
        (hash 'INSTALL_PREFIX "C:\\Program Files\\Zuo"
              'CC "cl.exe"
              'CFLAGS "/O2")]))
+  (define config (foldl (lambda (key config)
+                          (hash-set config key (hash-ref vars key)))
+                        config-in
+                        (hash-keys vars)))
 
   (define install-prefix (hash-ref config 'INSTALL_PREFIX))
 

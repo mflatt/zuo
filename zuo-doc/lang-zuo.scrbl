@@ -1011,11 +1011,21 @@ keys are as follows, and supplying an unrecognized key in
       to terminate before exiting itself, whether exiting normally, by
       an error, or by a received termination signal (such as Ctl-C).}
 
-@item{@racket['exact?] mapped to boolean (or any value), Windows only:
-      if not @racket[#f], a single @racket[arg] must be provided, and
-      it is provided as-is for the created process's command line.}
+@item{@racket['exact?] mapped to boolean (or any value): if not
+      @racket[#f], a single @racket[arg] must be provided, and it is
+      provided as-is for the created process's command line on
+      Windows. A non-@racket[#f] value for @racket['exact?] is not
+      allowed on Unix.}
 
-]}
+@item{@racket['exec?] mapped to boolean (or any value): if not
+      @racket[#f], the target executable is run in the current
+      process, after waiting for any other subprocesses and deleting
+      cleanables. A non-@racket[#f] value for @racket['exact?] is not
+      allowed on Windows.}
+
+]
+
+See also @racket[shell].}
 
 @defproc[(process-wait [process handle?] ...) handle?]{
 
@@ -1030,9 +1040,15 @@ handle will produce a result immediately.}
 Returns @racket['running] if the process represented by
 @racket[process] is still running, the exit value if the process has
 exited (@racket[0] normally means succes), erroring for any other kind
-of handle.
+of handle.}
 
-See also @racket[shell].}
+@defproc[(process/args [executable path-string?]
+                       [args (list string?)]
+                       [options hash? (hash)])
+         hash?]{
+
+Alternative to @racket[process] for cases where it's more convenient
+to have the arguments in a list before @racket[options].}
 
 
 @defproc[(find-executable-path [name path-string?]) (or/c path-string? #f)]{

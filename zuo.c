@@ -1665,9 +1665,7 @@ static zuo_t *zuo_to_string(zuo_t *objs, zuo_print_mode_t mode) {
   if (objs != z.o_null)
     zuo_out(&out, objs, mode);
 
-  out_char(&out, 0);
-  
-  str = zuo_string(out.s);
+  str = zuo_sized_string(out.s, out.len);
   out_done(&out);
   return str;
 }
@@ -1722,7 +1720,7 @@ static void zuo_stack_trace() {
   done_dump_name(showed_name, repeats);
 }
 
-static void zuo_clean_all(); /* a neceesary forward reference */
+static void zuo_clean_all(); /* a necessary forward reference */
 
 static void zuo_exit_int(int v) {
   zuo_clean_all();
@@ -5084,6 +5082,10 @@ static void zuo_clean_all() {
 #endif
     }
   }
+
+  Z.o_cleanable_table = z.o_empty_hash;
+
+  zuo_resume_signal();
 }
 
 #ifdef ZUO_UNIX
@@ -5482,9 +5484,7 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   int argc = 1, i, ok;
   char **argv;
   void *env;
-#ifdef ZUO_WINDOWS
-  int exact_cmdline;
-#endif
+  int as_child, exact_cmdline;
 
   check_path_string(who, command);
   for (l = args; l->tag == zuo_pair_tag; l = _zuo_cdr(l)) {
@@ -5583,15 +5583,24 @@ zuo_t *zuo_process(zuo_t *command_and_args)
   else
     no_wait = 0;
 
+  opt = zuo_consume_option(&options, "exec?");
+  as_child = ((opt == z.o_false) || (opt == z.o_undefined));
 #ifdef ZUO_WINDOWS
+  if (!as_child)
+    zuo_fail1w(who, "'exec? mode not supported", opt);
+#endif
+
   opt = zuo_consume_option(&options, "exact?");
   if ((opt == z.o_false) || (opt == z.o_undefined))
     exact_cmdline = 0;
   else {
     exact_cmdline = 1;
     if (argc != 2)
-      zuo_fail1w(who, "too many arguments for mode", opt);
+      zuo_fail1w(who, "too many arguments for 'exact? mode", opt);
   }
+#ifdef ZUO_UNIX
+  if (exact_cmdline)
+    zuo_fail1w(who, "'exact? mode not suported", opt);
 #endif
 
   check_options_consumed(who, options);
@@ -5602,7 +5611,12 @@ zuo_t *zuo_process(zuo_t *command_and_args)
 
     zuo_suspend_signal();
 
-    pid = fork();
+    if (as_child)
+      pid = fork();
+    else {
+      zuo_clean_all();
+      pid = 0;
+    }
 
     if (pid > 0) {
       /* This is the original process, which needs to manage the
@@ -5641,9 +5655,9 @@ zuo_t *zuo_process(zuo_t *command_and_args)
           execv(argv[0], argv);
         else
           execve(argv[0], argv, env);
-        msg = "exec failed";
+        msg = "exec failed\n";
       } else
-        msg = "chdir failed";
+        msg = "chdir failed\n";
 
       if (write(2, msg, strlen(msg)) != 0)
         abort();

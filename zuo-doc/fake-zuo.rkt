@@ -204,8 +204,8 @@
     no-sha1
     build
     build/command-line
+    build/command-line*
     build/recur
-    make-at-dir
     provide-targets
     find-target
 
