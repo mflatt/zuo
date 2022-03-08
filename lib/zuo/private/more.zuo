@@ -159,6 +159,20 @@
 (define (simple-form-path p)
   (apply build-path (explode-path p)))
 
+(define (convert-wrt wrts wrt)
+  (cond
+    [(equal? (car wrts) "..")
+     (let loop ([wrts wrts] [here (hash-ref (runtime-env) 'dir)] [accum '()])
+       (cond
+         [(and (pair? wrts)
+               (equal? (car wrts) ".."))
+          (define l (split-path here))
+          (if (not (car l))
+              (error "find-relative-path: too many ups" wrt)
+              (loop (cdr wrts) (car l) (cons (cdr l) accum)))]
+         [else (append (map (lambda (p) "..") wrts) (reverse accum))]))]
+    [else (map (lambda (p) "..") wrts)]))
+
 (define (find-relative-path wrt p)
   (unless (path-string? wrt)
     (arg-error 'find-relative-path "path string" wrt))
@@ -176,9 +190,9 @@
          (let loop ([ps (if (string=? (car ps) ".") (cdr ps) ps)] [wrts wrts])
            (cond
              [(null? wrts) (if (null? ps) "." (apply build-path ps))]
-             [(null? ps) (apply build-path (map (lambda (p) "..") wrts))]
+             [(null? ps) (apply build-path (convert-wrt wrts wrt))]
              [(equal? (car ps) (car wrts)) (loop (cdr ps) (cdr wrts))]
-             [else (apply build-path (append (map (lambda (p) "..") wrts) ps))]))
+             [else (apply build-path (append (convert-wrt wrts wrt) ps))]))
          p)]))
 
 (define (path-replace-suffix path-in suffix)

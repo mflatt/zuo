@@ -106,6 +106,8 @@
        (build-path "tmp" "cache"))
 (check (find-relative-path "tmp/cache" ".")
        (build-path ".." ".."))
+(check (find-relative-path "../bin/tarm64osx/bin/" "main.o")
+       (build-path ".." ".." ".." (cdr (split-path (hash-ref (runtime-env) 'dir))) "main.o"))
 (check-arg-fail (find-relative-path "/home/zuo/src" "tmp/cache")
                 "both relative or both absolute")
 

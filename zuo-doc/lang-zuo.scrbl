@@ -606,7 +606,9 @@ be normalized in the sense of @racket[simple-form-path], otherwise
 @filepath{.} and @filepath{..} elements are treated normal path
 elements. If @racket[base] and @racket[path] are both absolute and
 they do not share a root element, the result can still be an absolute
-path.}
+path. If @racket[base] starts with @filepath{..} elements that are not
+matched by @racket[path], then elements are drawn from
+@racket[(hash-ref (runtime-env) 'dir)].}
 
 @defproc[(path-only [path path-string?]) path-string?]{
 
