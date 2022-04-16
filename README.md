@@ -1,3 +1,10 @@
+Moved
+=====
+
+This repo has the starting development history of Zuo, but it's
+now maintained at [racket/racket](https://github.com/racket/racket)
+and mirrored at [racket/zuo](https://github.com/racket/zuo).
+
 Zuo: A Tiny Racket for Scripting
 ================================
 
