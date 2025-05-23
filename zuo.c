@@ -139,6 +139,7 @@ typedef enum {
   zuo_string_tag,
   zuo_symbol_tag,
   zuo_trie_node_tag,
+  zuo_binary_tree_node_tag,
   zuo_variable_tag,
   zuo_primitive_tag,
   zuo_closure_tag,
@@ -218,6 +219,13 @@ typedef struct zuo_trie_node_t {
   zuo_t *val;
   struct zuo_t* next[ZUO_TRIE_BFACTOR];
 } zuo_trie_node_t;
+
+typedef struct zuo_binary_tree_node_t {
+  zuo_t obj;
+  zuo_int32_t depth;
+  zuo_t *left;
+  zuo_t *right;
+} zuo_binary_tree_node_t;
 
 typedef struct {
   zuo_t obj;
@@ -333,6 +341,7 @@ static struct {
     zuo_t *o_let_symbol;
     zuo_t *o_begin_symbol;
     zuo_t *o_if_symbol;
+    zuo_t *o_ref_symbol;
   } image;
 
   /* Roots that are not included in a dump: */
@@ -485,6 +494,8 @@ static zuo_int_t object_size(zuo_int32_t tag, zuo_int_t maybe_string_len) {
     return sizeof(zuo_symbol_t);
   case zuo_trie_node_tag:
     return sizeof(zuo_trie_node_t);
+  case zuo_binary_tree_node_tag:
+    return sizeof(zuo_binary_tree_node_t);
   case zuo_variable_tag:
     return sizeof(zuo_variable_t);
   case zuo_primitive_tag:
@@ -542,6 +553,10 @@ static void zuo_trace(zuo_t *obj) {
       for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
         zuo_update(&((zuo_trie_node_t *)obj)->next[i]);
     }
+    break;
+  case zuo_binary_tree_node_tag:
+    zuo_update(&((zuo_binary_tree_node_t *)obj)->left);
+    zuo_update(&((zuo_binary_tree_node_t *)obj)->right);
     break;
   case zuo_variable_tag:
     zuo_update(&((zuo_variable_t *)obj)->name);
@@ -861,6 +876,11 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
           ((zuo_trie_node_t *)obj)->next[i] = z.o_undefined;
     }
     break;
+  case zuo_binary_tree_node_tag:
+    zuo_fasl_int32(&((zuo_binary_tree_node_t *)obj)->depth, stream);
+    zuo_fasl_ref(&((zuo_binary_tree_node_t *)obj)->left, stream);
+    zuo_fasl_ref(&((zuo_binary_tree_node_t *)obj)->right, stream);
+    break;
   case zuo_variable_tag:
     {
       zuo_fasl_ref(&((zuo_variable_t *)obj)->name, stream);
@@ -1069,6 +1089,16 @@ static zuo_t *zuo_trie_node(void) {
   obj->val = z.o_undefined;
   for (i = 0; i < ZUO_TRIE_BFACTOR; i++)
     obj->next[i] = z.o_undefined;
+
+  return (zuo_t *)obj;
+}
+
+static zuo_t *zuo_binary_tree_node(zuo_int_t depth, zuo_t *left, zuo_t *right) {
+  zuo_binary_tree_node_t *obj = (zuo_binary_tree_node_t *)zuo_new(zuo_binary_tree_node_tag, sizeof(zuo_binary_tree_node_t));
+
+  obj->depth = depth;
+  obj->left = left;
+  obj->right = right;
 
   return (zuo_t *)obj;
 }
@@ -1335,6 +1365,65 @@ static zuo_t *zuo_trie_keys(zuo_t *trie_in, zuo_t *accum) {
   }
 
   return accum;
+}
+
+/*======================================================================*/
+/* binary trees                                                         */
+/*======================================================================*/
+
+static zuo_t *make_binary_tree(zuo_int_t depth) {
+  zuo_t *child;
+  if (depth == 0)
+    child = z.o_undefined;
+  else
+    child = make_binary_tree(depth - 1);
+  return zuo_binary_tree_node(depth, child, child);
+}
+
+static zuo_t *binary_tree_ref(zuo_t *tree_in, zuo_int_t i) {
+  zuo_binary_tree_node_t *tree = (zuo_binary_tree_node_t *)tree_in;
+  if (tree->depth == 0) {
+    if (i == 0)
+      return tree->left;
+    else if (i == 1)
+      return tree->right;
+    else
+      return z.o_undefined;
+  } else {
+    zuo_int_t bit = 1 << tree->depth;
+    if (i < bit)
+      return binary_tree_ref(tree->left, i);
+    else
+      return binary_tree_ref(tree->right, i - bit);
+  }
+}
+
+static zuo_t *binary_tree_set(zuo_t *tree_in, zuo_int_t i, zuo_t *v) {
+  zuo_binary_tree_node_t *tree = (zuo_binary_tree_node_t *)tree_in;
+  zuo_int_t size = 1 << (tree->depth + 1);
+  if (i < size) {
+    zuo_t *left = tree->left;
+    zuo_t *right = tree->right;
+    if (tree->depth == 0) {
+      if (i == 0)
+        left = v;
+      else
+        right = v;
+    } else {
+      zuo_int_t bit = 1 << tree->depth;
+      if (i < bit)
+        left = binary_tree_set(left, i, v);
+      else
+        right = binary_tree_set(right, i - bit, v);
+    }
+    return zuo_binary_tree_node(tree->depth, left, right);
+  } else {
+    return binary_tree_set(zuo_binary_tree_node(tree->depth + 1,
+                                                (zuo_t *)tree,
+                                                make_binary_tree(tree->depth)),
+                           i,
+                           v);
+  }
 }
 
 /*======================================================================*/
@@ -3108,117 +3197,274 @@ static void bad_form(zuo_t *e) {
   zuo_fail("");
 }
 
-/* Not strictly necessary, but a handy sanity check on input expressions: */
-static void check_syntax(zuo_t *e) {
-  zuo_t *es = zuo_cons(e, z.o_null);
+static zuo_t *compile_bind_next(zuo_t *cenv) {
+  return _zuo_cdr(cenv);
+}
+
+static zuo_t *compile_bind(zuo_t *cenv, zuo_t *id, zuo_t *idx) {
+  return zuo_cons(zuo_trie_extend(_zuo_car(cenv), id, idx),
+                  zuo_integer(ZUO_INT_I(_zuo_cdr(cenv)) + 1));
+}
+
+#define xBINARY_TREE_ENV
+
+static zuo_t *compile_lookup(zuo_t *cenv, zuo_t *id) {
+#ifdef BINARY_TREE_ENV
+  return zuo_trie_lookup(_zuo_car(cenv), id);
+#else
+  zuo_t *idx = zuo_trie_lookup(_zuo_car(cenv), id);
+  if (idx == z.o_undefined)
+    return idx;
+  return zuo_integer(ZUO_INT_I(_zuo_cdr(cenv)) - ZUO_INT_I(idx) - 1);
+#endif
+}
+
+static zuo_t *compile_quote(zuo_t *v) {
+  if ((v->tag == zuo_integer_tag)
+      || (v->tag == zuo_pair_tag))
+    return zuo_cons(z.o_quote_symbol, zuo_cons(v, z.o_null));
+  return  v;
+}
+
+static zuo_t *compile(zuo_t *e, zuo_t *top_env) {
+  zuo_t *cenv = zuo_cons(z.o_empty_hash, zuo_integer(0));
+  zuo_t *es = zuo_cons(zuo_cons(e, cenv), z.o_null);
+  zuo_t *rs = z.o_null;
 
   while (es != z.o_null) {
     e = _zuo_car(es);
     es = _zuo_cdr(es);
-    if (e->tag == zuo_pair_tag) {
-      zuo_t *rator = _zuo_car(e);
 
-      if (rator == z.o_quote_symbol) {
-        zuo_t *d = _zuo_cdr(e);
-        if ((d->tag != zuo_pair_tag) || (_zuo_cdr(d) != z.o_null))
-          bad_form(e);
-      } else if (rator == z.o_if_symbol) {
-        zuo_t *d = _zuo_cdr(e), *dd, *ddd;
-        if (d->tag != zuo_pair_tag)
-          bad_form(e);
-        dd = _zuo_cdr(d);
-        if (dd->tag != zuo_pair_tag)
-          bad_form(e);
-        ddd = _zuo_cdr(dd);
-        if ((ddd->tag != zuo_pair_tag) || (_zuo_cdr(ddd) != z.o_null))
-          bad_form(e);
-        es = zuo_cons(_zuo_car(ddd), es);
-        es = zuo_cons(_zuo_car(dd), es);
-        es = zuo_cons(_zuo_car(d), es);
-      } else if (rator == z.o_lambda_symbol) {
-        zuo_t *d = _zuo_cdr(e), *dd, *ad;
-        if (d->tag != zuo_pair_tag)
-          bad_form(e);
-        ad = _zuo_car(d); /* formals */
-        dd = _zuo_cdr(d);
-        if (dd->tag != zuo_pair_tag)
-          bad_form(e);
-        if (_zuo_cdr(dd) != z.o_null) {
-          if (_zuo_car(dd)->tag == zuo_string_tag) {
-            /* skip over name string */
-            dd = _zuo_cdr(dd);
-            if (dd->tag != zuo_pair_tag)
+    if (e->tag == zuo_pair_tag) {
+      /* pair => subexpression */
+      cenv = _zuo_cdr(e);
+      e = _zuo_car(e);
+      if (e->tag == zuo_pair_tag) {
+        zuo_t *rator = _zuo_car(e);
+
+        if (rator == z.o_quote_symbol) {
+          zuo_t *d = _zuo_cdr(e);
+          if ((d->tag != zuo_pair_tag) || (_zuo_cdr(d) != z.o_null))
+            bad_form(e);
+          rs = zuo_cons(e, rs);
+        } else if (rator == z.o_if_symbol) {
+          zuo_t *d = _zuo_cdr(e), *dd, *ddd;
+          if (d->tag != zuo_pair_tag)
+            bad_form(e);
+          dd = _zuo_cdr(d);
+          if (dd->tag != zuo_pair_tag)
+            bad_form(e);
+          ddd = _zuo_cdr(dd);
+          if ((ddd->tag != zuo_pair_tag) || (_zuo_cdr(ddd) != z.o_null))
+            bad_form(e);
+          es = zuo_cons(z.o_if_symbol, es);
+          es = zuo_cons(zuo_cons(_zuo_car(ddd), cenv), es);
+          es = zuo_cons(zuo_cons(_zuo_car(dd), cenv), es);
+          es = zuo_cons(zuo_cons(_zuo_car(d), cenv), es);
+        } else if (rator == z.o_lambda_symbol) {
+          zuo_t *d = _zuo_cdr(e), *dd, *ad, *name_string = z.o_undefined, *idx;
+          zuo_int_t formals_count;
+          if (d->tag != zuo_pair_tag)
+            bad_form(e);
+          ad = _zuo_car(d); /* formals */
+          dd = _zuo_cdr(d);
+          if (dd->tag != zuo_pair_tag)
+            bad_form(e);
+          if (_zuo_cdr(dd) != z.o_null) {
+            if (_zuo_car(dd)->tag == zuo_string_tag) {
+              /* skip over name string */
+              name_string = _zuo_car(dd);
+              dd = _zuo_cdr(dd);
+              if (dd->tag != zuo_pair_tag)
+                bad_form(e);
+            } else
               bad_form(e);
-          } else
+          }
+          if (_zuo_cdr(dd) != z.o_null)
             bad_form(e);
-        }
-        if (_zuo_cdr(dd) != z.o_null)
-          bad_form(e);
-        while (ad->tag == zuo_pair_tag) {
-          if (_zuo_car(ad)->tag != zuo_symbol_tag)
+          idx = compile_bind_next(cenv);
+          formals_count = 0;
+          while (ad->tag == zuo_pair_tag) {
+            if (_zuo_car(ad)->tag != zuo_symbol_tag)
+              bad_form(e);
+            cenv = compile_bind(cenv, _zuo_car(ad), compile_bind_next(cenv));
+            ad = _zuo_cdr(ad);
+            formals_count++;
+          }
+          if (ad->tag == zuo_symbol_tag) {
+            cenv = compile_bind(cenv, ad, compile_bind_next(cenv));
+            formals_count = -(formals_count + 1);
+          } else {
+            if (ad != z.o_null)
+              bad_form(e);
+          }
+          es = zuo_cons(z.o_lambda_symbol, es);
+          es = zuo_cons(zuo_cons(_zuo_car(dd), cenv), es);
+          rs = zuo_cons(idx, rs);
+          rs = zuo_cons(zuo_integer(formals_count), rs);
+          rs = zuo_cons(name_string, rs);
+        } else if (rator == z.o_let_symbol) {
+          zuo_t *d = _zuo_cdr(e), *dd, *ad, *aad, *daad, *adaad, *id, *idx;
+          if (d->tag != zuo_pair_tag)
             bad_form(e);
-          ad = _zuo_cdr(ad);
+          ad = _zuo_car(d); /* `((id rhs))` */
+          dd = _zuo_cdr(d);
+          if ((dd->tag != zuo_pair_tag) || (_zuo_cdr(dd) != z.o_null))
+            bad_form(e);
+          if ((ad->tag != zuo_pair_tag) || (_zuo_cdr(ad) != z.o_null))
+            bad_form(e);
+          aad = _zuo_car(ad); /* `(id rhs)` */
+          if ((aad->tag != zuo_pair_tag) || (_zuo_car(aad)->tag != zuo_symbol_tag))
+            bad_form(e);
+          id = _zuo_car(aad);
+          daad = _zuo_cdr(aad); /* `(rhs)` */
+          if ((daad->tag != zuo_pair_tag) || (_zuo_cdr(daad) != z.o_null))
+            bad_form(e);
+          adaad = _zuo_car(daad); /* `rhs` */
+          idx = compile_bind_next(cenv);
+          es = zuo_cons(z.o_let_symbol, es);
+          es = zuo_cons(zuo_cons(adaad, cenv), es);
+          cenv = compile_bind(cenv, id, idx);
+          es = zuo_cons(zuo_cons(_zuo_car(dd), cenv), es);
+          rs = zuo_cons(idx, rs);
+        } else if (rator == z.o_begin_symbol) {
+          zuo_t *l = _zuo_cdr(e);
+          if (l->tag != zuo_pair_tag)
+            bad_form(e);
+          es = zuo_cons(z.o_begin_symbol, es);
+          while (l->tag == zuo_pair_tag) {
+            es = zuo_cons(zuo_cons(_zuo_car(l), cenv), es);
+            l = _zuo_cdr(l);
+          }
+          if (l != z.o_null)
+            bad_form(e);
+          rs = zuo_cons(z.o_undefined, rs); /* terminator */
+        } else {
+          zuo_t *l = e;
+          es = zuo_cons(z.o_null, es); /* null => application */
+          while (l->tag == zuo_pair_tag) {
+            es = zuo_cons(zuo_cons(_zuo_car(l), cenv), es);
+            l = _zuo_cdr(l);
+          }
+          if (l != z.o_null)
+            bad_form(e);
+          rs = zuo_cons(z.o_undefined, rs); /* terminator */
         }
-        if ((ad != z.o_null)
-            && (ad->tag != zuo_symbol_tag))
-          bad_form(e);
-        es = zuo_cons(_zuo_car(dd), es);
-      } else if (rator == z.o_let_symbol) {
-        zuo_t *d = _zuo_cdr(e), *dd, *ad, *aad, *daad, *adaad;
-        if (d->tag != zuo_pair_tag)
-          bad_form(e);
-        ad = _zuo_car(d); /* `((id rhs))` */
-        dd = _zuo_cdr(d);
-        if ((dd->tag != zuo_pair_tag) || (_zuo_cdr(dd) != z.o_null))
-          bad_form(e);
-        if ((ad->tag != zuo_pair_tag) || (_zuo_cdr(ad) != z.o_null))
-          bad_form(e);
-        aad = _zuo_car(ad); /* `(id rhs)` */
-        if ((aad->tag != zuo_pair_tag) || (_zuo_car(aad)->tag != zuo_symbol_tag))
-          bad_form(e);
-        daad = _zuo_cdr(aad); /* `(rhs)` */
-        if ((daad->tag != zuo_pair_tag) || (_zuo_cdr(daad) != z.o_null))
-          bad_form(e);
-        adaad = _zuo_car(daad); /* `rhs` */
-        es = zuo_cons(adaad, es);
-        es = zuo_cons(_zuo_car(dd), es);
-      } else if (rator == z.o_begin_symbol) {
-        zuo_t *l = _zuo_cdr(e);
-        if (l->tag != zuo_pair_tag)
-          bad_form(e);
-        while (l->tag == zuo_pair_tag) {
-          es = zuo_cons(_zuo_car(l), es);
-          l = _zuo_cdr(l);
-        }
-        if (l != z.o_null)
-          bad_form(e);
+      } else if (e->tag == zuo_symbol_tag) {
+        zuo_t *idx = compile_lookup(cenv, e);
+        if (idx == z.o_undefined)
+          idx = compile_quote(zuo_trie_lookup(top_env, e));
+        if (idx == z.o_undefined)
+          zuo_fail1("undefined", e);
+        rs = zuo_cons(idx, rs);
       } else {
-        zuo_t *l = e;
-        while (l->tag == zuo_pair_tag) {
-          es = zuo_cons(_zuo_car(l), es);
-          l = _zuo_cdr(l);
-        }
-        if (l != z.o_null)
-          bad_form(e);
+        rs = zuo_cons(compile_quote(e), rs);
       }
+    } else {
+      /* symbol or null => rebuild from rs */
+      if (e == z.o_if_symbol) {
+        zuo_t *thn, *els, *tst;
+        els = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        thn = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        tst = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        e = zuo_cons(z.o_if_symbol,
+                     zuo_cons(tst,
+                              zuo_cons(thn,
+                                       zuo_cons(els,
+                                                z.o_null))));
+      } else if (e == z.o_lambda_symbol) {
+        zuo_t *body, *name_string, *formals, *idx;
+        body = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        name_string = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        formals = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        idx = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        e = zuo_cons(body, z.o_null);
+        if (name_string != z.o_undefined)
+          e = zuo_cons(name_string, e);
+        e = zuo_cons(z.o_lambda_symbol,
+                     zuo_cons(zuo_cons(formals, idx),
+                              e));
+      } else if (e == z.o_let_symbol) {
+        zuo_t *id, *rhs, *body, *idx;
+        rhs = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        body = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        idx = _zuo_car(rs);
+        rs = _zuo_cdr(rs);
+        e = zuo_cons(z.o_let_symbol,
+                     zuo_cons(rhs,
+                              zuo_cons(idx,
+                                       zuo_cons(body,
+                                                z.o_null))));
+      } else if (e == z.o_begin_symbol) {
+        e = z.o_null;
+        while (_zuo_car(rs) != z.o_undefined) {
+          e = zuo_cons(_zuo_car(rs), e);
+          rs = _zuo_cdr(rs);
+        }
+        rs = _zuo_cdr(rs);
+        e = zuo_reverse(e);
+        e = zuo_cons(z.o_begin_symbol, e);
+      } else if (e == z.o_null) {
+        /* application */
+        e = z.o_null;
+        while (_zuo_car(rs) != z.o_undefined) {
+          e = zuo_cons(_zuo_car(rs), e);
+          rs = _zuo_cdr(rs);
+        }
+        rs = _zuo_cdr(rs);
+        e = zuo_reverse(e);
+      }
+      rs = zuo_cons(e, rs);
     }
   }
+
+  return _zuo_car(rs);
 }
 
-static zuo_t *env_extend(zuo_t *env, zuo_t *sym, zuo_t *val) {
-  ZUO_ASSERT((env->tag == zuo_trie_node_tag) || (env->tag == zuo_pair_tag));
-  return zuo_cons(zuo_cons(sym, val), env);
+#ifdef BINARY_TREE_ENV
+
+static zuo_t *env_init() {
+  return zuo_binary_tree_node(0, z.o_undefined, z.o_undefined);
 }
 
-static zuo_t *env_lookup(zuo_t *env, zuo_t *sym) {
-  while (env->tag == zuo_pair_tag) {
-    zuo_t *a = _zuo_car(env);
-    if (_zuo_car(a) == sym)
-      return _zuo_cdr(a);
+static zuo_t *env_extend(zuo_t *env, zuo_int_t i, zuo_t *val) {
+  ZUO_ASSERT(env->tag == zuo_binary_tree_node_tag);
+  ZUO_ASSERT(val != z.o_undefined);
+  return binary_tree_set(env, i, val);
+}
+
+static zuo_t *env_ref(zuo_t *env, zuo_int_t i) {
+  zuo_t *v = binary_tree_ref(env, i);
+  ZUO_ASSERT(v != z.o_undefined);
+  return v;
+}
+
+#else
+
+static zuo_t *env_init() {
+  return z.o_null;
+}
+
+static zuo_t *env_extend(zuo_t *env, zuo_int_t i, zuo_t *val) {
+  return zuo_cons(val, env);
+}
+
+static zuo_t *env_ref(zuo_t *env, zuo_int_t i) {
+  for (; i > 0; i--)
     env = _zuo_cdr(env);
-  }
-  return zuo_trie_lookup(env, sym);
+  return _zuo_car(env);
 }
+
+#endif
 
 static void interp_step(void) {
   zuo_t *e = Z.o_interp_e;
@@ -3231,11 +3477,8 @@ static void interp_step(void) {
     }
   }
 
-  if (e->tag == zuo_symbol_tag) {
-    zuo_t *val = env_lookup(Z.o_interp_env, e);
-    if (val == z.o_undefined)
-      zuo_fail1("undefined", e);
-    Z.o_interp_v = val;
+  if (e->tag == zuo_integer_tag) {
+    Z.o_interp_v = env_ref(Z.o_interp_env, ZUO_INT_I(e));
   } else if (e->tag == zuo_pair_tag) {
     zuo_t *rator = _zuo_car(e);
 
@@ -3252,9 +3495,9 @@ static void interp_step(void) {
       Z.o_interp_v = zuo_closure(Z.o_interp_e, Z.o_interp_env);
     } else if (rator == z.o_let_symbol) {
       zuo_t *d = _zuo_cdr(e);
-      Z.o_interp_e = _zuo_car(_zuo_cdr(_zuo_car(_zuo_car(d))));
+      Z.o_interp_e = _zuo_car(d);
       Z.o_interp_k = zuo_cont(zuo_let_cont,
-                              d, Z.o_interp_env,
+                              _zuo_cdr(d), Z.o_interp_env,
                               Z.o_interp_in_proc,
                               Z.o_interp_k);
     } else if (rator == z.o_begin_symbol) {
@@ -3302,7 +3545,12 @@ static void continue_step(void) {
             zuo_t *all_args = args;
             zuo_closure_t *f = (zuo_closure_t *)rator;
             zuo_t *env = f->env;
-            zuo_t *formals = _zuo_car(_zuo_cdr(f->lambda));
+            zuo_t *arg_spec = _zuo_car(_zuo_cdr(f->lambda));
+            zuo_t *formals = _zuo_car(arg_spec);
+            zuo_int_t formals_count = ZUO_INT_I(formals);
+            zuo_t *idx = _zuo_cdr(arg_spec);
+            zuo_int_t index = ZUO_INT_I(idx);
+            int has_rest = (formals_count < 0);
             zuo_t *body = _zuo_cdr(_zuo_cdr(f->lambda));
             zuo_t *body_d = _zuo_cdr(body);
             if (body_d != z.o_null) {
@@ -3315,18 +3563,19 @@ static void continue_step(void) {
                 Z.o_interp_in_proc = z.o_false;
             } else
               Z.o_interp_in_proc = z.o_false;
-            while (formals->tag == zuo_pair_tag) {
+            if (has_rest)
+              formals_count = -(formals_count + 1);
+            while (formals_count > 0) {
               if (args == z.o_null)
                 break;
-              env = env_extend(env, _zuo_car(formals), _zuo_car(args));
+              env = env_extend(env, index++, _zuo_car(args));
               args = _zuo_cdr(args);
-              formals = _zuo_cdr(formals);
+              formals_count--;
             }
-            if (formals->tag == zuo_symbol_tag)
-              env = env_extend(env, formals, args);
-            else if (formals != z.o_null || args != z.o_null)
+            if (has_rest && (formals_count == 0))
+              env = env_extend(env, index, args);
+            else if (formals_count != 0 || args != z.o_null)
               zuo_fail_arity(rator, all_args);
-
             Z.o_interp_e = _zuo_car(body);
             Z.o_interp_env = env;
             Z.o_interp_v = z.o_undefined;
@@ -3378,13 +3627,12 @@ static void continue_step(void) {
             if (count != 1)
               zuo_fail_arity(z.o_kernel_eval, args);
 
-            Z.o_interp_e = _zuo_car(args);
-            check_syntax(Z.o_interp_e);
+            Z.o_interp_e = compile(_zuo_car(args), z.o_top_env);
             Z.o_interp_meta_k = zuo_cons(zuo_cons(Z.o_interp_k, z.o_undefined),
                                          Z.o_interp_meta_k);
 
             Z.o_interp_v = z.o_undefined;
-            Z.o_interp_env = z.o_top_env;
+            Z.o_interp_env = env_init();
             Z.o_interp_k = z.o_done_k;
             break;
           } else
@@ -3403,7 +3651,7 @@ static void continue_step(void) {
     break;
   case zuo_let_cont:
     Z.o_interp_e = _zuo_car(_zuo_cdr(k->data));
-    Z.o_interp_env = env_extend(k->env, _zuo_car(_zuo_car(_zuo_car(k->data))), Z.o_interp_v);
+    Z.o_interp_env = env_extend(k->env, ZUO_INT_I(_zuo_car(k->data)), Z.o_interp_v);
     Z.o_interp_v = z.o_undefined;
     break;
   case zuo_begin_cont:
@@ -3435,11 +3683,11 @@ static void continue_step(void) {
 }
 
 static zuo_t *zuo_kernel_eval(zuo_t *e) {
-  check_syntax(e);
+  e = compile(e, z.o_top_env);
 
   Z.o_interp_e = e;
   Z.o_interp_v = z.o_undefined;
-  Z.o_interp_env = z.o_top_env;
+  Z.o_interp_env = env_init();
   Z.o_interp_k = z.o_done_k;
   Z.o_interp_meta_k = z.o_null;
 
@@ -3451,7 +3699,6 @@ static zuo_t *zuo_kernel_eval(zuo_t *e) {
       if (Z.o_interp_meta_k == z.o_null) {
         zuo_t *v = Z.o_interp_v;
         Z.o_interp_e = Z.o_interp_v = Z.o_interp_env = z.o_false;
-
         return v;
       } else {
         Z.o_interp_k = _zuo_car(_zuo_car(Z.o_interp_meta_k));
@@ -4774,11 +5021,12 @@ static zuo_t *zuo_declare_kernel_module(void) {
                     zuo_cons(zuo_cons(z.o_kernel_read_string,
                                       zuo_cons(arg_id, z.o_null)),
                              z.o_null));
-    read_and_eval = zuo_closure(zuo_cons(z.o_lambda_symbol,
-                                         zuo_cons(arg_id,
-                                                  zuo_cons(((zuo_symbol_t *)read_and_eval_sym)->str,
-                                                           zuo_cons(call, z.o_null)))),
-                                z.o_empty_hash);
+    read_and_eval = zuo_closure(compile(zuo_cons(z.o_lambda_symbol,
+                                                 zuo_cons(arg_id,
+                                                          zuo_cons(((zuo_symbol_t *)read_and_eval_sym)->str,
+                                                                   zuo_cons(call, z.o_null)))),
+                                        z.o_empty_hash),
+                                env_init());
 
     mod = zuo_trie_extend(z.o_empty_hash, read_and_eval_sym, read_and_eval);
 
@@ -4787,7 +5035,7 @@ static zuo_t *zuo_declare_kernel_module(void) {
 
   {
     zuo_t *mod_ids, *args, *car_arg, *cdr_arg, *hash_p_arg, *module_to_hash_star_arg, *recur;
-    zuo_t *call, *apply, *reg_mod, *bind, *if_form, *body;
+    zuo_t *call, *apply, *reg_mod, *bind, *if_form, *body, *self, *recur_var;
     /* module->hash = (lambda (mod) "module->hash"
        .                (let ([arg (module->hash* mod)])
        .                  (if (hash? arg)
@@ -4801,19 +5049,22 @@ static zuo_t *zuo_declare_kernel_module(void) {
     cdr_arg = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("cdr")), args);
     hash_p_arg = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("hash?")), args);
     module_to_hash_star_arg = zuo_cons(z.o_module_to_hash_star, mod_ids);
-    recur = zuo_cons(z.o_false, zuo_cons(car_arg, z.o_null));
+    recur_var = zuo_variable(zuo_symbol("module->hash"));
+    self = zuo_cons(zuo_trie_lookup(z.o_top_env, zuo_symbol("variable-ref")), zuo_cons(recur_var, z.o_null));      
+    recur = zuo_cons(self, zuo_cons(car_arg, z.o_null));
     call = zuo_cons(z.o_get_read_and_eval, zuo_cons(car_arg, zuo_cons(recur, z.o_null)));
     apply = zuo_cons(z.o_apply, zuo_cons(call, zuo_cons(cdr_arg, z.o_null)));
     reg_mod = zuo_cons(z.o_register_module, zuo_cons(_zuo_car(mod_ids), zuo_cons(apply, z.o_null)));
     if_form = zuo_cons(z.o_if_symbol, zuo_cons(hash_p_arg, zuo_cons(arg_id, zuo_cons(reg_mod, z.o_null))));
     bind = zuo_cons(zuo_cons(arg_id, zuo_cons(module_to_hash_star_arg, z.o_null)), z.o_null);
     body = zuo_cons(z.o_let_symbol, zuo_cons(bind, zuo_cons(if_form, z.o_null)));
-    module_to_hash = zuo_closure(zuo_cons(z.o_lambda_symbol,
-                                          zuo_cons(mod_ids,
-                                                   zuo_cons(zuo_string("module->hash"),
-                                                            zuo_cons(body, z.o_null)))),
-                                 z.o_empty_hash);
-    ((zuo_pair_t *)recur)->car = module_to_hash; /* tie loop for recursive call */
+    module_to_hash = zuo_closure(compile(zuo_cons(z.o_lambda_symbol,
+                                                  zuo_cons(mod_ids,
+                                                           zuo_cons(zuo_string("module->hash"),
+                                                                    zuo_cons(body, z.o_null)))),
+                                         z.o_empty_hash),
+                                 env_init());
+    ((zuo_variable_t *)recur_var)->val = module_to_hash; /* tie loop for recursive call */
   }
 
   return module_to_hash;
@@ -7342,6 +7593,7 @@ static void zuo_image_init(char *boot_image) {
       z.o_let_symbol = zuo_symbol("let");
       z.o_begin_symbol = zuo_symbol("begin");
       z.o_if_symbol = zuo_symbol("if");
+      z.o_ref_symbol = zuo_symbol("ref");
 
       z.o_modules = z.o_null;
 
