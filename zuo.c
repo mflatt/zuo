@@ -143,7 +143,6 @@ typedef enum {
   zuo_variable_tag,
   zuo_primitive_tag,
   zuo_closure_tag,
-  zuo_free_mask_tag,
   zuo_handle_tag,
   zuo_opaque_tag,
   zuo_cont_tag,
@@ -252,13 +251,8 @@ typedef struct {
   zuo_t obj;
   zuo_t *lambda;
   zuo_t *env;
+  zuo_t *live_mask;
 } zuo_closure_t;
-
-typedef struct {
-  zuo_t obj;
-  zuo_t *free;
-  zuo_t *e;
-} zuo_free_mask_t;
 
 typedef enum {
   zuo_handle_open_fd_in_status,
@@ -305,6 +299,7 @@ typedef struct zuo_cont_t {
   zuo_cont_tag_t tag;
   zuo_t *data;
   zuo_t *env;
+  zuo_t *live_mask;
   zuo_t *in_proc; /* string or #f */
   zuo_t *next;
 } zuo_cont_t;
@@ -509,8 +504,6 @@ static zuo_int_t object_size(zuo_int32_t tag, zuo_int_t maybe_string_len) {
     return sizeof(zuo_primitive_t);
   case zuo_closure_tag:
     return sizeof(zuo_closure_t);
-  case zuo_free_mask_tag:
-    return sizeof(zuo_free_mask_t);
   case zuo_handle_tag:
     return sizeof(zuo_handle_t);
   case zuo_opaque_tag:
@@ -577,10 +570,7 @@ static void zuo_trace(zuo_t *obj) {
   case zuo_closure_tag:
     zuo_update(&((zuo_closure_t *)obj)->lambda);
     zuo_update(&((zuo_closure_t *)obj)->env);
-    break;
-  case zuo_free_mask_tag:
-    zuo_update(&((zuo_free_mask_t *)obj)->free);
-    zuo_update(&((zuo_free_mask_t *)obj)->e);
+    zuo_update(&((zuo_closure_t *)obj)->live_mask);
     break;
   case zuo_opaque_tag:
     zuo_update(&((zuo_opaque_t *)obj)->tag);
@@ -589,6 +579,7 @@ static void zuo_trace(zuo_t *obj) {
   case zuo_cont_tag:
     zuo_update(&((zuo_cont_t *)obj)->data);
     zuo_update(&((zuo_cont_t *)obj)->env);
+    zuo_update(&((zuo_cont_t *)obj)->live_mask);
     zuo_update(&((zuo_cont_t *)obj)->in_proc);
     zuo_update(&((zuo_cont_t *)obj)->next);
     break;
@@ -917,10 +908,7 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   case zuo_closure_tag:
     zuo_fasl_ref(&((zuo_closure_t *)obj)->lambda, stream);
     zuo_fasl_ref(&((zuo_closure_t *)obj)->env, stream);
-    break;
-  case zuo_free_mask_tag:
-    zuo_fasl_ref(&((zuo_free_mask_t *)obj)->free, stream);
-    zuo_fasl_ref(&((zuo_free_mask_t *)obj)->e, stream);
+    zuo_fasl_ref(&((zuo_closure_t *)obj)->live_mask, stream);
     break;
   case zuo_opaque_tag:
     zuo_fasl_ref(&((zuo_opaque_t *)obj)->tag, stream);
@@ -929,6 +917,7 @@ static void zuo_fasl(zuo_t *obj, zuo_fasl_stream_t *stream) {
   case zuo_cont_tag:
     zuo_fasl_ref(&((zuo_cont_t *)obj)->data, stream);
     zuo_fasl_ref(&((zuo_cont_t *)obj)->env, stream);
+    zuo_fasl_ref(&((zuo_cont_t *)obj)->live_mask, stream);
     zuo_fasl_ref(&((zuo_cont_t *)obj)->in_proc, stream);
     zuo_fasl_ref(&((zuo_cont_t *)obj)->next, stream);
     break;
@@ -1190,17 +1179,11 @@ static zuo_t *zuo_primitive(zuo_dispatcher_proc_t dispatcher, zuo_proc_t proc, z
   }
 }
 
-static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env) {
+static zuo_t *zuo_closure(zuo_t *lambda, zuo_t *env, zuo_t *live_mask) {
   zuo_closure_t *obj = (zuo_closure_t *)zuo_new(zuo_closure_tag, sizeof(zuo_closure_t));
   obj->lambda = lambda;
   obj->env = env;
-  return (zuo_t *)obj;
-}
-
-static zuo_t *zuo_free_mask(zuo_t *free, zuo_t *e) {
-  zuo_free_mask_t *obj = (zuo_free_mask_t *)zuo_new(zuo_free_mask_tag, sizeof(zuo_free_mask_t));
-  obj->free = free;
-  obj->e = e;
+  obj->live_mask = live_mask;
   return (zuo_t *)obj;
 }
 
@@ -1219,11 +1202,12 @@ static zuo_t *zuo_opaque(zuo_t *tag, zuo_t *val) {
   return (zuo_t *)obj;
 }
 
-static zuo_t *zuo_cont(zuo_cont_tag_t tag, zuo_t *data, zuo_t *env, zuo_t *in_proc, zuo_t *next) {
+static zuo_t *zuo_cont(zuo_cont_tag_t tag, zuo_t *data, zuo_t *env, zuo_t *live_mask, zuo_t *in_proc, zuo_t *next) {
   zuo_cont_t *obj = (zuo_cont_t *)zuo_new(zuo_cont_tag, sizeof(zuo_cont_t));
   obj->tag = tag;
   obj->data = data;
   obj->env = env;
+  obj->live_mask = live_mask;
   obj->in_proc = in_proc;
   obj->next = next;
   return (zuo_t *)obj;
@@ -1493,24 +1477,6 @@ static zuo_t *binary_tree_union(zuo_t *tree_in, zuo_t *tree2_in) {
       }
     }
   }
-}
-
-/*======================================================================*/
-/* free-variable masks                                                  */
-/*======================================================================*/
-
-static zuo_t *get_free(zuo_t *e) {
-  if (e->tag == zuo_free_mask_tag)
-    return ((zuo_free_mask_t *)e)->free;
-  else
-    return z.o_undefined;
-}
-
-static zuo_t *strip_free(zuo_t *e) {
-  if (e->tag == zuo_free_mask_tag)
-    return ((zuo_free_mask_t *)e)->e;
-  else
-    return e;
 }
 
 /*======================================================================*/
@@ -1821,7 +1787,7 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, zuo_print_mode_t mode) {
     } else if (obj == z.o_kernel_eval) {
       out_string(out, "#<procedure:kernel-eval>");
     } else if (obj->tag == zuo_closure_tag) {
-      zuo_t *dd = ZUO_CDR(ZUO_CDR(strip_free(((zuo_closure_t *)obj)->lambda)));
+      zuo_t *dd = ZUO_CDR(ZUO_CDR(((zuo_closure_t *)obj)->lambda));
       out_string(out, "#<procedure");
       if (ZUO_CAR(dd)->tag == zuo_string_tag) {
         out_string(out, ":");
@@ -1853,6 +1819,8 @@ static void zuo_out(zuo_out_t *out, zuo_t *obj, zuo_print_mode_t mode) {
       out_string(out, "#<variable:");
       zuo_out(out, ((zuo_variable_t *)obj)->name, zuo_display_mode);
       out_string(out, ">");
+    } else if (obj->tag == zuo_binary_tree_node_tag) {
+      out_string(out, "#<binary-tree>");
     } else {
       out_string(out, "#<garbage>");
     }
@@ -3168,9 +3136,9 @@ static void zuo_fail_arity(zuo_t *rator, zuo_t *args) {
   else if (rator == z.o_kernel_eval)
     name = zuo_string("kernel-eval");
   else if (rator->tag == zuo_closure_tag) {
-    zuo_t *body = _zuo_cdr(_zuo_cdr(strip_free(((zuo_closure_t *)rator)->lambda)));
-    if (_zuo_cdr(body) != z.o_null)
-      name =  _zuo_car(body);
+    zuo_t *body = _zuo_cdr(_zuo_cdr(((zuo_closure_t *)rator)->lambda));
+    if (_zuo_car(body)->tag == zuo_string_tag)
+      name = _zuo_car(body);
     else
       name = z.o_false;
   } else
@@ -3313,10 +3281,29 @@ static zuo_t *compile_quote(zuo_t *v) {
   return  v;
 }
 
-static zuo_t *compile_add_free(zuo_t *e, zuo_t *free) {
-  if (free == z.o_undefined)
-    return e;
-  return zuo_free_mask(free, e);
+static zuo_t *compile_add_live(zuo_t *e, zuo_t *live) {
+  return zuo_cons(live, e);
+}
+
+static zuo_t *compile_get_live(zuo_t *e) {
+  return _zuo_car(e);
+}
+
+static zuo_t *compile_strip_live(zuo_t *e) {
+  return _zuo_cdr(e);
+}
+
+static zuo_t *compile_accum_live(zuo_t *e, zuo_t **_live) {
+  /* reverses, and also inserts accumulated live masks between elements */
+  zuo_t *re = z.o_null, *live = *_live;
+  while (e != z.o_null) {
+    if (re != z.o_null) re = zuo_cons(live, re);
+    live = binary_tree_union(compile_get_live(_zuo_car(e)), live);
+    re = zuo_cons(compile_strip_live(_zuo_car(e)), re);
+    e = _zuo_cdr(e);
+  }
+  *_live = live;
+  return re;
 }
 
 static zuo_t *compile(zuo_t *e, zuo_t *top_env) {
@@ -3339,6 +3326,7 @@ static zuo_t *compile(zuo_t *e, zuo_t *top_env) {
           zuo_t *d = _zuo_cdr(e);
           if ((d->tag != zuo_pair_tag) || (_zuo_cdr(d) != z.o_null))
             bad_form(e);
+          e = compile_add_live(e, z.o_undefined);
           rs = zuo_cons(e, rs);
         } else if (rator == z.o_if_symbol) {
           zuo_t *d = _zuo_cdr(e), *dd, *ddd;
@@ -3449,34 +3437,35 @@ static zuo_t *compile(zuo_t *e, zuo_t *top_env) {
           zuo_t *v = compile_quote(zuo_trie_lookup(top_env, e));
           if (v == z.o_undefined)
             zuo_fail1("undefined", e);
-          e = v;
+          e = compile_add_live(v, z.o_undefined);
         } else
-          e = compile_add_free(idx, binary_tree_set(z.o_undefined, ZUO_INT_I(idx), z.o_true));
+          e = compile_add_live(idx, binary_tree_set(z.o_undefined, ZUO_INT_I(idx), z.o_true));
         rs = zuo_cons(e, rs);
       } else {
-        rs = zuo_cons(compile_quote(e), rs);
+        rs = zuo_cons(compile_add_live(compile_quote(e),  z.o_undefined), rs);
       }
     } else {
       /* symbol or null => rebuild from rs */
       if (e == z.o_if_symbol) {
-        zuo_t *thn, *els, *tst, *free;
+        zuo_t *thn, *els, *tst, *live;
         els = _zuo_car(rs);
         rs = _zuo_cdr(rs);
         thn = _zuo_car(rs);
         rs = _zuo_cdr(rs);
         tst = _zuo_car(rs);
         rs = _zuo_cdr(rs);
+        live = binary_tree_union(compile_get_live(thn),
+                                 compile_get_live(els));
         e = zuo_cons(z.o_if_symbol,
-                     zuo_cons(tst,
-                              zuo_cons(thn,
-                                       zuo_cons(els,
-                                                z.o_null))));
-        free = binary_tree_union(get_free(thn),
-                                 get_free(els));
-        free = binary_tree_union(get_free(tst), free);
-        e = compile_add_free(e, free);
+                     zuo_cons(compile_strip_live(tst),
+                              zuo_cons(live,
+                                       zuo_cons(compile_strip_live(thn),
+                                                zuo_cons(compile_strip_live(els),
+                                                         z.o_null)))));
+        live = binary_tree_union(compile_get_live(tst), live);
+        e = compile_add_live(e, live);
       } else if (e == z.o_lambda_symbol) {
-        zuo_t *body, *name_string, *formals, *idx, *free;
+        zuo_t *body, *name_string, *formals, *idx, *live;
         zuo_int_t formals_count;
         body = _zuo_car(rs);
         rs = _zuo_cdr(rs);
@@ -3486,65 +3475,64 @@ static zuo_t *compile(zuo_t *e, zuo_t *top_env) {
         rs = _zuo_cdr(rs);
         idx = _zuo_car(rs);
         rs = _zuo_cdr(rs);
-        e = zuo_cons(body, z.o_null);
+        live = compile_get_live(body);
+        formals_count = ZUO_INT_I(formals);
+        if (formals_count < 0) formals_count = -formals_count;
+        for (; formals_count-- > 0; ) {
+          live = binary_tree_set(live, ZUO_INT_I(idx) + formals_count, z.o_undefined);
+        }
+        e = zuo_cons(live, zuo_cons(compile_strip_live(body), z.o_null));
         if (name_string != z.o_undefined)
           e = zuo_cons(name_string, e);
         e = zuo_cons(z.o_lambda_symbol,
                      zuo_cons(zuo_cons(formals, idx),
                               e));
-        free = get_free(body);
-        formals_count = ZUO_INT_I(formals);
-        if (formals_count < 0) formals_count = -formals_count;
-        for (; formals_count-- > 0; ) {
-          free = binary_tree_set(free, ZUO_INT_I(idx) + formals_count, z.o_undefined);
-        }
-        e = compile_add_free(e, free);
+        e = compile_add_live(e, live);
       } else if (e == z.o_let_symbol) {
-        zuo_t *id, *rhs, *body, *idx, *free;
+        zuo_t *id, *rhs, *body, *idx, *live;
         rhs = _zuo_car(rs);
         rs = _zuo_cdr(rs);
         body = _zuo_car(rs);
         rs = _zuo_cdr(rs);
         idx = _zuo_car(rs);
         rs = _zuo_cdr(rs);
+        live = binary_tree_set(compile_get_live(body), ZUO_INT_I(idx), z.o_undefined);
         e = zuo_cons(z.o_let_symbol,
-                     zuo_cons(rhs,
+                     zuo_cons(compile_strip_live(rhs),
                               zuo_cons(idx,
-                                       zuo_cons(body,
-                                                z.o_null))));
-        free = binary_tree_set(get_free(body), ZUO_INT_I(idx), z.o_undefined);
-        free = binary_tree_union(free, get_free(rhs));
-        e = compile_add_free(e, free);
+                                       zuo_cons(live,
+                                                zuo_cons(compile_strip_live(body),
+                                                         z.o_null)))));
+        live = binary_tree_union(live, compile_get_live(rhs));
+        e = compile_add_live(e, live);
       } else if (e == z.o_begin_symbol) {
-        zuo_t *free = z.o_undefined;
+        zuo_t *live = z.o_undefined;
         e = z.o_null;
         while (_zuo_car(rs) != z.o_undefined) {
           e = zuo_cons(_zuo_car(rs), e);
-          free = binary_tree_union(free, get_free(e));
-          rs = _zuo_cdr(rs);
+          rs = _zuo_cdr(rs);          
         }
         rs = _zuo_cdr(rs);
-        e = zuo_reverse(e);
+        e = compile_accum_live(e, &live);
         e = zuo_cons(z.o_begin_symbol, e);
-        e = compile_add_free(e, free);
+        e = compile_add_live(e, live);
       } else if (e == z.o_null) {
         /* application */
-        zuo_t *free = z.o_undefined;
+        zuo_t *live = z.o_undefined;
         e = z.o_null;
         while (_zuo_car(rs) != z.o_undefined) {
           e = zuo_cons(_zuo_car(rs), e);
-          free = binary_tree_union(free, get_free(e));
           rs = _zuo_cdr(rs);
         }
         rs = _zuo_cdr(rs);
-        e = zuo_reverse(e);
-        e = compile_add_free(e, free);
+        e = compile_accum_live(e, &live);
+        e = compile_add_live(e, live);
       }
       rs = zuo_cons(e, rs);
     }
   }
 
-  return _zuo_car(rs);
+  return compile_strip_live(_zuo_car(rs));
 }
 
 #ifdef BINARY_TREE_ENV
@@ -3584,7 +3572,7 @@ static zuo_t *env_ref(zuo_t *env, zuo_int_t i) {
 #endif
 
 static void interp_step(void) {
-  zuo_t *e = strip_free(Z.o_interp_e);
+  zuo_t *e = Z.o_interp_e;
 
   if (zuo_probe_each) {
     zuo_probe_counter++;
@@ -3604,17 +3592,22 @@ static void interp_step(void) {
     } else if (rator == z.o_if_symbol) {
       zuo_t *d = _zuo_cdr(e);
       Z.o_interp_e = _zuo_car(d);
+      d = _zuo_cdr(d);
       Z.o_interp_k = zuo_cont(zuo_if_cont,
-                              _zuo_cdr(d), Z.o_interp_env,
+                              _zuo_cdr(d), Z.o_interp_env, _zuo_car(d),
                               Z.o_interp_in_proc,
                               Z.o_interp_k);
     } else if (rator == z.o_lambda_symbol) {
-      Z.o_interp_v = zuo_closure(Z.o_interp_e, Z.o_interp_env);
+      zuo_t *d = _zuo_cdr(_zuo_cdr(Z.o_interp_e));
+      if (_zuo_car(d)->tag == zuo_string_tag)
+        d = _zuo_cdr(d);
+      Z.o_interp_v = zuo_closure(Z.o_interp_e, Z.o_interp_env, _zuo_car(d));
     } else if (rator == z.o_let_symbol) {
       zuo_t *d = _zuo_cdr(e);
       Z.o_interp_e = _zuo_car(d);
+      d = _zuo_cdr(d);
       Z.o_interp_k = zuo_cont(zuo_let_cont,
-                              _zuo_cdr(d), Z.o_interp_env,
+                              _zuo_cdr(d), Z.o_interp_env, _zuo_car(d),
                               Z.o_interp_in_proc,
                               Z.o_interp_k);
     } else if (rator == z.o_begin_symbol) {
@@ -3623,13 +3616,21 @@ static void interp_step(void) {
       Z.o_interp_e = _zuo_car(d);
       if (dd != z.o_null)
         Z.o_interp_k = zuo_cont(zuo_begin_cont,
-                                dd, Z.o_interp_env,
+                                _zuo_cdr(dd), Z.o_interp_env, _zuo_car(dd),
                                 Z.o_interp_in_proc,
                                 Z.o_interp_k);
     } else {
+      zuo_t *live;
       Z.o_interp_e = rator;
+      e = _zuo_cdr(e);
+      if (e == z.o_null)
+        live = z.o_undefined;
+      else {
+        live = _zuo_car(e);
+        e = _zuo_cdr(e);
+      }
       Z.o_interp_k = zuo_cont(zuo_apply_cont,
-                              zuo_cons(z.o_null, _zuo_cdr(e)), Z.o_interp_env,
+                              zuo_cons(z.o_null, e), Z.o_interp_env, live,
                               Z.o_interp_in_proc,
                               Z.o_interp_k);
     }
@@ -3662,7 +3663,7 @@ static void continue_step(void) {
             zuo_t *all_args = args;
             zuo_closure_t *f = (zuo_closure_t *)rator;
             zuo_t *env = f->env;
-            zuo_t *lam = strip_free(f->lambda);
+            zuo_t *lam = f->lambda;
             zuo_t *arg_spec = _zuo_car(_zuo_cdr(lam));
             zuo_t *formals = _zuo_car(arg_spec);
             zuo_int_t formals_count = ZUO_INT_I(formals);
@@ -3694,6 +3695,7 @@ static void continue_step(void) {
               env = env_extend(env, index, args);
             else if (formals_count != 0 || args != z.o_null)
               zuo_fail_arity(rator, all_args);
+            body = _zuo_cdr(body);
             Z.o_interp_e = _zuo_car(body);
             Z.o_interp_env = env;
             Z.o_interp_v = z.o_undefined;
@@ -3757,10 +3759,18 @@ static void continue_step(void) {
             zuo_fail1("not a procedure for application", rator);
         }
       } else {
+        zuo_t *live;
         Z.o_interp_e = _zuo_car(exps);
         Z.o_interp_env = k->env;
+        exps = _zuo_cdr(exps);
+        if (exps == z.o_null)
+          live = z.o_undefined;
+        else {
+          live = _zuo_car(exps);
+          exps = _zuo_cdr(exps);
+        }
         Z.o_interp_k = zuo_cont(zuo_apply_cont,
-                                zuo_cons(rev_vals, _zuo_cdr(exps)), Z.o_interp_env,
+                                zuo_cons(rev_vals, exps), Z.o_interp_env, live,
                                 Z.o_interp_in_proc,
                                 Z.o_interp_k);
         Z.o_interp_v = z.o_undefined;
@@ -3779,7 +3789,7 @@ static void continue_step(void) {
       Z.o_interp_env = k->env;
       if (d != z.o_null)
         Z.o_interp_k = zuo_cont(zuo_begin_cont,
-                                d, Z.o_interp_env,
+                                _zuo_cdr(d), Z.o_interp_env, _zuo_car(d),
                                 Z.o_interp_in_proc,
                                 Z.o_interp_k);
       Z.o_interp_v = z.o_undefined;
@@ -5144,7 +5154,8 @@ static zuo_t *zuo_declare_kernel_module(void) {
                                                           zuo_cons(((zuo_symbol_t *)read_and_eval_sym)->str,
                                                                    zuo_cons(call, z.o_null)))),
                                         z.o_empty_hash),
-                                env_init());
+                                env_init(),
+                                z.o_undefined);
 
     mod = zuo_trie_extend(z.o_empty_hash, read_and_eval_sym, read_and_eval);
 
@@ -5181,7 +5192,8 @@ static zuo_t *zuo_declare_kernel_module(void) {
                                                            zuo_cons(zuo_string("module->hash"),
                                                                     zuo_cons(body, z.o_null)))),
                                          z.o_empty_hash),
-                                 env_init());
+                                 env_init(),
+                                 z.o_undefined);
     ((zuo_variable_t *)recur_var)->val = module_to_hash; /* tie loop for recursive call */
   }
 
@@ -7539,7 +7551,7 @@ static void zuo_primitive_init(int will_load_image) {
   z.o_undefined = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_null = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
   z.o_void = zuo_new(zuo_singleton_tag, sizeof(zuo_forwarded_t));
-  z.o_done_k = zuo_cont(zuo_done_cont, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined);
+  z.o_done_k = zuo_cont(zuo_done_cont, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined, z.o_undefined);
   z.o_intern_table = zuo_trie_node();
   z.o_top_env = zuo_trie_node();
 
