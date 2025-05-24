@@ -50,7 +50,7 @@
 
 /* Space safety in the more traditional way, where any captured
    enviornment is eagerly pruned to live variables. */
-#define EVAL_SFS 1
+#define EVAL_SFS 0
 
 /* Option to turn on eager GC traversal of bitmask and environment
    binary trees -- useful for checking that facet of the
@@ -439,6 +439,9 @@ static zuo_int_t allocation_offset = 0;
 static zuo_int_t total_allocation = 0;
 static zuo_int_t gc_threshold = 0;
 
+static zuo_int_t cumulative_allocation = 0;
+static zuo_int_t peak_allocation = 0;
+
 typedef struct old_space_t {
   void *space;
   zuo_int_t size;
@@ -740,8 +743,13 @@ static void zuo_collect(void) {
   void *old_space = to_space;
   old_space_t *old_old_spaces = old_spaces;
   zuo_int_t old_heap_size = heap_size;
+  zuo_int_t start_allocation;
 
   zuo_suspend_signal();
+
+  start_allocation = total_allocation;
+  if (total_allocation > peak_allocation)
+    peak_allocation = total_allocation;
 
   old_spaces = NULL;
   heap_size = total_allocation * 2;
@@ -764,12 +772,13 @@ static void zuo_collect(void) {
   /* cleanup */
   zuo_finish_gc(old_space, old_heap_size, old_old_spaces);
 
+  cumulative_allocation += (start_allocation - total_allocation);
+
   zuo_resume_signal();
 }
 
-static void zuo_check_collect(void) {
-  if (total_allocation >= gc_threshold)
-    zuo_collect();
+static int zuo_check_collect(void) {
+  return total_allocation >= gc_threshold;
 }
 
 static void zuo_replace_heap(void *space, zuo_int_t size, zuo_int_t offset) {
@@ -4001,7 +4010,13 @@ static zuo_t *zuo_kernel_eval(zuo_t *e) {
   Z.o_interp_meta_k = z.o_null;
 
   while (1) {
-    zuo_check_collect();
+    if (zuo_check_collect()) {
+      if (Z.o_interp_v != z.o_undefined) {
+        Z.o_interp_e = z.o_undefined;
+        Z.o_interp_env = z.o_undefined;
+      }
+      zuo_collect();
+    }
     if (Z.o_interp_v == z.o_undefined) {
       interp_step();
     } else if (Z.o_interp_k == z.o_done_k) {
@@ -6048,6 +6063,28 @@ static zuo_t *zuo_current_time(void) {
 #endif
 }
 
+static zuo_t *zuo_current_memory_use(zuo_t *mode) {
+  if ((mode == z.o_undefined) || (mode == z.o_false)) {
+    Z.o_interp_e = z.o_undefined;
+    Z.o_interp_v = z.o_undefined;
+    Z.o_interp_env = z.o_undefined;
+    zuo_collect();
+    return zuo_integer(total_allocation);
+  } else if ((mode->tag == zuo_symbol_tag)
+           && (mode == zuo_symbol("cumulative")))
+    return zuo_integer(cumulative_allocation + total_allocation);
+  else if ((mode->tag == zuo_symbol_tag)
+           && (mode == zuo_symbol("peak"))) {
+    if (total_allocation > peak_allocation)
+      return zuo_integer(total_allocation);
+    else
+      return zuo_integer(peak_allocation);
+  } else {
+    zuo_fail1w("current-memory-use", "not #f, 'cumulative, or 'peak", mode);
+    return z.o_void;
+  }
+}
+
 /*======================================================================*/
 /* signal handling  and cleanables                                      */
 /*======================================================================*/
@@ -7838,6 +7875,7 @@ static void zuo_primitive_init(int will_load_image) {
   ZUO_TOP_ENV_SET_PRIMITIVE1("readlink", zuo_readlink);
   ZUO_TOP_ENV_SET_PRIMITIVEc("cp", zuo_cp);
   ZUO_TOP_ENV_SET_PRIMITIVE0("current-time", zuo_current_time);
+  ZUO_TOP_ENV_SET_PRIMITIVEa("current-memory-use", zuo_current_memory_use);
 
   ZUO_TOP_ENV_SET_PRIMITIVEN("process", zuo_process, -2);
   ZUO_TOP_ENV_SET_PRIMITIVE1("process-status", zuo_process_status);
