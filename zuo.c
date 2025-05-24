@@ -43,11 +43,25 @@
 # define ZUO_ASSERT(x) do { } while (0)
 #endif
 
-/* The experiment */
+/* Safe safety through the GC, where an envirionment is marked with
+   respect to live-variable masks, where multiple masks can be
+   paired with the same environment. */
 #define GC_SFS 1
-#define GC_BINARY_TREE_EAGER GC_SFS
-#define EVAL_SFS 0
-#define BINARY_TREE_ENV (GC_SFS || GC_BINARY_TREE_EAGER || EVAL_SFS)
+
+/* Space safety in the more traditional way, where any captured
+   enviornment is eagerly pruned to live variables. */
+#define EVAL_SFS 1
+
+/* Option to turn on eager GC traversal of bitmask and environment
+   binary trees -- useful for checking that facet of the
+   implementation independently. */
+#define GC_BINARY_TREE_EAGER (0 || GC_SFS)
+
+/* Option to turn on the binary-tree representation of environments,
+   instead of linked lists, even when not safe-for-space. This
+   representation provides constant-like access of variables in the
+   environment. */
+#define BINARY_TREE_ENV (0 || GC_SFS || GC_BINARY_TREE_EAGER || EVAL_SFS)
 
 /* `zuo_int_t` should be a 64-bit integer type, so we don't have to
    worry about Y2038 or large file sizes. `zuo_int32_t` should be a
@@ -556,6 +570,7 @@ static void zuo_update_masked_with(zuo_t **addr_to_update,
                                    zuo_t *old_env,
                                    zuo_t *mask) {
 #if !GC_SFS
+  *addr_to_update = old_env;
   zuo_update(addr_to_update);
 #else
   if (mask == z.o_undefined) {
